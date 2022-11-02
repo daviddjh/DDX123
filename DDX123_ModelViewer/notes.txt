@@ -1,0 +1,10 @@
+11/1/2022
+
+Goal: Build a Model Viewer app that can load the Sponza Scene, as well as others
+
+Results:
+- Load scene dynamicaly when user enters scene path
+- Responsibly manage resources for each loaded scene
+- ImGui for GUI
+- Camera to move around scene. uses keyboard and mouse controls
+- option to make fullscreen

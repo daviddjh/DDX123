@@ -1,0 +1,14 @@
+# Editor and Debugger files
+*.rdbg
+*.code-workspace
+
+# Build Extras
+*.asm
+*.ilk
+*.pdb
+*.cso
+*.obj
+
+# Annoying .vs folder
+.vs/
+.vscode/
