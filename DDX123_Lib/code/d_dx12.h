@@ -129,6 +129,7 @@ namespace d_dx12 {
 
         CD3DX12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle;
         CD3DX12_GPU_DESCRIPTOR_HANDLE gpu_descriptor_handle;
+        D3D12_DESCRIPTOR_HEAP_TYPE    type;
 
     };
 
@@ -267,6 +268,7 @@ namespace d_dx12 {
         void bind_vertex_buffer(Buffer* buffer, u32 slot);
         void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, std::string binding_point);
         void bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point);
+        Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
         void set_shader(Shader* shader);
         void set_render_targets(Texture* rt, Texture* ds);
         void draw(u32 number_of_verticies);

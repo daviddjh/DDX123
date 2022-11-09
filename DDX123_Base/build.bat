@@ -13,7 +13,7 @@ pushd C:\dev\DDX123\DDX123_Base\build
 "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\FXC.exe" /Od /Zi /T vs_5_1 /Fo VertexShader.cso ..\code\VertexShader.hlsl
 "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\FXC.exe" /Od /Zi /T ps_5_1 /Fo PixelShader.cso  ..\code\PixelShader.hlsl
 
-set flags=/FeDDX123 /MDd /Yc"pch.h" /FAs /EHsc /D_UNICODE
+set flags=/FeDDX123 /MDd /Yc"pch.h" /FAs /EHsc
 set code=..\code\main.cpp
 set includes=/I"C:\dev\DDX123\DDX123_Lib\code" /I"C:\dev\d_common" /I"C:\dev\DirectX\DirectXTK12\Inc"
 set link_libs= d3d12.lib dxgi.lib dxguid.lib D3Dcompiler.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib odbc32.lib odbccp32.lib C:\dev\DirectX\DirectXTK12\Bin\Desktop_2019_Win10\x64\Debug\DirectXTK12.lib C:\dev\DDX123\DDX123_Lib\build\d_dx12.lib
@@ -25,11 +25,9 @@ if "%1" == "-d" (
     C:\dev\DDX123\DDX123_Lib\build.bat -d
 
     :: Compile this
-    cl /Zi /D_DEBUG %flags% %code% %includes% %link_libs%
+    cl /Zi /DDEBUG /D_DEBUG %flags% %code% %includes% %link_libs%
 
 ) else if "%1" == "-rds" (
-
-    echo Release with debug symbols!
 
     :: Compile d_dx12 lib
     C:\dev\DDX123\DDX123_Lib\build.bat -rds

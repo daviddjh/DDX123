@@ -818,6 +818,7 @@ namespace d_dx12 {
         }
 
         this->is_gpu_visible = is_gpu_visible;
+        this->type           = type;
 
         // Create the heap
         D3D12_DESCRIPTOR_HEAP_DESC Descriptor_Heap_Desc = { };
@@ -854,7 +855,8 @@ namespace d_dx12 {
 
         Descriptor_Handle handle = {
             next_cpu_descriptor_handle,
-            next_gpu_descriptor_handle
+            next_gpu_descriptor_handle,
+            this->type
         };
 
         next_cpu_descriptor_handle.Offset(descriptor_size);
@@ -1335,6 +1337,20 @@ namespace d_dx12 {
             break;
 
         }
+
+    }
+
+    Descriptor_Handle Command_List::bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count){
+        if(handle.type != D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV){
+            OutputDebugString("Error (bind_descriptor_handle_to_online_descriptor_heap) Currently no online heap of the type provided! ");
+            DEBUG_BREAK;
+        }
+
+        Descriptor_Handle online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+        d3d12_device->CopyDescriptorsSimple(count, online_descriptor_handle.cpu_descriptor_handle, handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        return online_descriptor_handle;
 
     }
 

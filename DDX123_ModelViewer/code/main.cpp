@@ -1,5 +1,10 @@
 #include "pch.h"
 #include "d_dx12.h"
+#include "imgui.h"
+#include "imgui_impl_win32.h"
+// TODO: TEMPORARY TILL YOU WRITE YOUR OWN IO HANDLING!!!
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+#include "imgui_impl_dx12.h"
 
 #include <chrono>
 
@@ -23,6 +28,7 @@ struct D_Renderer {
     Texture*       sampled_texture;
     Buffer*        vertex_buffer;
     Buffer*        constant_buffer;
+    d_dx12::Descriptor_Handle imgui_font_handle;
 
     int  init();
     void render();
@@ -255,6 +261,25 @@ int D_Renderer::init(){
 
     upload_command_list->load_texture_from_file(sampled_texture, L"mountains.jpg");
 
+    ///////////////////////
+    // DearIMGUI
+    ///////////////////////
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& imgui_io = ImGui::GetIO();
+
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplWin32_Init(hWnd);
+
+    imgui_font_handle = resource_manager.offline_cbv_srv_uav_descriptor_heap.get_next_handle();
+
+    ImGui_ImplDX12_Init(d3d12_device.Get(), NUM_BACK_BUFFERS, DXGI_FORMAT_R8G8B8A8_UNORM, 
+        resource_manager.offline_cbv_srv_uav_descriptor_heap.d3d12_descriptor_heap.Get(),
+        imgui_font_handle.cpu_descriptor_handle,
+        imgui_font_handle.gpu_descriptor_handle);
+
     upload_command_list->close();
     execute_command_list(upload_command_list);
     flush_gpu();
@@ -287,7 +312,6 @@ void D_Renderer::render(){
     
     // Resets command list, command allocator, and online cbv_srv_uav descriptor heap in resource manager
     command_list->reset();
-
     // Fill the command list:
     command_list->set_shader(shader);
 
@@ -318,6 +342,27 @@ void D_Renderer::render(){
     // Dont think this is how draw should work, create a draw command struct to pass...
     command_list->draw(6);
 
+    //////////////////////
+    /// Dear IMGUI
+    //////////////////////
+    // Bind IMGUI Fonts
+    Descriptor_Handle online_imgui_font_handle = command_list->bind_descriptor_handles_to_online_descriptor_heap(imgui_font_handle, 1);
+    ImGuiIO& imgui_io = ImGui::GetIO();
+    imgui_io.Fonts->SetTexID((ImTextureID) online_imgui_font_handle.gpu_descriptor_handle.ptr); 
+
+    // Start IMGUI Frame
+    ImGui_ImplDX12_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
+    // Create IMGUI window
+    ImGui::Begin("Hello World!");
+    bool hi = true;
+    ImGui::Checkbox("Hello Back!", &hi);
+    ImGui::End();
+    ImGui::Render();
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
+
     // Transition RT to presentation state
     command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_PRESENT);
 
@@ -335,6 +380,9 @@ void D_Renderer::render(){
 LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
     LRESULT result = 0;
+
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+            return result;
 
     switch (msg) {
         

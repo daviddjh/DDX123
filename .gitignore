@@ -8,6 +8,8 @@
 *.pdb
 *.cso
 *.obj
+*.i
+*.ini
 
 # Annoying .vs folder
 .vs/
