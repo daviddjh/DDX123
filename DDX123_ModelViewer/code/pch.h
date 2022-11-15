@@ -12,6 +12,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include "windows.h"
+#include "windowsx.h"
 
 #include <d3d12.h>
 //#include "third_party/d3dx12.h"

@@ -2,13 +2,13 @@
 #include "d_dx12.h"
 #include "imgui.h"
 #include "imgui_impl_win32.h"
-// TODO: TEMPORARY TILL YOU WRITE YOUR OWN IO HANDLING!!!
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #include "imgui_impl_dx12.h"
 
 #include <chrono>
 
 using namespace d_dx12;
+
+bool application_is_initialized = false;
 
 struct Vertex_Position_Color_Texcoord {
     DirectX::XMFLOAT3 position;
@@ -289,6 +289,10 @@ int D_Renderer::init(){
     // Sets up FPS Counter
     tick_list = (double*)calloc(MAX_TICK_SAMPLES, sizeof(double));
 
+
+    application_is_initialized = true;
+
+
     return 0;
 
 }
@@ -303,9 +307,10 @@ void D_Renderer::render(){
     // Unsafe!
     char* buffer = (char*)calloc(500, sizeof(char));
     double frame_ms = frame_time.count() * 1000.;
-    double fps = 1000. / avg_ms_per_tick(frame_ms);
-    sprintf(buffer, "Frame time: %f milliseconds\nFPS: %f\n", frame_ms, fps);
-    OutputDebugString(buffer);
+    double avg_frame_ms = avg_ms_per_tick(frame_ms);
+    double fps = 1000. / avg_frame_ms;
+    //sprintf(buffer, "Frame time: %f milliseconds\nFPS: %f\n", frame_ms, fps);
+    //OutputDebugString(buffer);
     free(buffer);
 
     Command_List* command_list = direct_command_lists[current_backbuffer_index];
@@ -356,9 +361,9 @@ void D_Renderer::render(){
     ImGui::NewFrame();
 
     // Create IMGUI window
-    ImGui::Begin("Hello World!");
-    bool hi = true;
-    ImGui::Checkbox("Hello Back!", &hi);
+    ImGui::Begin("Info");
+    ImGui::Text("FPS: %.3lf", fps);
+    ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
     ImGui::End();
     ImGui::Render();
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
@@ -381,87 +386,126 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
     LRESULT result = 0;
 
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
-            return result;
+    if(application_is_initialized) {
 
-    switch (msg) {
-        
-        #if 0
-        // Closes the program
-        case(WM_SIZING): 
-        {
-            OutputDebugString("Resizing!\n");
-        }
-        break;
-        case(WM_SIZE): 
-        {
-            OutputDebugString("Resized!\n");
-        }
-        break;
-        case(WM_MOVE): 
-        {
-            OutputDebugString("Moved!\n");
-        }
-        break;
-        case(WM_MOVING): 
-        {
-            OutputDebugString("Moving!\n");
-        }
-        break;
-        case(WM_WINDOWPOSCHANGING): 
-        {
-            OutputDebugString("Position Changing!\n");
-            result = DefWindowProc(hWnd, msg, wParam, lParam);
-        }
-        break;
-        case(WM_WINDOWPOSCHANGED): 
-        {
-            OutputDebugString("Position Changed!\n");
-            result = DefWindowProc(hWnd, msg, wParam, lParam);
-        }
-        break;
-        case(WM_LBUTTONDOWN): 
-        {
-            OutputDebugString("Left Click Down!\n");
-        }
-        break;
-        case(WM_LBUTTONUP): 
-        {
-            OutputDebugString("Left Click Up!\n");
-        }
-        break;
-        case(WM_NCLBUTTONDOWN): 
-        {
-            OutputDebugString("Non-Client Left Click Down!\n");
-            result = DefWindowProc(hWnd, msg, wParam, lParam);
-        }
-        break;
-        case(WM_NCLBUTTONUP): 
-        {
-            OutputDebugString("Non-Client Left Click Up!\n");
-            result = DefWindowProc(hWnd, msg, wParam, lParam);
-        }
-        break;
-        case(WM_ENTERSIZEMOVE): 
-        {
-            OutputDebugString("Enter Size Move Loop!\n");
-        }
-        break;
-        #endif
-        case(WM_EXITSIZEMOVE): 
-        {
-            OutputDebugString("Exit size move loop!\n");
-            //RedrawWindow(hWnd, NULL, NULL, RDW_INTERNALPAINT);
-            UpdateWindow(hWnd);
-            result = DefWindowProc(hWnd, msg, wParam, lParam);
-        }
-        break;
-        case WM_DESTROY:
-            PostQuitMessage(0);
+        ImGuiIO& io = ImGui::GetIO();
+
+        switch (msg) {
+
+            // Key Press
+
+            // Mouse Button
+            case(WM_SYSKEYDOWN):
+            case(WM_LBUTTONDOWN):
+            {
+                if (!io.WantCaptureMouse){
+
+                } else {
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+                }
+            }
             break;
-        default:
-            // if we don't have anything to do, pass it off
-            result = DefWindowProc(hWnd, msg, wParam, lParam);
+
+            case(WM_LBUTTONUP):
+            {
+                if (!io.WantCaptureMouse){
+
+                } else {
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+                }
+            }
+            break;
+
+            case(WM_MOUSEMOVE):
+            {
+                if (!io.WantCaptureMouse){
+
+                }
+                io.AddMousePosEvent(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            }
+            break;
+
+            // Mouse movement
+            
+            #if 0
+            // Closes the program
+            case(WM_SIZING): 
+            {
+                OutputDebugString("Resizing!\n");
+            }
+            break;
+            case(WM_SIZE): 
+            {
+                OutputDebugString("Resized!\n");
+            }
+            break;
+            case(WM_MOVE): 
+            {
+                OutputDebugString("Moved!\n");
+            }
+            break;
+            case(WM_MOVING): 
+            {
+                OutputDebugString("Moving!\n");
+            }
+            break;
+            case(WM_WINDOWPOSCHANGING): 
+            {
+                OutputDebugString("Position Changing!\n");
+                result = DefWindowProc(hWnd, msg, wParam, lParam);
+            }
+            break;
+            case(WM_WINDOWPOSCHANGED): 
+            {
+                OutputDebugString("Position Changed!\n");
+                result = DefWindowProc(hWnd, msg, wParam, lParam);
+            }
+            break;
+            case(WM_LBUTTONDOWN): 
+            {
+                OutputDebugString("Left Click Down!\n");
+            }
+            break;
+            case(WM_LBUTTONUP): 
+            {
+                OutputDebugString("Left Click Up!\n");
+            }
+            break;
+            case(WM_NCLBUTTONDOWN): 
+            {
+                OutputDebugString("Non-Client Left Click Down!\n");
+                result = DefWindowProc(hWnd, msg, wParam, lParam);
+            }
+            break;
+            case(WM_NCLBUTTONUP): 
+            {
+                OutputDebugString("Non-Client Left Click Up!\n");
+                result = DefWindowProc(hWnd, msg, wParam, lParam);
+            }
+            break;
+            case(WM_ENTERSIZEMOVE): 
+            {
+                OutputDebugString("Enter Size Move Loop!\n");
+            }
+            break;
+            #endif
+            case(WM_EXITSIZEMOVE): 
+            {
+                OutputDebugString("Exit size move loop!\n");
+                //RedrawWindow(hWnd, NULL, NULL, RDW_INTERNALPAINT);
+                UpdateWindow(hWnd);
+                result = DefWindowProc(hWnd, msg, wParam, lParam);
+            }
+            break;
+            case WM_DESTROY:
+                PostQuitMessage(0);
+                break;
+            default:
+                // if we don't have anything to do, pass it off
+                result = DefWindowProc(hWnd, msg, wParam, lParam);
+        }
+    } else {
+        result = DefWindowProc(hWnd, msg, wParam, lParam);
     }
 
     return result;

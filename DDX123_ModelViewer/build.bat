@@ -30,13 +30,11 @@ if "%1" == "-d" (
 
 ) else if "%1" == "-rds" (
 
-    echo Release with debug symbols!
-
     :: Compile d_dx12 lib
     C:\dev\DDX123\DDX123_Lib\build.bat -rds
 
     :: Compile this
-    cl %flags% %code% %includes% %link_libs%
+    cl /Zi %flags% %code% %includes% %link_libs%
 
 ) else (
 

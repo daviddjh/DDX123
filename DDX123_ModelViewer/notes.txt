@@ -1,3 +1,15 @@
+11/14/2022
+
+Got ImGui working!
+Added avg FPS and frame MS.
+Added IO handling for ImGui.
+
+TODO: Shutdown ImGui. Check Refcount dx12 objects.
+
+D_Renderer::render:
+    Average Time Taken: 10.7ms
+    Median Time Taken:  9.2ms
+
 11/1/2022
 
 Goal: Build a Model Viewer app that can load the Sponza Scene, as well as others
