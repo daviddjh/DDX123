@@ -52,6 +52,13 @@ bool using_v_sync = false;
 */
 void D_Renderer::shutdown(){
 
+    // Dear ImGui Shutdown
+    ImGui_ImplDX12_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+
+    // d_dx12 shutdown
+
     resource_manager.d_dx12_release();
     shader->d_dx12_release();
 
