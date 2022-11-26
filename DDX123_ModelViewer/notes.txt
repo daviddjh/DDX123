@@ -1,3 +1,26 @@
+11/25/2022
+
+- Made progress on screen resize and the moving screen causing freeze bug. Fixed by moving render out of windows message loop
+- Added gltf file loader. Currently only works with files that have vertex color defined per vertex.
+    - Moved to DrawIndexedInstanced by defalut
+
+TODO:
+1. Add texture to model load.
+2. Clean up model / model load code, move to own file?
+3. Add default scaling, controls, lighting
+
+NOTES:
+
+Due to the combination of backside culling and DirectX + opengl z axis being swapped, at first, the models weren't being shown.
+It was only after I had added code to the model load that flipped the z axis that the models began to show. Originally, the z axis
+of the cube was flipped, thus after the combination of Z buffer depth culling(?), and backside culling, nothing ended up on the render target.
+
+11/15/2022
+
+Started on window resize and move
+
+TODO: Limit Screen resize, scale framebuffer to fullscreen??
+
 11/15/2022
 
 Added Dear ImGui Shutdown

@@ -7,6 +7,8 @@
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
 
+#include "d_include.h"
+
 #ifdef _DEBUG
 #include <dxgidebug.h>
 #endif
@@ -37,8 +39,6 @@ namespace d_dx12 {
         // Shader bytecode
         wchar_t* vertex_shader; 
         wchar_t* pixel_shader; 
-
-
 
         // Root Parameters
         // TODO: Should I have different types for Constant Parameters and Descriptor Tables?? Problably..
@@ -180,14 +180,17 @@ namespace d_dx12 {
             USAGE_DEPTH_STENCIL
         };
 
-        Microsoft::WRL::ComPtr<ID3D12Resource>   d3d12_resource;
+        Microsoft::WRL::ComPtr<ID3D12Resource>    d3d12_resource;
         Descriptor_Handle                         offline_descriptor_handle;
         Descriptor_Handle                         online_descriptor_handle;
         D3D12_RESOURCE_STATES                     state;
         USAGE                                     usage = USAGE_NONE;
-        wchar_t*                                  name;
+        u16                                       width;
+        u16                                       height;
+        wchar_t*                                  name = NULL;
 
         void d_dx12_release();
+        void resize(u16 width, u16 height);
     };
 
     struct Texture_Desc{
@@ -266,6 +269,7 @@ namespace d_dx12 {
         void reset();
         void close();
         void bind_vertex_buffer(Buffer* buffer, u32 slot);
+        void bind_index_buffer(Buffer* buffer);
         void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, std::string binding_point);
         void bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point);
         Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
@@ -308,10 +312,15 @@ namespace d_dx12 {
         u16                                             display_width;
         u16                                             display_height;
         u8                                              next_buffer = 0;
+        bool                                            fullscreen_mode = false;
+        HWND                                            win32_hwnd;
+        RECT                                            window_rect;
         void d_dx12_release();
     };
 
     extern Microsoft::WRL::ComPtr<ID3D12Device2>           d3d12_device;
+    extern Display           display;
+    extern u8 current_backbuffer_index;
     //extern HANDLE                                          fence_event;
     //extern Microsoft::WRL::ComPtr<ID3D12CommandAllocator>  d3d12_command_allocator[NUM_BACK_BUFFERS];
     //extern Microsoft::WRL::ComPtr<ID3D12CommandList>       d3d12_command_lists[NUM_BACK_BUFFERS];
@@ -331,10 +340,10 @@ namespace d_dx12 {
     void execute_command_list(Command_List* command_list);
     void present(bool using_v_sync);
     void flush_gpu();
+    void toggle_fullscreen(d_std::Span<Texture*> rts_to_resize);
 
     Command_List* create_command_list(Resource_Manager* , D3D12_COMMAND_LIST_TYPE);
     Shader*       create_shader(Shader_Desc& desc);
 
-    extern u8 current_backbuffer_index;
 
 };

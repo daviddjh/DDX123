@@ -7,6 +7,8 @@
 // Are we using WARP ?
 #define USING_WARP 0
 
+using namespace d_std;
+
 namespace d_dx12 {
 
     Microsoft::WRL::ComPtr<ID3D12Device2>           d3d12_device;
@@ -15,7 +17,6 @@ namespace d_dx12 {
     u64                                             frame_fence_values[NUM_BACK_BUFFERS];
     Display                                         display;
     Upload_Buffer                                   upload_buffer;
-
 	
     u8 current_backbuffer_index = 0;
     bool is_tearing_supported = false;
@@ -63,6 +64,18 @@ namespace d_dx12 {
             debugInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, true);
             debugInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_WARNING, true);
         } 
+
+        DXGI_INFO_QUEUE_MESSAGE_ID hide_ids[] = {
+
+            // DXGI ERROR: IDXGISwapChain::GetContainingOutput: The swapchain's adapter does not control the output on which the swapchain's window resides.
+            80
+
+        };
+        DXGI_INFO_QUEUE_FILTER filter = {};
+        filter.DenyList.NumIDs = _countof(hide_ids);
+        filter.DenyList.pIDList = hide_ids;
+        debugInfoQueue->AddStorageFilterEntries(DXGI_DEBUG_DXGI, &filter);
+
 #endif // _DEBUG
 
         Microsoft::WRL::ComPtr<IDXGIFactory6> dxgi_factory;
@@ -159,10 +172,64 @@ namespace d_dx12 {
 
     }
 
+    /*
+    *   Texture!
+    */
+    void Texture::resize(u16 width, u16 height){
+        this->d3d12_resource.Reset();
+
+        switch(this->usage){
+            case(Texture::USAGE::USAGE_DEPTH_STENCIL):
+            {
+
+                D3D12_CLEAR_VALUE optimizedClearValue = {};
+                optimizedClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+                optimizedClearValue.DepthStencil = { 1.0f, 0 };
+
+                D3D12_HEAP_PROPERTIES depth_buffer_heap_properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+                D3D12_RESOURCE_DESC  depth_buffer_resource_description = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, width, height,
+                    1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+
+                ThrowIfFailed(d3d12_device->CreateCommittedResource(
+                    &depth_buffer_heap_properties,
+                    D3D12_HEAP_FLAG_NONE,
+                    &depth_buffer_resource_description,
+                    D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                    &optimizedClearValue,
+                    IID_PPV_ARGS(&this->d3d12_resource)
+                ));
+
+                if(this->name)
+                    this->d3d12_resource->SetName(name);
+
+                // Update the depth stencil view
+                D3D12_DEPTH_STENCIL_VIEW_DESC dsv = { };
+                dsv.Format = DXGI_FORMAT_D32_FLOAT;
+                dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+                dsv.Texture2D.MipSlice = 0;
+                dsv.Flags = D3D12_DSV_FLAG_NONE;
+
+                d3d12_device->CreateDepthStencilView(this->d3d12_resource.Get(), &dsv, this->offline_descriptor_handle.cpu_descriptor_handle);
+
+            }
+            break;
+            case(Texture::USAGE::USAGE_NONE):
+            default:
+                OutputDebugString("Error (create_texture): Invalid Texture Usage");
+                DEBUG_BREAK;
+        }
+
+        this->state = D3D12_RESOURCE_STATE_COMMON;
+    }
+
     void Texture::d_dx12_release(){
         d3d12_resource.Reset();
     }
 
+    /*
+    *   Buffer!
+    */
     void Buffer::d_dx12_release(){
         d3d12_resource.Reset();
     }
@@ -741,6 +808,9 @@ namespace d_dx12 {
 
     void create_display(HWND& hWnd, u32 width, u32 height){
 
+        display.win32_hwnd = hWnd;
+        display.window_rect = {0, 0, (long)width, (long)height};
+
         display.display_width  = width;
         display.display_height = height;
         display.next_buffer    = 0;
@@ -879,7 +949,6 @@ namespace d_dx12 {
         for(int i = 0; i < NUM_BACK_BUFFERS; i++){
 
             online_cbv_srv_uav_descriptor_heap[i].init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 100, true);
-
         }
 
     }
@@ -906,6 +975,12 @@ namespace d_dx12 {
                     
                     texture->d3d12_resource.Get()->SetName(name);
                     d3d12_device->CreateRenderTargetView(texture->d3d12_resource.Get(), nullptr, descriptor_handle.cpu_descriptor_handle);
+
+                    DXGI_SWAP_CHAIN_DESC1 swap_chain_desc;
+                    ThrowIfFailed(display.d3d12_swap_chain->GetDesc1(&swap_chain_desc));
+
+                    texture->width = swap_chain_desc.Width;
+                    texture->height = swap_chain_desc.Height;
 
                 }
 
@@ -1008,6 +1083,22 @@ namespace d_dx12 {
             // TODO...
             case(Buffer::USAGE::USAGE_INDEX_BUFFER):
             {
+                // Create the resource in the buffer
+                D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size);
+
+                d3d12_device->CreateCommittedResource(
+                    &heap_prop,
+                    D3D12_HEAP_FLAG_NONE,
+                    &resource_desc,
+                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    nullptr,
+                    IID_PPV_ARGS(buffer->d3d12_resource.GetAddressOf())
+                );
+
+                buffer->index_buffer_view.SizeInBytes = desc.number_of_elements * desc.size_of_each_element;
+                buffer->index_buffer_view.BufferLocation = buffer->d3d12_resource->GetGPUVirtualAddress();
+                buffer->index_buffer_view.Format = DXGI_FORMAT_R16_UINT;
 
             }
             break;
@@ -1278,6 +1369,23 @@ namespace d_dx12 {
 
     }
 
+    void Command_List::bind_index_buffer(Buffer* buffer){
+
+        if(buffer->usage == Buffer::USAGE::USAGE_INDEX_BUFFER){
+
+            if(buffer->state != D3D12_RESOURCE_STATE_INDEX_BUFFER){
+                this->transition_buffer(buffer, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+            }
+
+            d3d12_command_list->IASetIndexBuffer(&buffer->index_buffer_view); 
+
+        } else {
+            OutputDebugString("Error: bind_vertex_buffer requires a buffer with usage: USAGE_VERTEX_BUFFER");
+            DEBUG_BREAK;
+        }
+
+    }
+
     void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, std::string binding_point){
 
         if(buffer->usage != Buffer::USAGE::USAGE_CONSTANT_BUFFER){
@@ -1368,8 +1476,8 @@ namespace d_dx12 {
 
     }
 
-    void Command_List::draw(u32 number_of_verticies){
-        d3d12_command_list->DrawInstanced(number_of_verticies, 1, 0, 0); 
+    void Command_List::draw(u32 number_of_indicies){
+        d3d12_command_list->DrawIndexedInstanced(number_of_indicies, 1, 0, 0, 0); 
     }
 
     void present(bool using_v_sync){
@@ -1412,6 +1520,131 @@ namespace d_dx12 {
         return allowTearing;
 
     }
+
+    void toggle_fullscreen(Span<Texture*> rts_to_resize){
+
+        if(rts_to_resize.nitems != NUM_BACK_BUFFERS){
+            OutputDebugString("Error (toggle_fullscreen): The number of Render targets sent to this function needs to equal the number of backbuffers the swapchain contains (currently 2)");
+            DEBUG_BREAK;
+        }
+
+        for(int i = 0; i < NUM_BACK_BUFFERS; i++){
+            if(rts_to_resize.ptr[i]->usage != Texture::USAGE::USAGE_RENDER_TARGET){
+                OutputDebugString("Error (toggle_fullscreen): rts_to_resize needs to contain Textures with usage: USAGE_RENDER_TARGET");
+                DEBUG_BREAK;
+            }
+        }
+
+        flush_gpu();
+
+        if(display.fullscreen_mode == true){
+
+            // Restore window style
+            SetWindowLong(display.win32_hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
+
+            SetWindowPos(
+                display.win32_hwnd,
+                HWND_NOTOPMOST,
+                display.window_rect.left,
+                display.window_rect.top,
+                display.window_rect.right - display.window_rect.left,
+                display.window_rect.bottom - display.window_rect.top,
+                SWP_FRAMECHANGED | SWP_NOACTIVATE
+            );
+
+            for(int i = 0; i < NUM_BACK_BUFFERS; i++){
+                rts_to_resize.ptr[i]->d_dx12_release();
+            }
+
+            ThrowIfFailed(display.d3d12_swap_chain->ResizeBuffers(
+                NUM_BACK_BUFFERS,
+                display.window_rect.right - display.window_rect.left,
+                display.window_rect.bottom - display.window_rect.top,
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                CheckTearingSupport() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING | DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH : DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH
+            ));
+
+            for(int i = 0; i < NUM_BACK_BUFFERS; i++){
+                ThrowIfFailed(display.d3d12_swap_chain->GetBuffer(i, IID_PPV_ARGS(&(rts_to_resize.ptr[i])->d3d12_resource)));
+                d3d12_device->CreateRenderTargetView(rts_to_resize.ptr[i]->d3d12_resource.Get(), nullptr, rts_to_resize.ptr[i]->offline_descriptor_handle.cpu_descriptor_handle);
+                rts_to_resize.ptr[i]->width  = display.window_rect.right - display.window_rect.left;
+                rts_to_resize.ptr[i]->height = display.window_rect.bottom - display.window_rect.top;
+                rts_to_resize.ptr[i]->d3d12_resource->SetName(rts_to_resize.ptr[i]->name);
+            }
+
+            ShowWindow(display.win32_hwnd, SW_NORMAL);
+
+        } else {
+
+            // Save window rect to restore later
+            GetWindowRect(display.win32_hwnd, &display.window_rect);
+
+            // Remove window borders so client area fills the whole screen
+            SetWindowLong(display.win32_hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU | WS_THICKFRAME));
+
+            RECT fullscreen_rect;
+
+            #if 0
+            if(display.d3d12_swap_chain){
+                Microsoft::WRL::ComPtr<IDXGIOutput> output;
+                ThrowIfFailed(display.d3d12_swap_chain->GetContainingOutput(&output));
+                DXGI_OUTPUT_DESC desc;
+                ThrowIfFailed(output->GetDesc(&desc));
+                fullscreen_rect = desc.DesktopCoordinates;
+            }
+            #endif
+
+            // Get the settings of the primary display
+            DEVMODE devMode = {};
+            devMode.dmSize = sizeof(DEVMODE);
+            EnumDisplaySettings(nullptr, ENUM_CURRENT_SETTINGS, &devMode);
+
+            fullscreen_rect = {
+                devMode.dmPosition.x,
+                devMode.dmPosition.y,
+                devMode.dmPosition.x + static_cast<LONG>(devMode.dmPelsWidth),
+                devMode.dmPosition.y + static_cast<LONG>(devMode.dmPelsHeight)
+            };
+
+            SetWindowPos(
+                display.win32_hwnd,
+                HWND_TOPMOST,
+                fullscreen_rect.left,
+                fullscreen_rect.top,
+                fullscreen_rect.right,
+                fullscreen_rect.bottom,
+                SWP_FRAMECHANGED | SWP_NOACTIVATE
+            );
+
+            for(int i = 0; i < NUM_BACK_BUFFERS; i++){
+                rts_to_resize.ptr[i]->d_dx12_release();
+            }
+
+            ThrowIfFailed(display.d3d12_swap_chain->ResizeBuffers(
+                NUM_BACK_BUFFERS,
+                fullscreen_rect.right - fullscreen_rect.left,
+                fullscreen_rect.bottom - fullscreen_rect.top,
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                CheckTearingSupport() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING | DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH : DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH
+            ));
+
+            for(int i = 0; i < NUM_BACK_BUFFERS; i++){
+                ThrowIfFailed(display.d3d12_swap_chain->GetBuffer(i, IID_PPV_ARGS(&(rts_to_resize.ptr[i])->d3d12_resource)));
+                d3d12_device->CreateRenderTargetView(rts_to_resize.ptr[i]->d3d12_resource.Get(), nullptr, rts_to_resize.ptr[i]->offline_descriptor_handle.cpu_descriptor_handle);
+                rts_to_resize.ptr[i]->width  = fullscreen_rect.right - fullscreen_rect.left;
+                rts_to_resize.ptr[i]->height = fullscreen_rect.bottom - fullscreen_rect.top;
+                rts_to_resize.ptr[i]->d3d12_resource->SetName(rts_to_resize.ptr[i]->name);
+            }
+
+            ShowWindow(display.win32_hwnd, SW_MAXIMIZE);
+
+        }
+        
+        current_backbuffer_index = display.d3d12_swap_chain->GetCurrentBackBufferIndex();
+        display.fullscreen_mode = !display.fullscreen_mode;
+
+    }
+
 
 #if 0    
 

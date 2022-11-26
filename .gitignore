@@ -1,6 +1,7 @@
 # Editor and Debugger files
 *.rdbg
 *.code-workspace
+*.cap
 
 # Build Extras
 *.asm

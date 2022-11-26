@@ -4,16 +4,28 @@
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"
 
+#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "tiny_gltf.h"
+
 #include <chrono>
 
 using namespace d_dx12;
+using namespace d_std;
+namespace tg = tinygltf;
 
-bool application_is_initialized = false;
+#define BUFFER_OFFSET(i) ((char *)0 + (i))
 
 struct Vertex_Position_Color_Texcoord {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT3 color;
     DirectX::XMFLOAT2 texture_coordinates;
+};
+
+struct D_Model {
+    Span<Vertex_Position_Color_Texcoord> verticies;
+    Span<u16> indicies;
 };
 
 // Global Vars, In order of creation
@@ -27,14 +39,24 @@ struct D_Renderer {
     Texture*       ds;
     Texture*       sampled_texture;
     Buffer*        vertex_buffer;
+    Buffer*        index_buffer;
     Buffer*        constant_buffer;
     d_dx12::Descriptor_Handle imgui_font_handle;
+    bool fullscreen_mode = false;
+    RECT window_rect;
+    tg::TinyGLTF loader;
+    Span<D_Model> models;
 
     int  init();
     void render();
     void shutdown();
+    void toggle_fullscreen();
+    void load_gltf_model(D_Model& d_model, const char* filename);
 
 };
+
+D_Renderer renderer;
+bool application_is_initialized = false;
 
 #define MAX_TICK_SAMPLES 20
 int tick_index = 0;
@@ -46,6 +68,173 @@ double *tick_list = NULL;
 u16 display_width  = 1920;
 u16 display_height = 1080;
 bool using_v_sync = false;
+
+
+
+/*
+*   Load a gltf model
+*/
+
+void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
+
+    u8* buffer_arrays[10] = {NULL};
+
+    // Loop threw buffer views
+    for(u64 i = 0; i < tg_model.bufferViews.size(); i++){
+
+        // The buffer view were looking at
+        const tg::BufferView &buffer_view = tg_model.bufferViews[i];
+
+        char* out_buffer = (char*)calloc(500, sizeof(char));
+        sprintf(out_buffer, "Buffer View: %d, byte length: %d, byte offset: %d\n", i, buffer_view.byteLength, buffer_view.byteOffset);
+        OutputDebugString(out_buffer);
+        free(out_buffer);
+
+        // The buffer our buffer view is referencing
+        const tg::Buffer &buffer = tg_model.buffers[buffer_view.buffer];
+
+        // Copy over our data from the buffer
+        buffer_arrays[i] = (u8*)malloc(sizeof(u8) * buffer_view.byteLength);
+        memccpy(buffer_arrays[i], &buffer.data.at(0) + buffer_view.byteOffset, 0, buffer_view.byteLength);
+
+        #if 0 
+        for(u64 j = 0; j < buffer_view.byteLength; j++){
+
+            char* out_buffer = (char*)calloc(500, sizeof(char));
+            sprintf(out_buffer, "j: %d : data: %u\n", j, buffer_arrays[i][j]);
+            OutputDebugString(out_buffer);
+            free(out_buffer);
+
+        }
+        #endif
+
+    }
+
+    for(u64 i = 0; i < mesh.primitives.size(); i++){
+        tg::Primitive primitive = mesh.primitives[i];
+
+        /////////////////////
+        // Indicies
+        /////////////////////
+        {
+            // Get Indicies accessor
+            tg::Accessor index_accessor = tg_model.accessors[primitive.indices];
+            // Get the buffer fiew our accessor references
+            const tg::BufferView &buffer_view = tg_model.bufferViews[index_accessor.bufferView];
+            // The buffer our buffer view is referencing
+            const tg::Buffer &buffer = tg_model.buffers[buffer_view.buffer];
+            // Alloc mem for indicies
+            int index_byte_stride = index_accessor.ByteStride(buffer_view);
+            d_model.indicies.alloc(index_accessor.count);
+
+            // copy over indicies
+            for(u64 i = 0; i < index_accessor.count; i++){
+                // WARNING: u16* would need to change with different sizes / byte_strides of indicies
+                d_model.indicies.ptr[i] = ((u16*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+            }
+        }
+
+        /////////////////////////
+        // Primitive attributes
+        /////////////////////////
+        {
+            // Find position attribute and allocate memory
+            for (auto &attribute : primitive.attributes){
+                if(attribute.first.compare("POSITION") == 0){
+                    tg::Accessor accessor = tg_model.accessors[attribute.second];
+                    d_model.verticies.alloc(accessor.count, sizeof(Vertex_Position_Color_Texcoord));
+                }
+            }
+
+            // For each attribute our mesh has
+            for (auto &attribute : primitive.attributes){
+                // Get the accessor for our attribute
+                tg::Accessor accessor = tg_model.accessors[attribute.second];
+                // Get the buffer fiew our accessor references
+                const tg::BufferView &buffer_view = tg_model.bufferViews[accessor.bufferView];
+                // The buffer our buffer view is referencing
+                const tg::Buffer &buffer = tg_model.buffers[buffer_view.buffer];
+
+                // Copy over our data from the buffer
+                // buffer_arrays[i] = (u8*)malloc(sizeof(u8) * buffer_view.byteLength);
+
+                int byte_stride = accessor.ByteStride(buffer_view);
+                int size = 1;
+                if(accessor.type != TINYGLTF_TYPE_SCALAR){
+                    size = accessor.type;
+                }
+                
+                if(attribute.first.compare("POSITION") == 0){
+                    for(int i = 0; i < d_model.verticies.nitems; i++){
+                        d_model.verticies.ptr[i].position = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                        d_model.verticies.ptr[i].position.z = -d_model.verticies.ptr[i].position.z;
+                    }
+                } else if(attribute.first.compare("NORMAL") == 0){
+                    // Normals not yet supported
+                } else if(attribute.first.compare("TEXCOORD_0") == 0){
+                    for(int i = 0; i < d_model.verticies.nitems; i++){
+                        d_model.verticies.ptr[i].texture_coordinates = ((DirectX::XMFLOAT2*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                    }
+                } else if(attribute.first.compare("COLOR_0") == 0){
+                    for(int i = 0; i < d_model.verticies.nitems; i++){
+                        d_model.verticies.ptr[i].color = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                    }
+                }
+
+                char* out_buffer = (char*)calloc(500, sizeof(char));
+                sprintf(out_buffer, "attribute.first: %s size: %u, count: %u, accessor.componentType: %u, accessor.normalized: %u, byteStride: %u, byteOffset: %u\n", attribute.first.c_str(), size, buffer_view.byteLength / byte_stride, accessor.componentType, accessor.normalized, byte_stride, BUFFER_OFFSET(accessor.byteOffset));
+                OutputDebugString(out_buffer);
+                free(out_buffer);
+
+                //d_model.verticies.alloc(, sizeof(Vertex_Position_Color_Texcoord));
+            }
+        }
+    }
+
+    if(tg_model.textures.size() > 0){
+        // TODO: Deal with textures...
+    }
+}
+
+void load_model_nodes(D_Model& d_model, tg::Model& tg_model, tg::Node& node){
+
+    if(node.mesh > -1 && node.mesh < tg_model.meshes.size()){
+        load_mesh(d_model, tg_model, tg_model.meshes[node.mesh]);
+    }
+
+    for(u64 i = 0; i < node.children.size(); i++){
+        load_model_nodes(d_model, tg_model, tg_model.nodes[node.children[i]]);
+    }
+
+}
+
+void D_Renderer::load_gltf_model(D_Model& d_model, const char* filename){
+
+    tg::Model tg_model;
+    std::string err;
+    std::string warn;
+    //const std::string model_name = "C:\\dev\\glTF-Sample-Models\\2.0\\BoxVertexColors\\glTF\\BoxVertexColors.gltf";
+    bool ret = loader.LoadASCIIFromFile(&tg_model, &err, &warn, filename);
+
+    if (!warn.empty()) {
+        printf("Warn: %s\n", warn.c_str());
+    }
+
+    if (!err.empty()) {
+        printf("Err: %s\n", err.c_str());
+    }
+
+    if (!ret) {
+        printf("Failed to parse glTF\n");
+        return;
+    }
+
+    const tg::Scene &scene = tg_model.scenes[tg_model.defaultScene];    
+    for(u64 i = 0; i < scene.nodes.size(); i++){
+        load_model_nodes(d_model, tg_model, tg_model.nodes[scene.nodes[i]]);
+    }
+
+}
 
 /*
 *   Release d3d12 obj before exiting application
@@ -103,8 +292,10 @@ double avg_ms_per_tick(double tick){
 */
 int D_Renderer::init(){
 
+    window_rect = { 0, 0, display_width, display_height };
+
     // Need to call this before doing much else!
-    d_dx12_init(hWnd, display_width, display_height);
+    d_dx12_init(hWnd, window_rect.right - window_rect.left, window_rect.bottom - window_rect.top);
 
     /*
      *   Create Resource Manager
@@ -205,6 +396,7 @@ int D_Renderer::init(){
      */
 
     // NOTE: DONT NEGLECT BACKSIDE CULLING (:
+    #if 0
     Vertex_Position_Color_Texcoord verticies[6] = {
         // BOTTOM
         {
@@ -240,16 +432,43 @@ int D_Renderer::init(){
             {0.0, 1.0},
         }
     };
+    #endif
 
-    Buffer_Desc buffer_desc = {};
-    buffer_desc.number_of_elements = sizeof(verticies) / sizeof(verticies[0]);
-    buffer_desc.size_of_each_element = sizeof(Vertex_Position_Color_Texcoord);
-    buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
+    ///////////////////////
+    // GLTF Model
+    ///////////////////////
 
-    vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", buffer_desc);
+    renderer.models.alloc(sizeof(D_Model), 1);
+    D_Model& test_model = renderer.models.ptr[0];
 
-    upload_command_list->load_buffer(vertex_buffer, (u8*)verticies, sizeof(verticies), sizeof(Vertex_Position_Color_Texcoord));//Fix: sizeof(Vertex_Position_Color));
+    load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\BoxVertexColors\\glTF\\BoxVertexColors.gltf");
+    //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\DamagedHelmet.gltf");
 
+    //////////////////////
+    // Model Buffers
+    //////////////////////
+
+    // Vertex buffer
+    Buffer_Desc vertex_buffer_desc = {};
+    vertex_buffer_desc.number_of_elements = test_model.verticies.nitems;
+    vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Color_Texcoord);
+    vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
+
+    vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", vertex_buffer_desc);
+
+    upload_command_list->load_buffer(vertex_buffer, (u8*)test_model.verticies.ptr, test_model.verticies.nitems * sizeof(Vertex_Position_Color_Texcoord), sizeof(Vertex_Position_Color_Texcoord));//Fix: sizeof(Vertex_Position_Color));
+
+    // Index Buffer
+    Buffer_Desc index_buffer_desc = {};
+    index_buffer_desc.number_of_elements = test_model.indicies.nitems;
+    index_buffer_desc.size_of_each_element = sizeof(u16);
+    index_buffer_desc.usage = Buffer::USAGE::USAGE_INDEX_BUFFER;
+
+    index_buffer = resource_manager.create_buffer(L"Index Buffer", index_buffer_desc);
+
+    upload_command_list->load_buffer(index_buffer, (u8*)test_model.indicies.ptr, test_model.indicies.nitems * sizeof(u16), sizeof(u16));//Fix: sizeof(Vertex_Position_Color));
+
+    // Constant Buffer
     Buffer_Desc cbuffer_desc = {};
     cbuffer_desc.number_of_elements = 1;
     cbuffer_desc.size_of_each_element = sizeof(DirectX::XMFLOAT3);
@@ -261,12 +480,14 @@ int D_Renderer::init(){
 
     upload_command_list->load_buffer(constant_buffer, (u8*)&constant_buffer_data, sizeof(constant_buffer_data), 32);
 
+    // Texture Buffer
     Texture_Desc texture_desc = {};
     texture_desc.usage = Texture::USAGE::USAGE_SAMPLED;
 
     sampled_texture = resource_manager.create_texture(L"Sampled_Texture", texture_desc);
 
     upload_command_list->load_texture_from_file(sampled_texture, L"mountains.jpg");
+
 
     ///////////////////////
     // DearIMGUI
@@ -296,9 +517,7 @@ int D_Renderer::init(){
     // Sets up FPS Counter
     tick_list = (double*)calloc(MAX_TICK_SAMPLES, sizeof(double));
 
-
     application_is_initialized = true;
-
 
     return 0;
 
@@ -341,6 +560,7 @@ void D_Renderer::render(){
 
     // Bind the buffers to the command list somewhere in the root signature
     command_list->bind_vertex_buffer(vertex_buffer, 0);
+    command_list->bind_index_buffer(index_buffer);
 
     // Can't use shader parameters that are optimized out
     //command_list->bind_buffer(constant_buffer, &resource_manager, "color_buffer");
@@ -352,7 +572,7 @@ void D_Renderer::render(){
     command_list->bind_texture(sampled_texture, &resource_manager, "albedo_texture");
 
     // Dont think this is how draw should work, create a draw command struct to pass...
-    command_list->draw(6);
+    command_list->draw(renderer.models.ptr[0].indicies.nitems);
 
     //////////////////////
     /// Dear IMGUI
@@ -400,9 +620,23 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
         switch (msg) {
 
             // Key Press
+            // Handle ALT+ENTER
+            case(WM_SYSKEYDOWN):
+            {
+                if ((wParam == VK_RETURN) && (lParam & (1 << 29))) {
+                    if (application_is_initialized && CheckTearingSupport()) {
+                        Span<Texture*> rts_to_resize = { renderer.rt, 2 };
+                        toggle_fullscreen(rts_to_resize);
+                        renderer.ds->resize(renderer.rt[0]->width, renderer.rt[0]->height);
+                    }
+                } else {
+                    result = DefWindowProc(hWnd, msg, wParam, lParam);
+                }
+            }
+            break;
 
             // Mouse Button
-            case(WM_SYSKEYDOWN):
+            //case(WM_SYSKEYDOWN):
             case(WM_LBUTTONDOWN):
             {
                 if (!io.WantCaptureMouse){
@@ -434,6 +668,13 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
             // Mouse movement
             
+            case(WM_MOVE): 
+            {
+                OutputDebugString("Moved!\n");
+                RECT test = {};
+                GetWindowRect(renderer.hWnd, &test);
+            }
+            break;
             #if 0
             // Closes the program
             case(WM_SIZING): 
@@ -444,11 +685,6 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             case(WM_SIZE): 
             {
                 OutputDebugString("Resized!\n");
-            }
-            break;
-            case(WM_MOVE): 
-            {
-                OutputDebugString("Moved!\n");
             }
             break;
             case(WM_MOVING): 
@@ -567,14 +803,13 @@ WinMain(HINSTANCE hInstance,
             return -1;
         }
 
-        D_Renderer renderer;
-
         // Create the window using our class..
         renderer.hWnd = CreateWindowEx(
                 WS_EX_TOPMOST,
                 "David Window Class",		// Defined previously
                 "David's DirectX Window",  // Name at the top of the window	
-                WS_OVERLAPPEDWINDOW ^ WS_THICKFRAME,		// A few attributes for the window like minimize, border, ect..
+                //WS_OVERLAPPEDWINDOW ^ WS_THICKFRAME,		// A few attributes for the window like minimize, border, ect..
+                WS_OVERLAPPEDWINDOW,		// A few attributes for the window like minimize, border, ect..
                 CW_USEDEFAULT,				// DefaultPos X
                 CW_USEDEFAULT,				// DefaultPos Y
                 display_width,	            // Display(!!) Width
@@ -607,13 +842,17 @@ WinMain(HINSTANCE hInstance,
                 if (msg.message == WM_QUIT) {
                     break;
                 }
+                /*
                 else if (msg.message == WM_PAINT) {
-                    renderer.render();
+                    //renderer.render();
                 }
+                */
                 else {
                     TranslateMessage(&msg);
                     DispatchMessage(&msg);
                 }
+            } else {
+                renderer.render();
             }
         }
 

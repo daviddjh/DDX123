@@ -67,8 +67,15 @@ inline void ThrowIfFailed(HRESULT hr)
 #endif
 
 #ifdef _DEBUG
-#define ThrowIfFailed(result) if(FAILED(result)) { DEBUG_BREAK; throw std::exception(); }
+//#define ThrowIfFailed(result) if(FAILED(result)) { DEBUG_BREAK; throw std::exception(); }
+inline void ThrowIfFailed(HRESULT result){
+	if(FAILED(result)){
+		DEBUG_BREAK;
+		throw std::exception();
+	}
+}
 #else
-#define ThrowIfFailed(hr) hr
+//#define ThrowIfFailed(hr) hr
+inline void ThrowIfFailed(HRESULT result){}
 #endif
 
