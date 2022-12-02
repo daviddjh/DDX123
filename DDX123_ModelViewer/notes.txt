@@ -1,5 +1,19 @@
 11/25/2022
 
+- Loads the DamagedHelmet GLtf model and albedo texture.
+
+TODO:
+1. Clean up model / model load code, move to own file?
+2. Add Model Matricies and other code to move models.
+3. Add default scaling, controls, lighting
+
+NOTES:
+
+Alignment is important!! Texture wasn't diplaying properly because the destination location in the CopyTextureRegion function
+wasn't aligned properly.
+
+11/25/2022
+
 - Made progress on screen resize and the moving screen causing freeze bug. Fixed by moving render out of windows message loop
 - Added gltf file loader. Currently only works with files that have vertex color defined per vertex.
     - Moved to DrawIndexedInstanced by defalut

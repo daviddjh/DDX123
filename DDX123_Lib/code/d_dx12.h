@@ -187,6 +187,8 @@ namespace d_dx12 {
         USAGE                                     usage = USAGE_NONE;
         u16                                       width;
         u16                                       height;
+        u16                                       pixel_size;
+        DXGI_FORMAT                               format;
         wchar_t*                                  name = NULL;
 
         void d_dx12_release();
@@ -199,6 +201,8 @@ namespace d_dx12 {
         bool rtv_connect_to_next_swapchain_buffer = true;
         u16  width;
         u16  height;
+        u16  pixel_size;
+        DXGI_FORMAT format;
 
     };
 
@@ -266,6 +270,7 @@ namespace d_dx12 {
         void clear_depth_stencil(Texture* ds, const float depth);
         void load_buffer(Buffer* buffer, u8* data, u64 size, u64 alignment);
         void load_texture_from_file(Texture* texture, const wchar_t* filename);
+        void load_decoded_texture_from_memory(Texture* texture, d_std::Span<u8> data);
         void reset();
         void close();
         void bind_vertex_buffer(Buffer* buffer, u32 slot);

@@ -18,11 +18,14 @@ float4 main(PixelShaderInput IN) : SV_Target
 {
 
     //return float4(color_buffer, 1.0);
-    float4 texture_color = albedo_texture.Sample(sampler_1, IN.TextureCoordinate);
+    float2 UV;
+    UV.x = IN.TextureCoordinate.x;
+    UV.y = IN.TextureCoordinate.y;
+    float4 texture_color = albedo_texture.Sample(sampler_1, UV);
 
-    float3 final_color = IN.Color + (0 * texture_color.xyz);
+    //float3 final_color = IN.Color + (0 * texture_color.xyz);
 
-    //return texture_color;
-    return float4(final_color, 1.0);
+    return texture_color;
+    //return float4(final_color, 1.0);
 
 }

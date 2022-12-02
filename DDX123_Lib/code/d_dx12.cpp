@@ -1029,6 +1029,10 @@ namespace d_dx12 {
                 Descriptor_Handle descriptor_handle = offline_cbv_srv_uav_descriptor_heap.get_next_handle();
                 texture->offline_descriptor_handle = descriptor_handle;
                 texture->state = D3D12_RESOURCE_STATE_COMMON;
+                texture->width = desc.width;
+                texture->height = desc.height;
+                texture->format = desc.format;
+                texture->pixel_size = desc.pixel_size;
 
                 // Empty to start, need to load a file into a resource and connect it to this texture
                 // -> LoadTextureFromFile();
@@ -1234,7 +1238,113 @@ namespace d_dx12 {
         d3d12_resource.Reset();
     }
 
-    // TODO: ...
+    void Command_List::load_decoded_texture_from_memory(Texture* texture, Span<u8> data){
+
+        if(texture->usage != Texture::USAGE::USAGE_SAMPLED){
+            OutputDebugString("Error (load_texture_from_memory): Invalid Texture Usage");
+            return;
+        }
+
+        if(data.ptr){
+
+            // TODO: create the commited resource!
+            D3D12_HEAP_PROPERTIES heap_properties = {};
+            heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+            heap_properties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+            heap_properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+
+            D3D12_RESOURCE_DESC resourceDesc = {};
+            resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            resourceDesc.Alignment = 0;
+            resourceDesc.Width = texture->width;
+            resourceDesc.Height = texture->height;
+            resourceDesc.DepthOrArraySize = 1;
+            resourceDesc.MipLevels = 1;
+            //resourceDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            resourceDesc.Format = texture->format;
+            resourceDesc.SampleDesc = {1, 0};
+            resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            resourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+            ThrowIfFailed(d3d12_device->CreateCommittedResource(
+                &heap_properties, D3D12_HEAP_FLAG_NONE, &resourceDesc,
+                D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture->d3d12_resource)));
+
+            
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
+            UINT row_count;
+            UINT64 row_size;
+            UINT64 size;
+            d3d12_device->GetCopyableFootprints(&texture->d3d12_resource->GetDesc(), 0, 1, 0,
+                                            &footprint, &row_count, &row_size, &size);
+
+            // Row Pitch:   The row pitch, or width, or physical size, in bytes, of the subresource data
+            // Row Pitch = width * pixel size in bytes
+            // Slice Pitch: The depth pitch, or width, or physical size, in bytes, of the subresource data
+            // Slice Pitch = height * Row Pitch
+            // TODO: Break here to inspect Slice and Row pitch
+
+            u64 row_pitch = texture->width * texture->pixel_size;
+            u64 slice_pitch = texture->height * row_pitch;
+
+            size_t allocation_size = slice_pitch;
+            // TODO: Is this the correct align value???
+            Upload_Buffer::Allocation upload_allocation = upload_buffer.allocate(size, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+
+            for(u64 i = 0; i < row_count; i++){
+
+                memcpy(upload_allocation.cpu_addr + row_size * i, data.ptr + texture->width * texture->pixel_size * i, texture->width * texture->pixel_size);
+
+            }
+
+            // Describe the destination location of the texture
+            CD3DX12_TEXTURE_COPY_LOCATION copy_dest(texture->d3d12_resource.Get(), 0);
+
+            // Describes a subresource within a parent
+            D3D12_SUBRESOURCE_FOOTPRINT texture_footprint = {};
+            texture_footprint.Format = footprint.Footprint.Format;
+            texture_footprint.Width = footprint.Footprint.Width;
+            texture_footprint.Height = footprint.Footprint.Height;
+            texture_footprint.Depth = 1;
+            //
+            // !!!!
+            // TODO: texture_footprint.RowPitch breaks if the image width isn't a multiple of 256. How do we fix this??
+            // !!!!
+            //
+            texture_footprint.RowPitch = footprint.Footprint.RowPitch;
+
+            // Describes a PLACED subresource within a parent. Note: Offset
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT placed_pitched_desc = {};
+            placed_pitched_desc.Offset = upload_allocation.resource_offset;
+            placed_pitched_desc.Footprint = texture_footprint;
+
+            // Describes the copy source of the texture.
+            // This would be the upload allocation we made in the Upload Buffer,
+            // plus an offset into the upload buffer resource.
+            CD3DX12_TEXTURE_COPY_LOCATION copy_src(upload_allocation.d3d12_resource.Get(), placed_pitched_desc);
+            //CD3DX12_TEXTURE_COPY_LOCATION copy_src(upload_allocation.d3d12_resource.Get(), footprint);
+
+            // Copies the texture from the upload buffer into the commited resource created in LoadWICTextureFromFile
+            d3d12_command_list->CopyTextureRegion(
+                &copy_dest,
+                0, 0, 0,
+                &copy_src,
+                nullptr
+            );
+           
+            D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+            srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srv_desc.Format = texture->format;
+            // Only works for 2d, 1 MIP level textures currently
+            srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srv_desc.Texture2D.MipLevels = 1;
+
+            d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srv_desc, texture->offline_descriptor_handle.cpu_descriptor_handle);
+        }
+
+        return;
+    }
+
     void Command_List::load_texture_from_file(Texture* texture, const wchar_t* filename){
 
         if(texture->usage != Texture::USAGE::USAGE_SAMPLED){
@@ -1262,7 +1372,9 @@ namespace d_dx12 {
         if(decoded_file_data.get()){
 
             // Row Pitch:   The row pitch, or width, or physical size, in bytes, of the subresource data
+            // Row Pitch = width * pixel size in bytes
             // Slice Pitch: The depth pitch, or width, or physical size, in bytes, of the subresource data
+            // Slice Pitch = height * Row Pitch
             // TODO: Break here to inspect Slice and Row pitch
             size_t allocation_size = subresource_data.SlicePitch;
             Upload_Buffer::Allocation upload_allocation = upload_buffer.allocate(allocation_size, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);

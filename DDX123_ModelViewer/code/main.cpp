@@ -26,6 +26,8 @@ struct Vertex_Position_Color_Texcoord {
 struct D_Model {
     Span<Vertex_Position_Color_Texcoord> verticies;
     Span<u16> indicies;
+    Span<u8>  texture;
+    Texture_Desc texture_desc;
 };
 
 // Global Vars, In order of creation
@@ -174,6 +176,8 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
                 } else if(attribute.first.compare("TEXCOORD_0") == 0){
                     for(int i = 0; i < d_model.verticies.nitems; i++){
                         d_model.verticies.ptr[i].texture_coordinates = ((DirectX::XMFLOAT2*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                        // Dx12 UV is different than OpenGL / GLTF
+                        d_model.verticies.ptr[i].texture_coordinates.y = 1 - d_model.verticies.ptr[i].texture_coordinates.y;
                     }
                 } else if(attribute.first.compare("COLOR_0") == 0){
                     for(int i = 0; i < d_model.verticies.nitems; i++){
@@ -192,7 +196,47 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
     }
 
     if(tg_model.textures.size() > 0){
-        // TODO: Deal with textures...
+        tg::Texture &tex = tg_model.textures[0];
+
+        if(tex.source >= 0){
+            tg::Image &image = tg_model.images[tex.source];
+
+            d_model.texture_desc.width = image.width;
+            d_model.texture_desc.height = image.height;
+
+            DXGI_FORMAT image_format = DXGI_FORMAT_UNKNOWN;
+            
+            if(image.component == 1){
+                if(image.bits == 8){
+                    image_format = DXGI_FORMAT_R8_UINT;
+                } else if(image.bits == 16){
+                    image_format = DXGI_FORMAT_R16_UINT;
+                }
+            } else if (image.component == 2){
+                if(image.bits == 8){
+                    image_format = DXGI_FORMAT_R8G8_UINT;
+                } else if(image.bits == 16){
+                    image_format = DXGI_FORMAT_R16G16_UINT;
+                }
+            } else if (image.component == 3){
+                // ?
+            } else if (image.component == 4){
+                if(image.bits == 8){
+                    image_format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                } else if(image.bits == 16){
+                    image_format = DXGI_FORMAT_R16G16B16A16_UINT;
+                }
+            }
+
+            d_model.texture_desc.format     = image_format;
+            d_model.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
+            d_model.texture_desc.pixel_size = image.component * image.bits / 8;
+
+            d_model.texture.alloc(image.image.size());
+            memcpy(d_model.texture.ptr, &image.image.at(0), image.image.size());// * image.component * (image.bits / 8));
+            
+        }
+
     }
 }
 
@@ -441,8 +485,14 @@ int D_Renderer::init(){
     renderer.models.alloc(sizeof(D_Model), 1);
     D_Model& test_model = renderer.models.ptr[0];
 
-    load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\BoxVertexColors\\glTF\\BoxVertexColors.gltf");
-    //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\DamagedHelmet.gltf");
+    //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\BoxVertexColors\\glTF\\BoxVertexColors.gltf");
+    load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\DamagedHelmet.gltf");
+
+    // GLtf Loading is broken..
+    //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\Sponza\\glTF\\Sponza.gltf");
+
+    // Doesn't work because of load_buffer error:..
+    //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\SciFiHelmet\\glTF\\SciFiHelmet.gltf");
 
     //////////////////////
     // Model Buffers
@@ -481,13 +531,17 @@ int D_Renderer::init(){
     upload_command_list->load_buffer(constant_buffer, (u8*)&constant_buffer_data, sizeof(constant_buffer_data), 32);
 
     // Texture Buffer
+    /*
     Texture_Desc texture_desc = {};
     texture_desc.usage = Texture::USAGE::USAGE_SAMPLED;
+    */
 
-    sampled_texture = resource_manager.create_texture(L"Sampled_Texture", texture_desc);
+    sampled_texture = resource_manager.create_texture(L"Sampled_Texture", models.ptr[0].texture_desc);
 
-    upload_command_list->load_texture_from_file(sampled_texture, L"mountains.jpg");
-
+    //upload_command_list->load_texture_from_file(sampled_texture, L"C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\Default_albedo.jpg");
+    if(models.ptr[0].texture.ptr){
+        upload_command_list->load_decoded_texture_from_memory(sampled_texture, models.ptr[0].texture);
+    }
 
     ///////////////////////
     // DearIMGUI
@@ -569,7 +623,9 @@ void D_Renderer::render(){
     // vickylovesyou!!
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    command_list->bind_texture(sampled_texture, &resource_manager, "albedo_texture");
+    if(models.ptr[0].texture.ptr){
+        command_list->bind_texture(sampled_texture, &resource_manager, "albedo_texture");
+    }
 
     // Dont think this is how draw should work, create a draw command struct to pass...
     command_list->draw(renderer.models.ptr[0].indicies.nitems);
