@@ -1,3 +1,37 @@
+12/23/2022
+
+Sponza is rendering correctly with textures! Had to flip texture coordinate back to default for sponza to 
+be viewed correctly.
+
+Todo:
+1. Consider adding some sort of camera controls to validate rest of the sponza model is loaded properly
+2. Clean up code before adding anything else. Getting a bit out of hand..
+
+12/23/2022
+
+Slowly getting there! Got sponza loaded with textures showing on a few objects infront of the cameras.
+Textures on the fabric looks heavily aliased, need mip mapping.
+Decoupled Materials from primitive_groups. Primative groups now store the index of the material they need.
+
+Todo:
+1. Fix matricies so model moving works
+2. Consider adding some sort of camera controls to validate rest of the sponza model is loaded properly
+3. Clean up code before adding anything else. Getting a bit out of hand..
+
+12/5/2022
+
+- Still working on sponza model load. The verticies, indicies, and textures are taking up a lot of room.
+- Just giving each primitive_group it's own buffers and draw call, will need to optimize in the future.
+- In the future will need to rewrite upload buffer code to support more buffers and clean up after upload.
+- Seems like there is a problem with resource cleanup on the GPU, as the program fails to create a resource
+    when not attached to RemedyBG.
+    - Should add a "cleanup" function to model to cleanup the models resources. See if that works.
+- Also, since I added these model data structures, I should clean up the global vars for vertex buffer, albedo texture, etc..
+
+12/4/2022
+
+- Currently working to improve model load code with the goal of Sponza being able to load properly
+
 11/25/2022
 
 - Loads the DamagedHelmet GLtf model and albedo texture.

@@ -23,11 +23,35 @@ struct Vertex_Position_Color_Texcoord {
     DirectX::XMFLOAT2 texture_coordinates;
 };
 
-struct D_Model {
+struct D_Material {
+    Span<u8>  cpu_texture_data;
+    Texture_Desc texture_desc;
+    Texture* texture;
+};
+
+struct D_Primitive_Group {
+    D3D_PRIMITIVE_TOPOLOGY primitive_topology;
     Span<Vertex_Position_Color_Texcoord> verticies;
     Span<u16> indicies;
-    Span<u8>  texture;
-    Texture_Desc texture_desc;
+    u16 material_index = -1;
+    Buffer* vertex_buffer;
+    Buffer* index_buffer;
+};
+
+struct D_Mesh {
+    Span<D_Primitive_Group> primitive_groups;
+};
+
+struct D_Model {
+    Span<D_Material> materials;
+    Span<D_Mesh> meshes;
+    DirectX::XMFLOAT3 coords;
+};
+
+struct D_Camera {
+    DirectX::XMVECTOR eye_position;
+    DirectX::XMVECTOR eye_direction;
+    DirectX::XMVECTOR up_direction;
 };
 
 // Global Vars, In order of creation
@@ -48,12 +72,15 @@ struct D_Renderer {
     RECT window_rect;
     tg::TinyGLTF loader;
     Span<D_Model> models;
+    D_Camera camera;
 
     int  init();
     void render();
     void shutdown();
     void toggle_fullscreen();
     void load_gltf_model(D_Model& d_model, const char* filename);
+    void upload_model_to_gpu(Command_List* command_list, D_Model& test_model);
+    void bind_and_draw_model(Command_List* command_list, D_Model* model);
 
 };
 
@@ -79,7 +106,8 @@ bool using_v_sync = false;
 
 void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
 
-    u8* buffer_arrays[10] = {NULL};
+    #if 0
+    u8* buffer_arrays[100] = {NULL};
 
     // Loop threw buffer views
     for(u64 i = 0; i < tg_model.bufferViews.size(); i++){
@@ -111,132 +139,102 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
         #endif
 
     }
+    #endif
 
-    for(u64 i = 0; i < mesh.primitives.size(); i++){
-        tg::Primitive primitive = mesh.primitives[i];
+    // Allocate and loop through array of meshes
+    d_model.meshes.alloc(tg_model.meshes.size());
+    for(u64 mesh_index = 0; mesh_index < d_model.meshes.nitems; mesh_index++){
 
-        /////////////////////
-        // Indicies
-        /////////////////////
-        {
-            // Get Indicies accessor
-            tg::Accessor index_accessor = tg_model.accessors[primitive.indices];
-            // Get the buffer fiew our accessor references
-            const tg::BufferView &buffer_view = tg_model.bufferViews[index_accessor.bufferView];
-            // The buffer our buffer view is referencing
-            const tg::Buffer &buffer = tg_model.buffers[buffer_view.buffer];
-            // Alloc mem for indicies
-            int index_byte_stride = index_accessor.ByteStride(buffer_view);
-            d_model.indicies.alloc(index_accessor.count);
+        D_Mesh* mesh = d_model.meshes.ptr + mesh_index;
+        tg::Mesh tg_mesh = tg_model.meshes[mesh_index];
 
-            // copy over indicies
-            for(u64 i = 0; i < index_accessor.count; i++){
-                // WARNING: u16* would need to change with different sizes / byte_strides of indicies
-                d_model.indicies.ptr[i] = ((u16*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
-            }
-        }
+        // Allocate and loop through array of primative groups
+        mesh->primitive_groups.alloc(tg_mesh.primitives.size());
+        for(u64 primative_group_index = 0; primative_group_index < mesh->primitive_groups.nitems; primative_group_index++){
 
-        /////////////////////////
-        // Primitive attributes
-        /////////////////////////
-        {
-            // Find position attribute and allocate memory
-            for (auto &attribute : primitive.attributes){
-                if(attribute.first.compare("POSITION") == 0){
-                    tg::Accessor accessor = tg_model.accessors[attribute.second];
-                    d_model.verticies.alloc(accessor.count, sizeof(Vertex_Position_Color_Texcoord));
-                }
-            }
+            D_Primitive_Group* primative_group = mesh->primitive_groups.ptr + primative_group_index;
+            tg::Primitive primitive = tg_mesh.primitives[primative_group_index];
 
-            // For each attribute our mesh has
-            for (auto &attribute : primitive.attributes){
-                // Get the accessor for our attribute
-                tg::Accessor accessor = tg_model.accessors[attribute.second];
+            // Fill primative group
+
+            /////////////////////
+            // Indicies
+            /////////////////////
+            {
+                // Get Indicies accessor
+                tg::Accessor index_accessor = tg_model.accessors[primitive.indices];
                 // Get the buffer fiew our accessor references
-                const tg::BufferView &buffer_view = tg_model.bufferViews[accessor.bufferView];
+                const tg::BufferView &buffer_view = tg_model.bufferViews[index_accessor.bufferView];
                 // The buffer our buffer view is referencing
                 const tg::Buffer &buffer = tg_model.buffers[buffer_view.buffer];
+                // Alloc mem for indicies
+                int index_byte_stride = index_accessor.ByteStride(buffer_view);
+                primative_group->indicies.alloc(index_accessor.count);
 
-                // Copy over our data from the buffer
-                // buffer_arrays[i] = (u8*)malloc(sizeof(u8) * buffer_view.byteLength);
-
-                int byte_stride = accessor.ByteStride(buffer_view);
-                int size = 1;
-                if(accessor.type != TINYGLTF_TYPE_SCALAR){
-                    size = accessor.type;
-                }
-                
-                if(attribute.first.compare("POSITION") == 0){
-                    for(int i = 0; i < d_model.verticies.nitems; i++){
-                        d_model.verticies.ptr[i].position = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
-                        d_model.verticies.ptr[i].position.z = -d_model.verticies.ptr[i].position.z;
-                    }
-                } else if(attribute.first.compare("NORMAL") == 0){
-                    // Normals not yet supported
-                } else if(attribute.first.compare("TEXCOORD_0") == 0){
-                    for(int i = 0; i < d_model.verticies.nitems; i++){
-                        d_model.verticies.ptr[i].texture_coordinates = ((DirectX::XMFLOAT2*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
-                        // Dx12 UV is different than OpenGL / GLTF
-                        d_model.verticies.ptr[i].texture_coordinates.y = 1 - d_model.verticies.ptr[i].texture_coordinates.y;
-                    }
-                } else if(attribute.first.compare("COLOR_0") == 0){
-                    for(int i = 0; i < d_model.verticies.nitems; i++){
-                        d_model.verticies.ptr[i].color = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
-                    }
-                }
-
-                char* out_buffer = (char*)calloc(500, sizeof(char));
-                sprintf(out_buffer, "attribute.first: %s size: %u, count: %u, accessor.componentType: %u, accessor.normalized: %u, byteStride: %u, byteOffset: %u\n", attribute.first.c_str(), size, buffer_view.byteLength / byte_stride, accessor.componentType, accessor.normalized, byte_stride, BUFFER_OFFSET(accessor.byteOffset));
-                OutputDebugString(out_buffer);
-                free(out_buffer);
-
-                //d_model.verticies.alloc(, sizeof(Vertex_Position_Color_Texcoord));
-            }
-        }
-    }
-
-    if(tg_model.textures.size() > 0){
-        tg::Texture &tex = tg_model.textures[0];
-
-        if(tex.source >= 0){
-            tg::Image &image = tg_model.images[tex.source];
-
-            d_model.texture_desc.width = image.width;
-            d_model.texture_desc.height = image.height;
-
-            DXGI_FORMAT image_format = DXGI_FORMAT_UNKNOWN;
-            
-            if(image.component == 1){
-                if(image.bits == 8){
-                    image_format = DXGI_FORMAT_R8_UINT;
-                } else if(image.bits == 16){
-                    image_format = DXGI_FORMAT_R16_UINT;
-                }
-            } else if (image.component == 2){
-                if(image.bits == 8){
-                    image_format = DXGI_FORMAT_R8G8_UINT;
-                } else if(image.bits == 16){
-                    image_format = DXGI_FORMAT_R16G16_UINT;
-                }
-            } else if (image.component == 3){
-                // ?
-            } else if (image.component == 4){
-                if(image.bits == 8){
-                    image_format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                } else if(image.bits == 16){
-                    image_format = DXGI_FORMAT_R16G16B16A16_UINT;
+                // copy over indicies
+                for(u64 i = 0; i < index_accessor.count; i++){
+                    // WARNING: u16* would need to change with different sizes / byte_strides of indicies
+                    //primative_group->indicies.ptr[i] = ((u16*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                    primative_group->indicies.ptr[i] = ((u16*)(&buffer.data.at(0) + index_accessor.byteOffset))[i];
                 }
             }
 
-            d_model.texture_desc.format     = image_format;
-            d_model.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
-            d_model.texture_desc.pixel_size = image.component * image.bits / 8;
+            /////////////////////////
+            // Primitive attributes
+            /////////////////////////
+            {
+                // Find position attribute and allocate memory
+                for (auto &attribute : primitive.attributes){
+                    if(attribute.first.compare("POSITION") == 0){
+                        tg::Accessor accessor = tg_model.accessors[attribute.second];
+                        primative_group->verticies.alloc(accessor.count, sizeof(Vertex_Position_Color_Texcoord));
+                    }
+                }
 
-            d_model.texture.alloc(image.image.size());
-            memcpy(d_model.texture.ptr, &image.image.at(0), image.image.size());// * image.component * (image.bits / 8));
-            
+                // For each attribute our mesh has
+                for (auto &attribute : primitive.attributes){
+                    // Get the accessor for our attribute
+                    tg::Accessor accessor = tg_model.accessors[attribute.second];
+                    // Get the buffer fiew our accessor references
+                    const tg::BufferView &buffer_view = tg_model.bufferViews[accessor.bufferView];
+                    // The buffer our buffer view is referencing
+                    const tg::Buffer &buffer = tg_model.buffers[buffer_view.buffer];
+
+                    int byte_stride = accessor.ByteStride(buffer_view);
+                    int size = 1;
+                    if(accessor.type != TINYGLTF_TYPE_SCALAR){
+                        size = accessor.type;
+                    }
+                    
+                    if(attribute.first.compare("POSITION") == 0){
+                        for(int i = 0; i < primative_group->verticies.nitems; i++){
+                            primative_group->verticies.ptr[i].position = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                            primative_group->verticies.ptr[i].position.z = -primative_group->verticies.ptr[i].position.z;
+                        }
+                    } else if(attribute.first.compare("NORMAL") == 0){
+                        // Normals not yet supported
+                    } else if(attribute.first.compare("TEXCOORD_0") == 0){
+                        for(int i = 0; i < primative_group->verticies.nitems; i++){
+                            primative_group->verticies.ptr[i].texture_coordinates = ((DirectX::XMFLOAT2*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                            // Dx12 UV is different than OpenGL / GLTF
+                            //primative_group->verticies.ptr[i].texture_coordinates.y = 1 - primative_group->verticies.ptr[i].texture_coordinates.y;
+                        }
+                    } else if(attribute.first.compare("COLOR_0") == 0){
+                        for(int i = 0; i < primative_group->verticies.nitems; i++){
+                            primative_group->verticies.ptr[i].color = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                        }
+                    }
+
+                    char* out_buffer = (char*)calloc(500, sizeof(char));
+                    sprintf(out_buffer, "attribute.first: %s size: %u, count: %u, accessor.componentType: %u, accessor.normalized: %u, byteStride: %u, byteOffset: %u\n", attribute.first.c_str(), size, buffer_view.byteLength / byte_stride, accessor.componentType, accessor.normalized, byte_stride, BUFFER_OFFSET(accessor.byteOffset));
+                    OutputDebugString(out_buffer);
+                    free(out_buffer);
+
+                    //d_model.verticies.alloc(, sizeof(Vertex_Position_Color_Texcoord));
+                }
+            }
+            primative_group->material_index = primitive.material;
         }
-
     }
 }
 
@@ -250,6 +248,60 @@ void load_model_nodes(D_Model& d_model, tg::Model& tg_model, tg::Node& node){
         load_model_nodes(d_model, tg_model, tg_model.nodes[node.children[i]]);
     }
 
+}
+
+void load_materials(D_Model& d_model, tg::Model& tg_model){
+
+    if(tg_model.textures.size() > 0){
+
+        d_model.materials.alloc(tg_model.materials.size());
+
+        for(u16 j = 0; j < tg_model.materials.size(); j++){
+
+            u32 texture_index = tg_model.materials[j].pbrMetallicRoughness.baseColorTexture.index;
+            tg::Texture &tex = tg_model.textures[texture_index];
+            D_Material &material = d_model.materials.ptr[j];
+
+            if(tex.source >= 0){
+                tg::Image &image = tg_model.images[tex.source];
+
+                material.texture_desc.width = image.width;
+                material.texture_desc.height = image.height;
+
+                DXGI_FORMAT image_format = DXGI_FORMAT_UNKNOWN;
+                
+                if(image.component == 1){
+                    if(image.bits == 8){
+                        image_format = DXGI_FORMAT_R8_UINT;
+                    } else if(image.bits == 16){
+                        image_format = DXGI_FORMAT_R16_UINT;
+                    }
+                } else if (image.component == 2){
+                    if(image.bits == 8){
+                        image_format = DXGI_FORMAT_R8G8_UINT;
+                    } else if(image.bits == 16){
+                        image_format = DXGI_FORMAT_R16G16_UINT;
+                    }
+                } else if (image.component == 3){
+                    // ?
+                } else if (image.component == 4){
+                    if(image.bits == 8){
+                        image_format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    } else if(image.bits == 16){
+                        image_format = DXGI_FORMAT_R16G16B16A16_UINT;
+                    }
+                }
+
+                material.texture_desc.format     = image_format;
+                material.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
+                material.texture_desc.pixel_size = image.component * image.bits / 8;
+
+                material.cpu_texture_data.alloc(image.image.size());
+                memcpy(material.cpu_texture_data.ptr, &image.image.at(0), image.image.size());// * image.component * (image.bits / 8));
+                
+            }
+        }
+    }
 }
 
 void D_Renderer::load_gltf_model(D_Model& d_model, const char* filename){
@@ -277,7 +329,88 @@ void D_Renderer::load_gltf_model(D_Model& d_model, const char* filename){
     for(u64 i = 0; i < scene.nodes.size(); i++){
         load_model_nodes(d_model, tg_model, tg_model.nodes[scene.nodes[i]]);
     }
+    load_materials(d_model, tg_model);
 
+}
+
+void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_model){
+
+    // Strategy: Each mesh gets it's own vertex buffer?
+
+    //////////////////////
+    // Model Buffers
+    //////////////////////
+
+    // For each primitive group
+    for(u64 i = 0; i < test_model.meshes.nitems; i++){
+        D_Mesh* mesh = test_model.meshes.ptr + i;
+        for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
+            D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
+
+            // Vertex buffer
+            Buffer_Desc vertex_buffer_desc = {};
+            vertex_buffer_desc.number_of_elements = primitive_group->verticies.nitems;
+            vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Color_Texcoord);
+            vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
+
+            primitive_group->vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", vertex_buffer_desc);
+
+            command_list->load_buffer(primitive_group->vertex_buffer, (u8*)primitive_group->verticies.ptr, primitive_group->verticies.nitems * sizeof(Vertex_Position_Color_Texcoord), sizeof(Vertex_Position_Color_Texcoord));//Fix: sizeof(Vertex_Position_Color));
+
+            // Index Buffer
+            Buffer_Desc index_buffer_desc = {};
+            index_buffer_desc.number_of_elements = primitive_group->indicies.nitems;
+            index_buffer_desc.size_of_each_element = sizeof(u16);
+            index_buffer_desc.usage = Buffer::USAGE::USAGE_INDEX_BUFFER;
+
+            primitive_group->index_buffer = resource_manager.create_buffer(L"Index Buffer", index_buffer_desc);
+
+            command_list->load_buffer(primitive_group->index_buffer, (u8*)primitive_group->indicies.ptr, primitive_group->indicies.nitems * sizeof(u16), sizeof(u16));//Fix: sizeof(Vertex_Position_Color));
+            
+        }
+    }
+
+    // Textures
+    for(u32 material_index = 0; material_index < test_model.materials.nitems; material_index++){
+
+        D_Material& material = test_model.materials.ptr[material_index];
+
+        // Texture
+        material.texture = resource_manager.create_texture(L"Sampled_Texture", material.texture_desc);
+
+        //upload_command_list->load_texture_from_file(sampled_texture, L"C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\Default_albedo.jpg");
+        if(material.cpu_texture_data.ptr){
+            command_list->load_decoded_texture_from_memory(material.texture, material.cpu_texture_data);
+        }
+
+    }
+}
+
+void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model){
+
+    DirectX::XMMATRIX model_matrix = DirectX::XMMatrixIdentity();
+    DirectX::XMMATRIX translation_matrix = DirectX::XMMatrixTranslation(model->coords.x, model->coords.y, model->coords.z);
+    model_matrix = DirectX::XMMatrixMultiply(translation_matrix, DirectX::XMMatrixIdentity());
+    command_list->bind_constant_arguments(&model_matrix, sizeof(DirectX::XMMATRIX) / 4, "model_matrix");
+
+    for(u64 i = 0; i < model->meshes.nitems; i++){
+        D_Mesh* mesh = model->meshes.ptr + i;
+        for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
+            D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
+
+            // Bind the buffers to the command list somewhere in the root signature
+            command_list->bind_vertex_buffer(primitive_group->vertex_buffer, 0);
+            command_list->bind_index_buffer(primitive_group->index_buffer);
+
+            // Shortcut to tell if we have a texture TODO: make more robust
+            if(primitive_group->material_index >= 0){
+                command_list->bind_texture(model->materials.ptr[primitive_group->material_index].texture, &resource_manager, "albedo_texture");
+            }
+
+            // Dont think this is how draw should work, create a draw command struct to pass...
+            command_list->draw(primitive_group->indicies.nitems);
+        }
+    }
 }
 
 /*
@@ -301,9 +434,26 @@ void D_Renderer::shutdown(){
     }
 
     ds->d_dx12_release();
-    sampled_texture->d_dx12_release();
-    vertex_buffer->d_dx12_release();
+    //sampled_texture->d_dx12_release();
+    //vertex_buffer->d_dx12_release();
     constant_buffer->d_dx12_release();
+
+    // Release model resources
+    D_Model* model = &models.ptr[0];
+    for(u64 i = 0; i < model->meshes.nitems; i++){
+        D_Mesh* mesh = model->meshes.ptr + i;
+        for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
+            D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
+
+            primitive_group->index_buffer->d_dx12_release();
+            primitive_group->vertex_buffer->d_dx12_release();
+
+        }
+    }
+    for(u32 i = 0; i < model->materials.nitems; i++){
+        model->materials.ptr[i].texture->d_dx12_release();
+    }
+
 
     // Releases DirectX 12 objects in library 
     d_dx12_shutdown();
@@ -416,6 +566,21 @@ int D_Renderer::init(){
 
     shader_desc.parameter_list.push_back(albedo_texture);
 
+    // Model Matrix
+    Shader_Desc::Parameter model_matrix;
+    model_matrix.name                   = "model_matrix";
+    model_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+    model_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
+    shader_desc.parameter_list.push_back(model_matrix);
+
+    // View Matrix
+    Shader_Desc::Parameter view_projection_matrix;
+    view_projection_matrix.name                   = "view_projection_matrix";
+    view_projection_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+    view_projection_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
+
+    shader_desc.parameter_list.push_back(view_projection_matrix);
+
     //
     // Input Layout
     // 
@@ -486,37 +651,14 @@ int D_Renderer::init(){
     D_Model& test_model = renderer.models.ptr[0];
 
     //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\BoxVertexColors\\glTF\\BoxVertexColors.gltf");
-    load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\DamagedHelmet.gltf");
+    //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\DamagedHelmet.gltf");
 
     // GLtf Loading is broken..
-    //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\Sponza\\glTF\\Sponza.gltf");
+    load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\Sponza\\glTF\\Sponza.gltf");
+    upload_model_to_gpu(upload_command_list, test_model);
 
     // Doesn't work because of load_buffer error:..
     //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\SciFiHelmet\\glTF\\SciFiHelmet.gltf");
-
-    //////////////////////
-    // Model Buffers
-    //////////////////////
-
-    // Vertex buffer
-    Buffer_Desc vertex_buffer_desc = {};
-    vertex_buffer_desc.number_of_elements = test_model.verticies.nitems;
-    vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Color_Texcoord);
-    vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
-
-    vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", vertex_buffer_desc);
-
-    upload_command_list->load_buffer(vertex_buffer, (u8*)test_model.verticies.ptr, test_model.verticies.nitems * sizeof(Vertex_Position_Color_Texcoord), sizeof(Vertex_Position_Color_Texcoord));//Fix: sizeof(Vertex_Position_Color));
-
-    // Index Buffer
-    Buffer_Desc index_buffer_desc = {};
-    index_buffer_desc.number_of_elements = test_model.indicies.nitems;
-    index_buffer_desc.size_of_each_element = sizeof(u16);
-    index_buffer_desc.usage = Buffer::USAGE::USAGE_INDEX_BUFFER;
-
-    index_buffer = resource_manager.create_buffer(L"Index Buffer", index_buffer_desc);
-
-    upload_command_list->load_buffer(index_buffer, (u8*)test_model.indicies.ptr, test_model.indicies.nitems * sizeof(u16), sizeof(u16));//Fix: sizeof(Vertex_Position_Color));
 
     // Constant Buffer
     Buffer_Desc cbuffer_desc = {};
@@ -536,12 +678,10 @@ int D_Renderer::init(){
     texture_desc.usage = Texture::USAGE::USAGE_SAMPLED;
     */
 
-    sampled_texture = resource_manager.create_texture(L"Sampled_Texture", models.ptr[0].texture_desc);
-
-    //upload_command_list->load_texture_from_file(sampled_texture, L"C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\Default_albedo.jpg");
-    if(models.ptr[0].texture.ptr){
-        upload_command_list->load_decoded_texture_from_memory(sampled_texture, models.ptr[0].texture);
-    }
+    // Camera
+    camera.eye_direction = DirectX::XMVectorSet(0., -.25, -1., 0.);
+    camera.eye_position  = DirectX::XMVectorSet(0., 5., 0., 0.);
+    camera.up_direction  = DirectX::XMVectorSet(0., 1., 0., 0.);
 
     ///////////////////////
     // DearIMGUI
@@ -597,38 +737,6 @@ void D_Renderer::render(){
     
     // Resets command list, command allocator, and online cbv_srv_uav descriptor heap in resource manager
     command_list->reset();
-    // Fill the command list:
-    command_list->set_shader(shader);
-
-    // Transition the RT
-    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-    command_list->set_render_targets(rt[current_backbuffer_index], ds);
-
-    // Clear the render target and depth stencil
-    //FLOAT clear_color[] = {0.9f, float(current_backbuffer_index), 0.7f, 1.0f};
-    FLOAT clear_color[] = {0.2f, 0.2, 0.7f, 1.0f};
-
-    command_list->clear_render_target(rt[current_backbuffer_index], clear_color);
-    command_list->clear_depth_stencil(ds, 1.0f);
-
-    // Bind the buffers to the command list somewhere in the root signature
-    command_list->bind_vertex_buffer(vertex_buffer, 0);
-    command_list->bind_index_buffer(index_buffer);
-
-    // Can't use shader parameters that are optimized out
-    //command_list->bind_buffer(constant_buffer, &resource_manager, "color_buffer");
-
-    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    // vickylovesyou!!
-    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-    if(models.ptr[0].texture.ptr){
-        command_list->bind_texture(sampled_texture, &resource_manager, "albedo_texture");
-    }
-
-    // Dont think this is how draw should work, create a draw command struct to pass...
-    command_list->draw(renderer.models.ptr[0].indicies.nitems);
 
     //////////////////////
     /// Dear IMGUI
@@ -647,8 +755,53 @@ void D_Renderer::render(){
     ImGui::Begin("Info");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
+    ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
     ImGui::End();
     ImGui::Render();
+
+    //////////////////////
+    /// Update Camera Matricies
+    //////////////////////
+
+    DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
+    
+    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(100), display_width / display_height, 0.1f, 1000.0f);
+    //DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveLH(display_width, display_height, 0.1f, 100.0f);
+    //DirectX::XMMATRIX model_matrix = DirectX::XMMatrixIdentity();
+    //DirectX::XMMATRIX translate_matrix = DirectX::XMMatrixTranslation(renderer.models.ptr[0].coords.x, renderer.models.ptr[0].coords.y, renderer.models.ptr[0].coords.z);
+    //DirectX::XMMATRIX mvp_matrix = projection_matrix * view_matrix * (translate_matrix * model_matrix);
+    DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
+
+    //////////////////////
+    /// The scene
+    //////////////////////
+
+    // Fill the command list:
+    command_list->set_shader(shader);
+
+    // Transition the RT
+    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    command_list->set_render_targets(rt[current_backbuffer_index], ds);
+
+    // Clear the render target and depth stencil
+    //FLOAT clear_color[] = {0.9f, float(current_backbuffer_index), 0.7f, 1.0f};
+    FLOAT clear_color[] = {0.2f, 0.2, 0.7f, 1.0f};
+
+    command_list->clear_render_target(rt[current_backbuffer_index], clear_color);
+    command_list->clear_depth_stencil(ds, 1.0f);
+
+
+    // Can't use shader parameters that are optimized out
+    //command_list->bind_buffer(constant_buffer, &resource_manager, "color_buffer");
+
+    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    // vickylovesyou!!
+    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, "view_projection_matrix");
+    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+    
+    // Render ImGui on top of everything
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
 
     // Transition RT to presentation state

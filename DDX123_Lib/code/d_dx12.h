@@ -203,6 +203,7 @@ namespace d_dx12 {
         u16  height;
         u16  pixel_size;
         DXGI_FORMAT format;
+        wchar_t* name = NULL;
 
     };
 
@@ -220,8 +221,8 @@ namespace d_dx12 {
         Descriptor_Handle                         online_descriptor_handle;
         D3D12_RESOURCE_STATES                     state;
         USAGE usage                             = USAGE_NONE;
-        u16 number_of_elements;
-        u16 size_of_each_element;
+        u64 number_of_elements;
+        u64 size_of_each_element;
         wchar_t*                                  name;
         union{
 
@@ -237,8 +238,8 @@ namespace d_dx12 {
     struct Buffer_Desc {
 
         Buffer::USAGE usage = Buffer::USAGE::USAGE_NONE; 
-        u16 number_of_elements;
-        u16 size_of_each_element;
+        u64 number_of_elements;
+        u64 size_of_each_element;
 
     };
 
@@ -277,6 +278,7 @@ namespace d_dx12 {
         void bind_index_buffer(Buffer* buffer);
         void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, std::string binding_point);
         void bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point);
+        void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, std::string parameter_name);
         Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
         void set_shader(Shader* shader);
         void set_render_targets(Texture* rt, Texture* ds);

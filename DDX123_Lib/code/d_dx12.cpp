@@ -945,10 +945,10 @@ namespace d_dx12 {
         // Create descriptor heaps (For DSV and RTV)
         rtv_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 16);
         dsv_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 16);
-        offline_cbv_srv_uav_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 100);
+        offline_cbv_srv_uav_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 200);
         for(int i = 0; i < NUM_BACK_BUFFERS; i++){
 
-            online_cbv_srv_uav_descriptor_heap[i].init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 100, true);
+            online_cbv_srv_uav_descriptor_heap[i].init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 200, true);
         }
 
     }
@@ -957,7 +957,7 @@ namespace d_dx12 {
     Texture* Resource_Manager::create_texture(wchar_t* name, Texture_Desc& desc){
         Texture* texture = new Texture;
         texture->usage = desc.usage;
-        texture->name  = name;
+        texture->name  = desc.name;
 
         switch(desc.usage){
             case(Texture::USAGE::USAGE_RENDER_TARGET):
@@ -1171,7 +1171,7 @@ namespace d_dx12 {
 
     void Upload_Buffer::init(){
 
-        capacity = _64MB;
+        capacity = _64MB * 2 * 2 * 2 * 2;
         size     = 0;
         offset   = 0;
 
@@ -1572,6 +1572,26 @@ namespace d_dx12 {
 
         return online_descriptor_handle;
 
+    }
+
+    void Command_List::bind_constant_arguments(void* data, u16 num_32bit_values_to_set, std::string parameter_name){
+        // TODO...
+        if(this->type == D3D12_COMMAND_LIST_TYPE_DIRECT){
+
+            Shader::Binding_Point* binding_point = &this->current_bound_shader->binding_points[parameter_name];
+            u32 root_signature_index = binding_point->root_signature_index;
+
+            d3d12_command_list->SetGraphicsRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);
+
+        } else if(this->type == D3D12_COMMAND_LIST_TYPE_COMPUTE){
+
+            Shader::Binding_Point* binding_point = &this->current_bound_shader->binding_points[parameter_name];
+            u32 root_signature_index = binding_point->root_signature_index;
+
+            d3d12_command_list->SetComputeRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);
+        } else {
+            OutputDebugString("Error (set_inline_constants): Cannot set inline constants for this command list type");
+        }
     }
 
     void Command_List::set_shader(Shader* shader){

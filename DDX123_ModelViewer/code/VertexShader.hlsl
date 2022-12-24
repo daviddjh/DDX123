@@ -1,6 +1,6 @@
-struct ModelViewProjection
+struct ViewProjection
 {
-    matrix MVP;
+    matrix VP;
 };
 
 struct Model
@@ -10,6 +10,9 @@ struct Model
 
 //ConstantBuffer<Model> ModelCB : register(b0);
 //ConstantBuffer<ModelViewProjection> ModelViewProjectionCB : register(b0);
+
+ConstantBuffer<ViewProjection> view_projection_matrix: register(b1);
+ConstantBuffer<Model> model_matrix:                    register(b2);
 
 struct VertexPosColor
 {
@@ -48,8 +51,10 @@ VertexShaderOutput main(VertexPosColorTexture IN)
 {
     VertexShaderOutput OUT;
 
-    //OUT.Position = mul(ModelViewProjectionCB.MVP, float4(IN.Position, 1.0f));
-    OUT.Position          = float4(IN.Position, 1.0f);
+    // I think this is right..
+    matrix mvp_matrix     = mul(view_projection_matrix.VP, model_matrix.M);
+    // I think this is right..
+    OUT.Position          = mul(mvp_matrix, float4(IN.Position, 1.0));
     OUT.Color             = IN.Color;
     OUT.TextureCoordinate = IN.texCoord;
 
