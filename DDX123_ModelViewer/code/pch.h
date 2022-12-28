@@ -1,3 +1,5 @@
+#pragma once
+
 #ifdef  _DEBUG
 #define _CRTDBG_MAP_ALLOC //to get more details
 #endif

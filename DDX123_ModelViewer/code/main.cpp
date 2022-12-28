@@ -1,52 +1,21 @@
 #include "pch.h"
+#include "main.h"
+
 #include "d_dx12.h"
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"
 
-#define TINYGLTF_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "tiny_gltf.h"
-
 #include <chrono>
+
+#include "model.h"
 
 using namespace d_dx12;
 using namespace d_std;
-namespace tg = tinygltf;
 
 #define BUFFER_OFFSET(i) ((char *)0 + (i))
-
-struct Vertex_Position_Color_Texcoord {
-    DirectX::XMFLOAT3 position;
-    DirectX::XMFLOAT3 color;
-    DirectX::XMFLOAT2 texture_coordinates;
-};
-
-struct D_Material {
-    Span<u8>  cpu_texture_data;
-    Texture_Desc texture_desc;
-    Texture* texture;
-};
-
-struct D_Primitive_Group {
-    D3D_PRIMITIVE_TOPOLOGY primitive_topology;
-    Span<Vertex_Position_Color_Texcoord> verticies;
-    Span<u16> indicies;
-    u16 material_index = -1;
-    Buffer* vertex_buffer;
-    Buffer* index_buffer;
-};
-
-struct D_Mesh {
-    Span<D_Primitive_Group> primitive_groups;
-};
-
-struct D_Model {
-    Span<D_Material> materials;
-    Span<D_Mesh> meshes;
-    DirectX::XMFLOAT3 coords;
-};
+// Sets window, rendertargets to 4k resolution
+#define d_4k
 
 struct D_Camera {
     DirectX::XMVECTOR eye_position;
@@ -70,7 +39,6 @@ struct D_Renderer {
     d_dx12::Descriptor_Handle imgui_font_handle;
     bool fullscreen_mode = false;
     RECT window_rect;
-    tg::TinyGLTF loader;
     Span<D_Model> models;
     D_Camera camera;
 
@@ -78,7 +46,6 @@ struct D_Renderer {
     void render();
     void shutdown();
     void toggle_fullscreen();
-    void load_gltf_model(D_Model& d_model, const char* filename);
     void upload_model_to_gpu(Command_List* command_list, D_Model& test_model);
     void bind_and_draw_model(Command_List* command_list, D_Model* model);
 
@@ -94,248 +61,20 @@ double *tick_list = NULL;
 
 /*******************/
 
+#ifdef d_4k
+u16 display_width  = 3840;
+u16 display_height = 2160;
+#else
 u16 display_width  = 1920;
 u16 display_height = 1080;
+#endif
+
 bool using_v_sync = false;
-
-
-
-/*
-*   Load a gltf model
-*/
-
-void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
-
-    #if 0
-    u8* buffer_arrays[100] = {NULL};
-
-    // Loop threw buffer views
-    for(u64 i = 0; i < tg_model.bufferViews.size(); i++){
-
-        // The buffer view were looking at
-        const tg::BufferView &buffer_view = tg_model.bufferViews[i];
-
-        char* out_buffer = (char*)calloc(500, sizeof(char));
-        sprintf(out_buffer, "Buffer View: %d, byte length: %d, byte offset: %d\n", i, buffer_view.byteLength, buffer_view.byteOffset);
-        OutputDebugString(out_buffer);
-        free(out_buffer);
-
-        // The buffer our buffer view is referencing
-        const tg::Buffer &buffer = tg_model.buffers[buffer_view.buffer];
-
-        // Copy over our data from the buffer
-        buffer_arrays[i] = (u8*)malloc(sizeof(u8) * buffer_view.byteLength);
-        memccpy(buffer_arrays[i], &buffer.data.at(0) + buffer_view.byteOffset, 0, buffer_view.byteLength);
-
-        #if 0 
-        for(u64 j = 0; j < buffer_view.byteLength; j++){
-
-            char* out_buffer = (char*)calloc(500, sizeof(char));
-            sprintf(out_buffer, "j: %d : data: %u\n", j, buffer_arrays[i][j]);
-            OutputDebugString(out_buffer);
-            free(out_buffer);
-
-        }
-        #endif
-
-    }
-    #endif
-
-    // Allocate and loop through array of meshes
-    d_model.meshes.alloc(tg_model.meshes.size());
-    for(u64 mesh_index = 0; mesh_index < d_model.meshes.nitems; mesh_index++){
-
-        D_Mesh* mesh = d_model.meshes.ptr + mesh_index;
-        tg::Mesh tg_mesh = tg_model.meshes[mesh_index];
-
-        // Allocate and loop through array of primative groups
-        mesh->primitive_groups.alloc(tg_mesh.primitives.size());
-        for(u64 primative_group_index = 0; primative_group_index < mesh->primitive_groups.nitems; primative_group_index++){
-
-            D_Primitive_Group* primative_group = mesh->primitive_groups.ptr + primative_group_index;
-            tg::Primitive primitive = tg_mesh.primitives[primative_group_index];
-
-            // Fill primative group
-
-            /////////////////////
-            // Indicies
-            /////////////////////
-            {
-                // Get Indicies accessor
-                tg::Accessor index_accessor = tg_model.accessors[primitive.indices];
-                // Get the buffer fiew our accessor references
-                const tg::BufferView &buffer_view = tg_model.bufferViews[index_accessor.bufferView];
-                // The buffer our buffer view is referencing
-                const tg::Buffer &buffer = tg_model.buffers[buffer_view.buffer];
-                // Alloc mem for indicies
-                int index_byte_stride = index_accessor.ByteStride(buffer_view);
-                primative_group->indicies.alloc(index_accessor.count);
-
-                // copy over indicies
-                for(u64 i = 0; i < index_accessor.count; i++){
-                    // WARNING: u16* would need to change with different sizes / byte_strides of indicies
-                    //primative_group->indicies.ptr[i] = ((u16*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
-                    primative_group->indicies.ptr[i] = ((u16*)(&buffer.data.at(0) + index_accessor.byteOffset))[i];
-                }
-            }
-
-            /////////////////////////
-            // Primitive attributes
-            /////////////////////////
-            {
-                // Find position attribute and allocate memory
-                for (auto &attribute : primitive.attributes){
-                    if(attribute.first.compare("POSITION") == 0){
-                        tg::Accessor accessor = tg_model.accessors[attribute.second];
-                        primative_group->verticies.alloc(accessor.count, sizeof(Vertex_Position_Color_Texcoord));
-                    }
-                }
-
-                // For each attribute our mesh has
-                for (auto &attribute : primitive.attributes){
-                    // Get the accessor for our attribute
-                    tg::Accessor accessor = tg_model.accessors[attribute.second];
-                    // Get the buffer fiew our accessor references
-                    const tg::BufferView &buffer_view = tg_model.bufferViews[accessor.bufferView];
-                    // The buffer our buffer view is referencing
-                    const tg::Buffer &buffer = tg_model.buffers[buffer_view.buffer];
-
-                    int byte_stride = accessor.ByteStride(buffer_view);
-                    int size = 1;
-                    if(accessor.type != TINYGLTF_TYPE_SCALAR){
-                        size = accessor.type;
-                    }
-                    
-                    if(attribute.first.compare("POSITION") == 0){
-                        for(int i = 0; i < primative_group->verticies.nitems; i++){
-                            primative_group->verticies.ptr[i].position = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
-                            primative_group->verticies.ptr[i].position.z = -primative_group->verticies.ptr[i].position.z;
-                        }
-                    } else if(attribute.first.compare("NORMAL") == 0){
-                        // Normals not yet supported
-                    } else if(attribute.first.compare("TEXCOORD_0") == 0){
-                        for(int i = 0; i < primative_group->verticies.nitems; i++){
-                            primative_group->verticies.ptr[i].texture_coordinates = ((DirectX::XMFLOAT2*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
-                            // Dx12 UV is different than OpenGL / GLTF
-                            //primative_group->verticies.ptr[i].texture_coordinates.y = 1 - primative_group->verticies.ptr[i].texture_coordinates.y;
-                        }
-                    } else if(attribute.first.compare("COLOR_0") == 0){
-                        for(int i = 0; i < primative_group->verticies.nitems; i++){
-                            primative_group->verticies.ptr[i].color = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
-                        }
-                    }
-
-                    char* out_buffer = (char*)calloc(500, sizeof(char));
-                    sprintf(out_buffer, "attribute.first: %s size: %u, count: %u, accessor.componentType: %u, accessor.normalized: %u, byteStride: %u, byteOffset: %u\n", attribute.first.c_str(), size, buffer_view.byteLength / byte_stride, accessor.componentType, accessor.normalized, byte_stride, BUFFER_OFFSET(accessor.byteOffset));
-                    OutputDebugString(out_buffer);
-                    free(out_buffer);
-
-                    //d_model.verticies.alloc(, sizeof(Vertex_Position_Color_Texcoord));
-                }
-            }
-            primative_group->material_index = primitive.material;
-        }
-    }
-}
-
-void load_model_nodes(D_Model& d_model, tg::Model& tg_model, tg::Node& node){
-
-    if(node.mesh > -1 && node.mesh < tg_model.meshes.size()){
-        load_mesh(d_model, tg_model, tg_model.meshes[node.mesh]);
-    }
-
-    for(u64 i = 0; i < node.children.size(); i++){
-        load_model_nodes(d_model, tg_model, tg_model.nodes[node.children[i]]);
-    }
-
-}
-
-void load_materials(D_Model& d_model, tg::Model& tg_model){
-
-    if(tg_model.textures.size() > 0){
-
-        d_model.materials.alloc(tg_model.materials.size());
-
-        for(u16 j = 0; j < tg_model.materials.size(); j++){
-
-            u32 texture_index = tg_model.materials[j].pbrMetallicRoughness.baseColorTexture.index;
-            tg::Texture &tex = tg_model.textures[texture_index];
-            D_Material &material = d_model.materials.ptr[j];
-
-            if(tex.source >= 0){
-                tg::Image &image = tg_model.images[tex.source];
-
-                material.texture_desc.width = image.width;
-                material.texture_desc.height = image.height;
-
-                DXGI_FORMAT image_format = DXGI_FORMAT_UNKNOWN;
-                
-                if(image.component == 1){
-                    if(image.bits == 8){
-                        image_format = DXGI_FORMAT_R8_UINT;
-                    } else if(image.bits == 16){
-                        image_format = DXGI_FORMAT_R16_UINT;
-                    }
-                } else if (image.component == 2){
-                    if(image.bits == 8){
-                        image_format = DXGI_FORMAT_R8G8_UINT;
-                    } else if(image.bits == 16){
-                        image_format = DXGI_FORMAT_R16G16_UINT;
-                    }
-                } else if (image.component == 3){
-                    // ?
-                } else if (image.component == 4){
-                    if(image.bits == 8){
-                        image_format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                    } else if(image.bits == 16){
-                        image_format = DXGI_FORMAT_R16G16B16A16_UINT;
-                    }
-                }
-
-                material.texture_desc.format     = image_format;
-                material.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
-                material.texture_desc.pixel_size = image.component * image.bits / 8;
-
-                material.cpu_texture_data.alloc(image.image.size());
-                memcpy(material.cpu_texture_data.ptr, &image.image.at(0), image.image.size());// * image.component * (image.bits / 8));
-                
-            }
-        }
-    }
-}
-
-void D_Renderer::load_gltf_model(D_Model& d_model, const char* filename){
-
-    tg::Model tg_model;
-    std::string err;
-    std::string warn;
-    //const std::string model_name = "C:\\dev\\glTF-Sample-Models\\2.0\\BoxVertexColors\\glTF\\BoxVertexColors.gltf";
-    bool ret = loader.LoadASCIIFromFile(&tg_model, &err, &warn, filename);
-
-    if (!warn.empty()) {
-        printf("Warn: %s\n", warn.c_str());
-    }
-
-    if (!err.empty()) {
-        printf("Err: %s\n", err.c_str());
-    }
-
-    if (!ret) {
-        printf("Failed to parse glTF\n");
-        return;
-    }
-
-    const tg::Scene &scene = tg_model.scenes[tg_model.defaultScene];    
-    for(u64 i = 0; i < scene.nodes.size(); i++){
-        load_model_nodes(d_model, tg_model, tg_model.nodes[scene.nodes[i]]);
-    }
-    load_materials(d_model, tg_model);
-
-}
 
 void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_model){
 
     // Strategy: Each mesh gets it's own vertex buffer?
+    // Not good, but will do for now
 
     //////////////////////
     // Model Buffers
@@ -370,15 +109,17 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
         }
     }
 
-    // Textures
+    //////////////////////
+    // Model Buffers
+    //////////////////////
     for(u32 material_index = 0; material_index < test_model.materials.nitems; material_index++){
 
         D_Material& material = test_model.materials.ptr[material_index];
 
         // Texture
+        // TODO: This name is not useful, however I do not know how to handle wchar_t that resource needs, vs char that tinygltf gives me
         material.texture = resource_manager.create_texture(L"Sampled_Texture", material.texture_desc);
 
-        //upload_command_list->load_texture_from_file(sampled_texture, L"C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\Default_albedo.jpg");
         if(material.cpu_texture_data.ptr){
             command_list->load_decoded_texture_from_memory(material.texture, material.cpu_texture_data);
         }
@@ -486,20 +227,24 @@ double avg_ms_per_tick(double tick){
 */
 int D_Renderer::init(){
 
+    ////////////////////////////////
+    //   Initialize d_dx12 library
+    ////////////////////////////////
     window_rect = { 0, 0, display_width, display_height };
 
     // Need to call this before doing much else!
     d_dx12_init(hWnd, window_rect.right - window_rect.left, window_rect.bottom - window_rect.top);
 
-    /*
-     *   Create Resource Manager
-     */
+
+    ///////////////////////////////
+    //   Create Resource Manager
+    ///////////////////////////////
 
     resource_manager.init();
 
-    /*
-     *   Create Render Targets and Depth Stencil
-     */
+    ///////////////////////////////////////////////
+    //   Create Render Targets and Depth Stencil
+    ///////////////////////////////////////////////
 
     Texture_Desc rt_desc;
     rt_desc.usage = Texture::USAGE::USAGE_RENDER_TARGET;
@@ -517,33 +262,35 @@ int D_Renderer::init(){
 
     ds = resource_manager.create_texture(L"Depth Stencil", ds_desc);
 
-    // Set the current back buffer index
-	//current_back_buffer_index = display->d3d12_swap_chain->GetCurrentBackBufferIndex();
 
-    /*
-    *   Command Allocator and Command List
-    */
+    ///////////////////////////////////////////////
+    //  Create command allocators and command lists
+    ///////////////////////////////////////////////
 
-    // Create command allocators and command lists
     for(int i = 0; i < NUM_BACK_BUFFERS; i++){
         direct_command_lists[i] = create_command_list(&resource_manager, D3D12_COMMAND_LIST_TYPE_DIRECT);
     }
 
-    /*
-     *  Shader / PSO
-     */
+
+    //////////////////////////////////
+    //  Create our shader / PSO
+    //////////////////////////////////
 
     Shader_Desc shader_desc;
 
-    //
-    // Set compiled shader code
-    // 
+    //////////////////////////////////
+    //  Set compiled shader code
+    //////////////////////////////////
+
     shader_desc.vertex_shader = L"VertexShader.cso";
     shader_desc.pixel_shader  = L"PixelShader.cso";
 
-    //
+
+    //////////////////////////////////
+    //  Specify our shader Parameters
+    //////////////////////////////////
+
     // Sampler Parameter
-    //
     Shader_Desc::Parameter::Static_Sampler_Desc sampler_1_ssd;
     sampler_1_ssd.filter           = D3D12_FILTER_MIN_MAG_MIP_POINT;
     sampler_1_ssd.comparison_func  = D3D12_COMPARISON_FUNC_NEVER;
@@ -557,9 +304,7 @@ int D_Renderer::init(){
 
     shader_desc.parameter_list.push_back(sampler_1);
 
-    //
     // Texture Parameter
-    //
     Shader_Desc::Parameter albedo_texture;
     albedo_texture.name                = "albedo_texture";
     albedo_texture.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
@@ -581,86 +326,49 @@ int D_Renderer::init(){
 
     shader_desc.parameter_list.push_back(view_projection_matrix);
 
-    //
-    // Input Layout
-    // 
+    /////////////////
+    //  Input Layout
+    /////////////////
+
     shader_desc.input_layout.push_back({"POSITION", DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({"COLOR"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
 
-    //
-    // Create PSO using shader reflection
-    // 
+
+    /////////////////////////////////////////
+    //  Create PSO using shader reflection
+    /////////////////////////////////////////
+
     shader = create_shader(shader_desc);
 
-    /*
-     *  Upload Command_List
-     */
+
+    ////////////////////////////
+    //  Create our command list
+    ////////////////////////////
 
     Command_List* upload_command_list = create_command_list(&resource_manager, D3D12_COMMAND_LIST_TYPE_COPY);
     upload_command_list->reset();
 
-    /*
-     *  Upload our vertex buffer
-     */
+
+    //////////////////////////
+    //  Upload our GLTF Model
+    //////////////////////////
 
     // NOTE: DONT NEGLECT BACKSIDE CULLING (:
-    #if 0
-    Vertex_Position_Color_Texcoord verticies[6] = {
-        // BOTTOM
-        {
-            {1.00, -1.00, 0.0},
-            {0.0, 0.0, 1.0},
-            {0.0, 1.0},
-        },
-        {
-            
-            {-1.00, -1.00, 0.0},
-            {1.0, 0.0, 0.0},
-            {1.0, 1.0},
-        },
-        {
-            {-1.00, 1.00, 0.0},
-            {0.0, 1.0, 0.0},
-            {1.0, 0.0},
-        },
-        // TOP
-        {
-            {-1.00, 1.00, 0.0},
-            {0.0, 1.0, 0.0},
-            {1.0, 0.0},
-        },
-        {
-            {1.00, 1.00, 0.0},
-            {1.0, 0.0, 0.0},
-            {0.0, 0.0},
-        },
-        {
-            {1.00, -1.00, 0.0},
-            {0.0, 0.0, 1.0},
-            {0.0, 1.0},
-        }
-    };
-    #endif
-
-    ///////////////////////
-    // GLTF Model
-    ///////////////////////
 
     renderer.models.alloc(sizeof(D_Model), 1);
     D_Model& test_model = renderer.models.ptr[0];
 
     //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\BoxVertexColors\\glTF\\BoxVertexColors.gltf");
     //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\DamagedHelmet\\glTF\\DamagedHelmet.gltf");
-
-    // GLtf Loading is broken..
     load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\Sponza\\glTF\\Sponza.gltf");
     upload_model_to_gpu(upload_command_list, test_model);
 
-    // Doesn't work because of load_buffer error:..
-    //load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\SciFiHelmet\\glTF\\SciFiHelmet.gltf");
 
-    // Constant Buffer
+    ///////////////////////
+    //  Constant Buffer
+    ///////////////////////
+
     Buffer_Desc cbuffer_desc = {};
     cbuffer_desc.number_of_elements = 1;
     cbuffer_desc.size_of_each_element = sizeof(DirectX::XMFLOAT3);
@@ -672,19 +380,18 @@ int D_Renderer::init(){
 
     upload_command_list->load_buffer(constant_buffer, (u8*)&constant_buffer_data, sizeof(constant_buffer_data), 32);
 
-    // Texture Buffer
-    /*
-    Texture_Desc texture_desc = {};
-    texture_desc.usage = Texture::USAGE::USAGE_SAMPLED;
-    */
 
-    // Camera
+    ///////////////////////
+    //  Camera
+    ///////////////////////
+
     camera.eye_direction = DirectX::XMVectorSet(0., -.25, -1., 0.);
     camera.eye_position  = DirectX::XMVectorSet(0., 5., 0., 0.);
     camera.up_direction  = DirectX::XMVectorSet(0., 1., 0., 0.);
 
+
     ///////////////////////
-    // DearIMGUI
+    //  DearIMGUI
     ///////////////////////
 
     IMGUI_CHECKVERSION();
@@ -705,6 +412,11 @@ int D_Renderer::init(){
     upload_command_list->close();
     execute_command_list(upload_command_list);
     flush_gpu();
+
+
+    ////////////////
+    //  Finish init
+    ////////////////
 
     upload_command_list->d_dx12_release();
 
@@ -759,17 +471,13 @@ void D_Renderer::render(){
     ImGui::End();
     ImGui::Render();
 
-    //////////////////////
+    ////////////////////////////
     /// Update Camera Matricies
-    //////////////////////
+    ////////////////////////////
 
     DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
     
     DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(100), display_width / display_height, 0.1f, 1000.0f);
-    //DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveLH(display_width, display_height, 0.1f, 100.0f);
-    //DirectX::XMMATRIX model_matrix = DirectX::XMMatrixIdentity();
-    //DirectX::XMMATRIX translate_matrix = DirectX::XMMatrixTranslation(renderer.models.ptr[0].coords.x, renderer.models.ptr[0].coords.y, renderer.models.ptr[0].coords.z);
-    //DirectX::XMMATRIX mvp_matrix = projection_matrix * view_matrix * (translate_matrix * model_matrix);
     DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
 
     //////////////////////
@@ -785,12 +493,10 @@ void D_Renderer::render(){
     command_list->set_render_targets(rt[current_backbuffer_index], ds);
 
     // Clear the render target and depth stencil
-    //FLOAT clear_color[] = {0.9f, float(current_backbuffer_index), 0.7f, 1.0f};
     FLOAT clear_color[] = {0.2f, 0.2, 0.7f, 1.0f};
 
     command_list->clear_render_target(rt[current_backbuffer_index], clear_color);
     command_list->clear_depth_stencil(ds, 1.0f);
-
 
     // Can't use shader parameters that are optimized out
     //command_list->bind_buffer(constant_buffer, &resource_manager, "color_buffer");
