@@ -14,8 +14,9 @@ using namespace d_dx12;
 using namespace d_std;
 
 #define BUFFER_OFFSET(i) ((char *)0 + (i))
+
 // Sets window, rendertargets to 4k resolution
-#define d_4k
+//#define d_4k
 
 struct D_Camera {
     DirectX::XMVECTOR eye_position;
@@ -73,8 +74,10 @@ bool using_v_sync = false;
 
 void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_model){
 
-    // Strategy: Each mesh gets it's own vertex buffer?
+    // Strategy: Each primative group gets it's own vertex buffer?
     // Not good, but will do for now
+    // ... new stratagy, each mesh gets it's own buffer ..?
+    // ++
 
     //////////////////////
     // Model Buffers
@@ -82,35 +85,103 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
 
     // For each primitive group
     for(u64 i = 0; i < test_model.meshes.nitems; i++){
+
         D_Mesh* mesh = test_model.meshes.ptr + i;
+
+        // Get the number of verticies in this mesh
+        u64 number_of_verticies = 0;
+        u64 number_of_indicies  = 0;
         for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
+
+            D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
+            number_of_verticies +=  primitive_group->verticies.nitems;
+            number_of_indicies  +=  primitive_group->indicies.nitems;
+
+        }
+
+        // Allocate space for the draw calls
+        mesh->draw_calls.alloc(mesh->primitive_groups.nitems);
+
+        // Allocate cpu space for the verticies
+        Span<Vertex_Position_Color_Texcoord> verticies_buffer;
+        verticies_buffer.alloc(number_of_verticies);
+
+        // Copy the verticies in all primitive groups to this buffer
+        Vertex_Position_Color_Texcoord* start_vertex_ptr = verticies_buffer.ptr;
+        Vertex_Position_Color_Texcoord* current_vertex_ptr = start_vertex_ptr;
+
+        // Allocate cpu space for the indicies
+        Span<u16> indicies_buffer;
+        indicies_buffer.alloc(number_of_indicies);
+
+        // Copy the verticies in all primitive groups to this buffer
+        u16* start_index_ptr = indicies_buffer.ptr;
+        u16* current_index_ptr = start_index_ptr;
+
+        for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
+
+            // Get the primitive group
             D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
 
-            // Vertex buffer
-            Buffer_Desc vertex_buffer_desc = {};
-            vertex_buffer_desc.number_of_elements = primitive_group->verticies.nitems;
-            vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Color_Texcoord);
-            vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
+            // Copy the verticies
+            memcpy(current_vertex_ptr, primitive_group->verticies.ptr, primitive_group->verticies.nitems * sizeof(Vertex_Position_Color_Texcoord));
 
-            primitive_group->vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", vertex_buffer_desc);
+            // Copy the indicies
+            memcpy(current_index_ptr, primitive_group->indicies.ptr, primitive_group->indicies.nitems * sizeof(u16));
 
-            command_list->load_buffer(primitive_group->vertex_buffer, (u8*)primitive_group->verticies.ptr, primitive_group->verticies.nitems * sizeof(Vertex_Position_Color_Texcoord), sizeof(Vertex_Position_Color_Texcoord));//Fix: sizeof(Vertex_Position_Color));
+            // Update draw_call information
+            mesh->draw_calls.ptr[j].index_count    = primitive_group->indicies.nitems;
+            mesh->draw_calls.ptr[j].index_offset   = current_index_ptr - start_index_ptr;
+            mesh->draw_calls.ptr[j].vertex_offset  = current_vertex_ptr - start_vertex_ptr;
+            mesh->draw_calls.ptr[j].material_index = primitive_group->material_index;
 
-            // Index Buffer
-            Buffer_Desc index_buffer_desc = {};
-            index_buffer_desc.number_of_elements = primitive_group->indicies.nitems;
-            index_buffer_desc.size_of_each_element = sizeof(u16);
-            index_buffer_desc.usage = Buffer::USAGE::USAGE_INDEX_BUFFER;
-
-            primitive_group->index_buffer = resource_manager.create_buffer(L"Index Buffer", index_buffer_desc);
-
-            command_list->load_buffer(primitive_group->index_buffer, (u8*)primitive_group->indicies.ptr, primitive_group->indicies.nitems * sizeof(u16), sizeof(u16));//Fix: sizeof(Vertex_Position_Color));
+            // Update pointers
+            current_vertex_ptr += primitive_group->verticies.nitems;
+            current_index_ptr  += primitive_group->indicies.nitems;
             
         }
+
+        // Vertex buffer
+        Buffer_Desc vertex_buffer_desc = {};
+        vertex_buffer_desc.number_of_elements = verticies_buffer.nitems;
+        vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Color_Texcoord);
+        vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
+
+        mesh->vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", vertex_buffer_desc);
+
+        command_list->load_buffer(mesh->vertex_buffer, (u8*)verticies_buffer.ptr, verticies_buffer.nitems * sizeof(Vertex_Position_Color_Texcoord), sizeof(Vertex_Position_Color_Texcoord));//Fix: sizeof(Vertex_Position_Color));
+
+        #if 0
+        for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
+
+            D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
+
+            for(u64 k = 0; k < primitive_group->indicies.nitems; k++){
+                current_index_ptr[k] = primitive_group->indicies.ptr[k] + start_index_ptr[k + current_index_ptr - start_index_ptr];
+            }
+
+            memcpy(current_index_ptr, primitive_group->indicies.ptr, primitive_group->indicies.nitems);
+            current_index_ptr += primitive_group->verticies.nitems;
+            
+        }
+        #endif
+
+        // Index Buffer
+        Buffer_Desc index_buffer_desc = {};
+        index_buffer_desc.number_of_elements = indicies_buffer.nitems;
+        index_buffer_desc.size_of_each_element = sizeof(u16);
+        index_buffer_desc.usage = Buffer::USAGE::USAGE_INDEX_BUFFER;
+
+        mesh->index_buffer = resource_manager.create_buffer(L"Index Buffer", index_buffer_desc);
+
+        command_list->load_buffer(mesh->index_buffer, (u8*)indicies_buffer.ptr, indicies_buffer.nitems * sizeof(u16), sizeof(u16));
+
+        indicies_buffer.d_free();
+        verticies_buffer.d_free();
     }
 
     //////////////////////
-    // Model Buffers
+    //  Materials
     //////////////////////
     for(u32 material_index = 0; material_index < test_model.materials.nitems; material_index++){
 
@@ -136,6 +207,37 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
 
     for(u64 i = 0; i < model->meshes.nitems; i++){
         D_Mesh* mesh = model->meshes.ptr + i;
+
+        // Bind the buffers to the command list somewhere in the root signature
+        command_list->bind_vertex_buffer(mesh->vertex_buffer, 0);
+        command_list->bind_index_buffer(mesh->index_buffer);
+        
+        // For each draw call
+        for(u64 j = 0; j < mesh->draw_calls.nitems; j++){
+
+            D_Draw_Call draw_call = mesh->draw_calls.ptr[j];
+
+            D_Material material   = model->materials.ptr[draw_call.material_index];
+            command_list->bind_texture(material.texture, &resource_manager, "albedo_texture");
+
+            command_list->draw_indexed(draw_call.index_count, draw_call.index_offset, draw_call.vertex_offset);
+
+        }
+
+        #if 0
+        // Shortcut to tell if we have a texture TODO: make more robust
+        if(mesh->material_index >= 0){
+            command_list->bind_texture(model->materials.ptr[primitive_group->material_index].texture, &resource_manager, "albedo_texture");
+        }
+
+        // Dont think this is how draw should work, create a draw command struct to pass...
+        command_list->draw(primitive_group->indicies.nitems);
+        #endif
+    }
+
+    #if 0
+    for(u64 i = 0; i < model->meshes.nitems; i++){
+        D_Mesh* mesh = model->meshes.ptr + i;
         for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
             D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
 
@@ -152,6 +254,7 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             command_list->draw(primitive_group->indicies.nitems);
         }
     }
+    #endif
 }
 
 /*
@@ -181,18 +284,19 @@ void D_Renderer::shutdown(){
 
     // Release model resources
     D_Model* model = &models.ptr[0];
+
     for(u64 i = 0; i < model->meshes.nitems; i++){
+
         D_Mesh* mesh = model->meshes.ptr + i;
-        for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
-            D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
+        mesh->index_buffer->d_dx12_release();
+        mesh->vertex_buffer->d_dx12_release();
 
-            primitive_group->index_buffer->d_dx12_release();
-            primitive_group->vertex_buffer->d_dx12_release();
-
-        }
     }
+
     for(u32 i = 0; i < model->materials.nitems; i++){
+
         model->materials.ptr[i].texture->d_dx12_release();
+
     }
 
 

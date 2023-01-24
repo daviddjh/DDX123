@@ -1,3 +1,22 @@
+1/23/2023
+
+Todo:
+1. Copy over code from DavidDx12_2 for controls (WASD - Movement, Right Mouse + Drag - Rotate)
+2. Implement Lighting! ( Problably something simple at first, first big goal being PBR with IBL )
+
+Figured out a way to handle the transparent pixels in a texture. I just "discarded" the pixel if it's
+alpha was less than 1. I guess this means it's depth was not written to the depth buffer because the
+primitives behind it started appering. This is not the best solution, but it will work for now!
+
+1/22/2023
+
+Meshes now have a single vertex and a single index buffer. They have an array of draw calls that track
+the vertex and index offsets to use when making the d3d12 draw call.
+
+Got a blending state set up for alpha to work properly, now dont know what to do about the z depth for
+alpha blended pixels. Depending on draw order, primitives at an alpha pixel could get depth compared out,
+so nothing is drawn behind the alpha pixel anymore.
+
 12/23/2022
 
 Sponza is rendering correctly with textures! Had to flip texture coordinate back to default for sponza to 

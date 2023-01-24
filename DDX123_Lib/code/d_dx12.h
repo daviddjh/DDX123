@@ -285,6 +285,7 @@ namespace d_dx12 {
         void set_shader(Shader* shader);
         void set_render_targets(Texture* rt, Texture* ds);
         void draw(u32 number_of_verticies);
+        void draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset);
         void d_dx12_release();
 
     };

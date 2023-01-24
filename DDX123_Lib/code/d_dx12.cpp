@@ -518,10 +518,13 @@ namespace d_dx12 {
         *   Set pipeline state object
         */
 
+
+
         struct PipelineStateStream {
             CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE pRootSignature;
             CD3DX12_PIPELINE_STATE_STREAM_INPUT_LAYOUT InputLayout;
             CD3DX12_PIPELINE_STATE_STREAM_PRIMITIVE_TOPOLOGY PrimitiveTopologyType;
+            CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC blend_desc;
             CD3DX12_PIPELINE_STATE_STREAM_VS VS;
             CD3DX12_PIPELINE_STATE_STREAM_PS PS;
             CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
@@ -554,14 +557,37 @@ namespace d_dx12 {
         ThrowIfFailed(D3DReadFileToBlob(desc.vertex_shader, &d3d12_vertex_shader_blob));
         ThrowIfFailed(D3DReadFileToBlob(desc.pixel_shader, &d3d12_pixel_shader_blob));
 
+        // Create Blend Desc
+        CD3DX12_BLEND_DESC alpha_blend_desc;
+        alpha_blend_desc.AlphaToCoverageEnable = false;
+        alpha_blend_desc.IndependentBlendEnable = false;
+
+        // Learned from: https://wickedengine.net/2017/10/22/which-blend-state-for-me/
+        D3D12_RENDER_TARGET_BLEND_DESC render_target_blend_desc;
+        render_target_blend_desc.BlendEnable   = true;
+        render_target_blend_desc.LogicOpEnable = false;
+        render_target_blend_desc.SrcBlend  = D3D12_BLEND_SRC_ALPHA;
+        render_target_blend_desc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+        render_target_blend_desc.BlendOp   = D3D12_BLEND_OP_ADD;
+        render_target_blend_desc.SrcBlendAlpha  = D3D12_BLEND_ONE;
+        render_target_blend_desc.DestBlendAlpha = D3D12_BLEND_ONE;
+        render_target_blend_desc.BlendOpAlpha   = D3D12_BLEND_OP_ADD;
+        render_target_blend_desc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+        for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
+            alpha_blend_desc.RenderTarget[ i ] = render_target_blend_desc;
+        
+
         // Describe PSO
         pipelineStateStream.pRootSignature        = shader->d3d12_root_signature.Get();
         pipelineStateStream.InputLayout           = { input_layout.data(), (u16)input_layout.size() };
         pipelineStateStream.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        pipelineStateStream.blend_desc            = alpha_blend_desc;
         pipelineStateStream.VS                    = CD3DX12_SHADER_BYTECODE(d3d12_vertex_shader_blob.Get());
         pipelineStateStream.PS                    = CD3DX12_SHADER_BYTECODE(d3d12_pixel_shader_blob.Get());
         pipelineStateStream.DSVFormat             = DXGI_FORMAT_D32_FLOAT;   // Hopefully a good default!
         pipelineStateStream.RTVFormats            = rtvFormats;
+
 
         // Create PSO
         D3D12_PIPELINE_STATE_STREAM_DESC pipelineStateStreamDesc = {
@@ -1610,6 +1636,10 @@ namespace d_dx12 {
 
     void Command_List::draw(u32 number_of_indicies){
         d3d12_command_list->DrawIndexedInstanced(number_of_indicies, 1, 0, 0, 0); 
+    }
+
+    void Command_List::draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset){
+        d3d12_command_list->DrawIndexedInstanced(index_count, 1, index_offset, vertex_offset, 0); 
     }
 
     void present(bool using_v_sync){

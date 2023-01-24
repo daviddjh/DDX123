@@ -21,6 +21,7 @@ tg::TinyGLTF model_loader;
 *   Loads a mesh from the tg_model
 *   Stores Indicies and Verticies (Primitive attributes)
 *   Currently only supports POSITION, TEXCOORD_0, and COLOR_0
+*   Loads to CPU memory only!
 */
 void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
 
