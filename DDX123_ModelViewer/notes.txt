@@ -1,3 +1,11 @@
+1/24/2023
+
+Todo:
+1. Copy over code from DavidDx12_2 for controls (Mouse Capture - Rotate)
+2. Implement Lighting! ( Problably something simple at first, first big goal being PBR with IBL )
+
+Got the camera translating on a single plane with WASD, now we need mouse + rotation controls!
+
 1/23/2023
 
 Todo:

@@ -12,6 +12,7 @@
 
 using namespace d_dx12;
 using namespace d_std;
+using namespace DirectX;
 
 #define BUFFER_OFFSET(i) ((char *)0 + (i))
 
@@ -22,6 +23,7 @@ struct D_Camera {
     DirectX::XMVECTOR eye_position;
     DirectX::XMVECTOR eye_direction;
     DirectX::XMVECTOR up_direction;
+    float speed = 1;
 };
 
 // Global Vars, In order of creation
@@ -572,6 +574,7 @@ void D_Renderer::render(){
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
     ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
+    ImGui::SliderFloat("Camera Speed", &camera.speed, 0.0, 10.0);
     ImGui::End();
     ImGui::Render();
 
@@ -685,6 +688,108 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             }
             break;
 
+#if 0
+			case WM_LBUTTONDOWN:
+			{
+				MouseButtonEventArgs args = { DH_MOUSE_BUTTON_L };
+				game_ptr->OnMouseButtonPressed(args);
+			}
+				break;
+
+			case WM_LBUTTONUP:
+			{
+				MouseButtonEventArgs args = { DH_MOUSE_BUTTON_L | DH_MOUSE_BUTTON_UP };
+				game_ptr->OnMouseButtonPressed(args);
+			}
+				break;
+
+			case WM_MOUSEMOVE:
+			{
+				MouseMotionEventArgs args = {
+					GET_X_LPARAM(lParam),
+					GET_Y_LPARAM(lParam)
+				};
+				game_ptr->OnMouseMoved(args);
+			}
+				break;
+
+			case WM_KEYDOWN:
+			{
+				bool alt = (::GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+				switch (wParam) {
+				case VK_ESCAPE:
+				case 'W':
+				case 'A':
+				case 'S':
+				case 'D':
+				{
+					KeyEventArgs args = { alt, wParam };
+					game_ptr->OnKeyPressed(args);
+				}
+				break;
+				case 'V':
+					GraphicsCore::m_Vsync = !GraphicsCore::m_Vsync;
+					break;
+				case VK_RETURN:
+					if (alt)
+					{
+				case VK_F11:
+					GraphicsCore::SetFullscreen(!GraphicsCore::m_Fullscreen);
+					}
+					break;
+				 }
+			}
+			break;
+#endif
+
+			case WM_KEYDOWN:
+			{
+				bool alt = (::GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+				switch (wParam) {
+                    case VK_ESCAPE:
+                    case 'W':
+                    {
+                        // Translate the camera forward
+                        float speed = renderer.camera.speed;
+                        XMVECTOR translation_vector = XMVectorMultiply(XMVector3Normalize(renderer.camera.eye_direction), XMVectorSet(speed, speed, speed, 0));
+                        renderer.camera.eye_position = XMVectorAdd(renderer.camera.eye_position, translation_vector);
+                        io.AddInputCharacter(wParam);
+                    }
+                    break;
+                    case 'A':
+                    {
+                        // Translate the camera to the left
+                        float speed = -renderer.camera.speed;
+                        XMVECTOR translation_vector = XMVectorMultiply(XMVector3Normalize(XMVector3Cross(renderer.camera.eye_direction, renderer.camera.up_direction)), XMVectorSet(speed, speed, speed, 0));
+                        renderer.camera.eye_position = XMVectorAdd(renderer.camera.eye_position, translation_vector);
+                        io.AddInputCharacter(wParam);
+                    }
+                    break;
+                    case 'S':
+                    {
+                        // Translate the camera backwards
+                        float speed = -renderer.camera.speed;
+                        XMVECTOR translation_vector = XMVectorMultiply(XMVector3Normalize(renderer.camera.eye_direction), XMVectorSet(speed, speed, speed, 0));
+                        renderer.camera.eye_position = XMVectorAdd(renderer.camera.eye_position, translation_vector);
+                        io.AddInputCharacter(wParam);
+                    }
+                    break;
+                    case 'D':
+                    {
+                        // Translate the camera to the left
+                        float speed = renderer.camera.speed; 
+                        XMVECTOR translation_vector = XMVectorMultiply(XMVector3Normalize(XMVector3Cross(renderer.camera.eye_direction, renderer.camera.up_direction)), XMVectorSet(speed, speed, speed, 0));
+                        renderer.camera.eye_position = XMVectorAdd(renderer.camera.eye_position, translation_vector);
+                        io.AddInputCharacter(wParam);
+                    }
+                    break;
+
+                    case 'V':
+                        using_v_sync = !using_v_sync;
+                    break;
+                }
+            }
+			break;
             // Mouse movement
             
             case(WM_MOVE): 
