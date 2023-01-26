@@ -216,7 +216,7 @@ namespace d_dx12 {
             break;
             case(Texture::USAGE::USAGE_NONE):
             default:
-                OutputDebugString("Error (create_texture): Invalid Texture Usage");
+                OutputDebugString("Error (Texture::resize): Invalid Texture Usage");
                 DEBUG_BREAK;
         }
 

@@ -23,7 +23,7 @@ struct D_Camera {
     DirectX::XMVECTOR eye_position;
     DirectX::XMVECTOR eye_direction;
     DirectX::XMVECTOR up_direction;
-    float speed = 1;
+    float speed = 8;
 };
 
 // Global Vars, In order of creation
@@ -73,6 +73,7 @@ u16 display_height = 1080;
 #endif
 
 bool using_v_sync = false;
+bool capturing_mouse = false;
 
 void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_model){
 
@@ -225,38 +226,7 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             command_list->draw_indexed(draw_call.index_count, draw_call.index_offset, draw_call.vertex_offset);
 
         }
-
-        #if 0
-        // Shortcut to tell if we have a texture TODO: make more robust
-        if(mesh->material_index >= 0){
-            command_list->bind_texture(model->materials.ptr[primitive_group->material_index].texture, &resource_manager, "albedo_texture");
-        }
-
-        // Dont think this is how draw should work, create a draw command struct to pass...
-        command_list->draw(primitive_group->indicies.nitems);
-        #endif
     }
-
-    #if 0
-    for(u64 i = 0; i < model->meshes.nitems; i++){
-        D_Mesh* mesh = model->meshes.ptr + i;
-        for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
-            D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
-
-            // Bind the buffers to the command list somewhere in the root signature
-            command_list->bind_vertex_buffer(primitive_group->vertex_buffer, 0);
-            command_list->bind_index_buffer(primitive_group->index_buffer);
-
-            // Shortcut to tell if we have a texture TODO: make more robust
-            if(primitive_group->material_index >= 0){
-                command_list->bind_texture(model->materials.ptr[primitive_group->material_index].texture, &resource_manager, "albedo_texture");
-            }
-
-            // Dont think this is how draw should work, create a draw command struct to pass...
-            command_list->draw(primitive_group->indicies.nitems);
-        }
-    }
-    #endif
 }
 
 /*
@@ -573,8 +543,8 @@ void D_Renderer::render(){
     ImGui::Begin("Info");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
-    ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
-    ImGui::SliderFloat("Camera Speed", &camera.speed, 0.0, 10.0);
+    //ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
+    //ImGui::SliderFloat("Camera Speed", &camera.speed, 0.0, 10.0);
     ImGui::End();
     ImGui::Render();
 
@@ -584,7 +554,7 @@ void D_Renderer::render(){
 
     DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
     
-    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(100), display_width / display_height, 0.1f, 1000.0f);
+    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(100), display_width / display_height, 0.1f, 2500.0f);
     DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
 
     //////////////////////
@@ -661,8 +631,15 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             //case(WM_SYSKEYDOWN):
             case(WM_LBUTTONDOWN):
             {
-                if (!io.WantCaptureMouse){
+                if (!capturing_mouse && !io.WantCaptureMouse) {
+                    SetCapture(hWnd);
+                    ShowCursor(false);
 
+                    // These window rects should be saved
+                    RECT window_rect;
+                    GetWindowRect(hWnd, &window_rect);
+                    SetCursorPos((window_rect.left + window_rect.right) / 2, (window_rect.top + window_rect.bottom) / 2);
+                    capturing_mouse = true;
                 } else {
                     io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
                 }
@@ -679,14 +656,37 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             }
             break;
 
-            case(WM_MOUSEMOVE):
-            {
-                if (!io.WantCaptureMouse){
+			case WM_MOUSEMOVE:
+			{
 
+				int mouse_x = GET_X_LPARAM(lParam);
+			    int mouse_y = GET_Y_LPARAM(lParam);
+
+                if (capturing_mouse && !io.WantCaptureMouse) {
+
+                    // These window rects should be saved
+                    RECT window_rect;
+                    GetWindowRect(hWnd, &window_rect);
+
+                    POINT transformed_mouse_cord = { mouse_x, mouse_y };
+                    ClientToScreen(hWnd, &transformed_mouse_cord);
+
+                    int delta_x = transformed_mouse_cord.x - ((window_rect.left + window_rect.right) / 2);
+                    int delta_y = transformed_mouse_cord.y - ((window_rect.top + window_rect.bottom) / 2);
+
+                    // Move coursor to center of the screen
+                    SetCursorPos((window_rect.left + window_rect.right) / 2, (window_rect.top + window_rect.bottom) / 2);
+
+                    // Rotate the camera
+                    XMVECTOR camera_x_axis        = XMVector3Normalize(XMVector3Cross(renderer.camera.eye_direction, renderer.camera.up_direction));
+                    XMMATRIX rotation_matrix      = XMMatrixMultiply(DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(0, 1, 0, 0), (float)-delta_x / 100.), DirectX::XMMatrixRotationAxis(camera_x_axis, (float)(-delta_y) / 100.));
+                    renderer.camera.eye_direction = XMVector3Normalize(XMVector3Transform(renderer.camera.eye_direction, rotation_matrix));
                 }
-                io.AddMousePosEvent(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-            }
-            break;
+
+                io.AddMousePosEvent(mouse_x, mouse_y);
+
+			}
+				break;
 
 #if 0
 			case WM_LBUTTONDOWN:
@@ -746,7 +746,6 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			{
 				bool alt = (::GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
 				switch (wParam) {
-                    case VK_ESCAPE:
                     case 'W':
                     {
                         // Translate the camera forward
@@ -781,6 +780,16 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                         XMVECTOR translation_vector = XMVectorMultiply(XMVector3Normalize(XMVector3Cross(renderer.camera.eye_direction, renderer.camera.up_direction)), XMVectorSet(speed, speed, speed, 0));
                         renderer.camera.eye_position = XMVectorAdd(renderer.camera.eye_position, translation_vector);
                         io.AddInputCharacter(wParam);
+                    }
+                    break;
+
+                    case VK_ESCAPE:
+                    {
+                        if (capturing_mouse) {
+                            ReleaseCapture();
+                            ShowCursor(true);
+                            capturing_mouse = false;
+                        }
                     }
                     break;
 
