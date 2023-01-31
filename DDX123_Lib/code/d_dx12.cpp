@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "d_dx12.h"
 #include "WICTextureLoader.h"
+#include "DirectXTex.h"
 
 #define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
 
@@ -8,6 +9,7 @@
 #define USING_WARP 0
 
 using namespace d_std;
+using namespace DirectX;
 
 namespace d_dx12 {
 
@@ -1273,7 +1275,128 @@ namespace d_dx12 {
 
         if(data.ptr){
 
-            // TODO: create the commited resource!
+            HRESULT hr;
+
+            u64 row_pitch = texture->width * texture->pixel_size;
+            u64 slice_pitch = texture->height * row_pitch;
+
+            // Create a DirectxTex texture for our image
+            Image base_texture;
+            base_texture.format     = texture->format;
+            base_texture.height     = texture->height;
+            base_texture.width      = texture->width;
+            base_texture.rowPitch   = row_pitch;
+            base_texture.slicePitch = slice_pitch;
+            base_texture.pixels     = data.ptr;
+
+            // Create a DirectXTex Scratch image for our image
+            ScratchImage base_scratch_image;
+            hr = GenerateMipMaps(base_texture, TEX_FILTER_DEFAULT, 0, base_scratch_image);
+            if(FAILED(hr)){
+                OutputDebugString("Error (load_decoded_texture_from_memory): Error when creating mip_chain");
+                DEBUG_BREAK;
+            }
+
+            hr = CreateTexture(d3d12_device.Get(), base_scratch_image.GetMetadata(), texture->d3d12_resource.GetAddressOf());
+            if(FAILED(hr)){
+                OutputDebugString("Error (load_decoded_texture_from_memory): Error when creating texture resource");
+                DEBUG_BREAK;
+            }
+
+            std::vector<D3D12_SUBRESOURCE_DATA> subresources;
+            hr = PrepareUpload(d3d12_device.Get(), base_scratch_image.GetImages(), 
+                base_scratch_image.GetImageCount(), base_scratch_image.GetMetadata(), subresources);
+            if(FAILED(hr)){
+                OutputDebugString("Error (load_decoded_texture_from_memory): Error preparing for texture upload");
+                DEBUG_BREAK;
+            }
+
+            const u64 upload_buffer_size = GetRequiredIntermediateSize(texture->d3d12_resource.Get(), 0, subresources.size());
+
+            Upload_Buffer::Allocation upload_allocation = upload_buffer.allocate(upload_buffer_size, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+
+            UpdateSubresources(this->d3d12_command_list.Get(),
+                texture->d3d12_resource.Get(), upload_allocation.d3d12_resource.Get(),
+                upload_allocation.resource_offset, 0, static_cast<unsigned int>(subresources.size()),
+                subresources.data());
+            
+            // Remap after Update Subresources unmaps
+            upload_buffer.d3d12_resource->Map(0, &CD3DX12_RANGE(0, upload_buffer.capacity), (void**)&(upload_buffer.start_cpu));
+
+            /*
+            // Problems because it Maps and Unmaps
+            UpdateSubresources(
+                this->d3d12_command_list.Get(),
+                texture->d3d12_resource.Get(),
+                upload_allocation.d3d12_resource.Get(), 
+                upload_allocation.resource_offset,
+                0,
+                subresources.size(),
+                subresources.data()
+            );
+            */
+
+            #if 0
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
+            UINT row_count;
+            UINT64 row_size;
+            UINT64 size;
+            d3d12_device->GetCopyableFootprints(&texture->d3d12_resource->GetDesc(), 0, 1, 0,
+                                            &footprint, &row_count, &row_size, &size);
+
+            for(u64 i = 0; i < row_count; i++){
+
+                memcpy(upload_allocation.cpu_addr + row_size * i, data.ptr + texture->width * texture->pixel_size * i, texture->width * texture->pixel_size);
+
+            }
+
+            // Describe the destination location of the texture
+            CD3DX12_TEXTURE_COPY_LOCATION copy_dest(texture->d3d12_resource.Get(), 0);
+
+            // Describes a subresource within a parent
+            D3D12_SUBRESOURCE_FOOTPRINT texture_footprint = {};
+            texture_footprint.Format = footprint.Footprint.Format;
+            texture_footprint.Width = footprint.Footprint.Width;
+            texture_footprint.Height = footprint.Footprint.Height;
+            texture_footprint.Depth = 1;
+            //
+            // !!!!
+            // TODO: texture_footprint.RowPitch breaks if the image width isn't a multiple of 256. How do we fix this??
+            // !!!!
+            //
+            texture_footprint.RowPitch = footprint.Footprint.RowPitch;
+
+            // Describes a PLACED subresource within a parent. Note: Offset
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT placed_pitched_desc = {};
+            placed_pitched_desc.Offset = upload_allocation.resource_offset;
+            placed_pitched_desc.Footprint = texture_footprint;
+
+            // Describes the copy source of the texture.
+            // This would be the upload allocation we made in the Upload Buffer,
+            // plus an offset into the upload buffer resource.
+            CD3DX12_TEXTURE_COPY_LOCATION copy_src(upload_allocation.d3d12_resource.Get(), placed_pitched_desc);
+
+            // Copies the texture from the upload buffer into the commited resource created in LoadWICTextureFromFile
+            d3d12_command_list->CopyTextureRegion(
+                &copy_dest,
+                0, 0, 0,
+                &copy_src,
+                nullptr
+            );
+            #endif
+            
+            TexMetadata final_tex_metadata = base_scratch_image.GetMetadata();
+            D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+            srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            srv_desc.Format = final_tex_metadata.format;
+            // Only works for 2d textures currently
+            srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            srv_desc.Texture2D.MipLevels = final_tex_metadata.mipLevels;
+
+            d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srv_desc, texture->offline_descriptor_handle.cpu_descriptor_handle);
+
+#if 0
+
             D3D12_HEAP_PROPERTIES heap_properties = {};
             heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT;
             heap_properties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
@@ -1366,6 +1489,7 @@ namespace d_dx12 {
             srv_desc.Texture2D.MipLevels = 1;
 
             d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srv_desc, texture->offline_descriptor_handle.cpu_descriptor_handle);
+#endif
         }
 
         return;

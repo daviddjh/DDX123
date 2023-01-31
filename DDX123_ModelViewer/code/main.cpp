@@ -7,6 +7,7 @@
 #include "imgui_impl_dx12.h"
 
 #include <chrono>
+#include "timeapi.h"
 
 #include "model.h"
 
@@ -23,7 +24,8 @@ struct D_Camera {
     DirectX::XMVECTOR eye_position;
     DirectX::XMVECTOR eye_direction;
     DirectX::XMVECTOR up_direction;
-    float speed = 8;
+    float speed = 8.;
+    float fov   = 100.;
 };
 
 // Global Vars, In order of creation
@@ -368,7 +370,7 @@ int D_Renderer::init(){
 
     // Sampler Parameter
     Shader_Desc::Parameter::Static_Sampler_Desc sampler_1_ssd;
-    sampler_1_ssd.filter           = D3D12_FILTER_MIN_MAG_MIP_POINT;
+    sampler_1_ssd.filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
     sampler_1_ssd.comparison_func  = D3D12_COMPARISON_FUNC_NEVER;
     sampler_1_ssd.min_lod          = 0;
     sampler_1_ssd.max_lod          = D3D12_FLOAT32_MAX;
@@ -543,8 +545,9 @@ void D_Renderer::render(){
     ImGui::Begin("Info");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
-    //ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
-    //ImGui::SliderFloat("Camera Speed", &camera.speed, 0.0, 10.0);
+    ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
+    ImGui::SliderFloat("Camera Speed", &camera.speed, 0.0, 20.0);
+    ImGui::SliderFloat("Camera FOV", &camera.fov, 70.0, 130.0);
     ImGui::End();
     ImGui::Render();
 
@@ -554,7 +557,7 @@ void D_Renderer::render(){
 
     DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
     
-    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(100), display_width / display_height, 0.1f, 2500.0f);
+    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500.0f);
     DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
 
     //////////////////////
@@ -910,6 +913,7 @@ WinMain(HINSTANCE hInstance,
     *   docs.microsoft.com : Set the DPI awareness for the current thread to the provided value. 
     */
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    timeBeginPeriod(1);
 
     // Renderer Scope
     {

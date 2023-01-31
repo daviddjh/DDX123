@@ -1,4 +1,5 @@
 #include "model.h"
+#include "DirectXTex.h"
 
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
@@ -7,6 +8,7 @@
 
 namespace tg = tinygltf;
 using namespace d_dx12;
+using namespace DirectX;
 
 tg::TinyGLTF model_loader;
 
@@ -16,6 +18,34 @@ tg::TinyGLTF model_loader;
 *   Load a gltf model
 */
 
+#if 0
+bool load_image_function(tg::Image *tg_image, const int image_idx, std::string *err, std::string *warn,
+    int req_width, int req_height, const unsigned char *bytes, int size, void *user_data){
+
+    HRESULT hr;
+    
+    // Image name:
+    // tg_image.uri.c_str();
+
+    // Load to ScratchImage
+    // LoadFromWICMemory
+    ScratchImage* image = new ScratchImage();
+    TexMetadata  image_metadata;
+    hr = LoadFromWICMemory(bytes, size, WIC_FLAGS_ALL_FRAMES, &image_metadata, *image);
+    if(FAILED(hr)){
+        OutputDebugString("Error (load_image_function): Failed to load image.");
+    }
+
+    // GenerateMipChain
+    // GenerateMipMaps()
+
+    // Copy ScratchImage to image
+    tg_image->image.resize(sizeof(ScratchImage));
+    memcpy(tg_image->image.data(), (u8*)image, sizeof(ScratchImage));
+
+    return true;
+}
+#endif
 
 /*
 *   Loads a mesh from the tg_model

@@ -7,6 +7,7 @@
 #include "third_party/d3dx12.h"
 #include "dxgi1_6.h"
 #include <DirectXMath.h>
+#include "DirectXTex.h"
 #include <d3dcompiler.h>
 
 #include "d_include.h"

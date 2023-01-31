@@ -1,3 +1,16 @@
+1/30/2023
+
+Mipmapping is working! Works a little funky with the upload buffer and having to remap it
+after running UpdateSubresources. May want to implement the functionallity of UpdateSubresources
+directly. Also, I should compress the textures the same time I generate the mipchain. Then 
+save them and load them the next time they're needed.
+
+Todo:
+1. Start on lighting!
+2. Compress textures
+3. Save compressed mipchain for the next time the file needs to be loaded
+4. Better upload buffer system
+
 1/25/2023
 
 Added the mouse controls! Now I can move and look around Sponza. The textures are very distracting
