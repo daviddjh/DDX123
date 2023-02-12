@@ -226,7 +226,8 @@ namespace d_dx12 {
     }
 
     void Texture::d_dx12_release(){
-        d3d12_resource.Reset();
+        if(d3d12_resource)
+            d3d12_resource.Reset();
     }
 
     /*
@@ -906,9 +907,11 @@ namespace d_dx12 {
     */
 
     // Initializes a Descriptor Heap with size amount of descriptors
-    void Descriptor_Heap::init(D3D12_DESCRIPTOR_HEAP_TYPE type, u16 size, bool is_gpu_visible){
+    void Descriptor_Heap::init(D3D12_DESCRIPTOR_HEAP_TYPE type, u16 capacity, bool is_gpu_visible){
         
         // TODO: Should check the size here to ensure it's OK
+        this->size     = 0;
+        this->capacity = capacity;
 
         if(is_gpu_visible && (type == D3D12_DESCRIPTOR_HEAP_TYPE_DSV || type == D3D12_DESCRIPTOR_HEAP_TYPE_RTV)){
             OutputDebugString("Error(Descriptor_Heap::init) This Descriptor Heap type cannot be GPU visible");
@@ -921,7 +924,7 @@ namespace d_dx12 {
         // Create the heap
         D3D12_DESCRIPTOR_HEAP_DESC Descriptor_Heap_Desc = { };
         Descriptor_Heap_Desc.Type = type;
-        Descriptor_Heap_Desc.NumDescriptors = size;
+        Descriptor_Heap_Desc.NumDescriptors = this->capacity;
         if(is_gpu_visible) Descriptor_Heap_Desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         ThrowIfFailed(d3d12_device->CreateDescriptorHeap(&Descriptor_Heap_Desc, IID_PPV_ARGS(&d3d12_descriptor_heap)));
 
@@ -945,22 +948,31 @@ namespace d_dx12 {
     Descriptor_Handle Descriptor_Heap::get_next_handle(){
 
         // TODO: Check size/index before doing this? Don't go off the end, ring buffer?
+        if( this-> size < this->capacity){
 
-        if(d3d12_descriptor_heap == NULL){
-            OutputDebugString("Error (Descriptor_Heap::get_next_handle): The d3d12 Descriptor Heap hasn't been created yet");
+            if(d3d12_descriptor_heap == NULL){
+                OutputDebugString("Error (Descriptor_Heap::get_next_handle): The d3d12 Descriptor Heap hasn't been created yet");
+                DEBUG_BREAK;
+            }
+
+            Descriptor_Handle handle = {
+                next_cpu_descriptor_handle,
+                next_gpu_descriptor_handle,
+                this->type
+            };
+
+            this->size += 1;
+
+            next_cpu_descriptor_handle.Offset(descriptor_size);
+            if(is_gpu_visible) next_gpu_descriptor_handle.Offset(descriptor_size);
+
+            return handle;
+
+        } else {
+            OutputDebugString("Error (get_next_handle): No more handles left!");
             DEBUG_BREAK;
+            return { };
         }
-
-        Descriptor_Handle handle = {
-            next_cpu_descriptor_handle,
-            next_gpu_descriptor_handle,
-            this->type
-        };
-
-        next_cpu_descriptor_handle.Offset(descriptor_size);
-        if(is_gpu_visible) next_gpu_descriptor_handle.Offset(descriptor_size);
-
-        return handle;
 
     }
 
@@ -973,10 +985,11 @@ namespace d_dx12 {
         // Create descriptor heaps (For DSV and RTV)
         rtv_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 16);
         dsv_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 16);
-        offline_cbv_srv_uav_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 200);
+        offline_cbv_srv_uav_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 300);
         for(int i = 0; i < NUM_BACK_BUFFERS; i++){
 
-            online_cbv_srv_uav_descriptor_heap[i].init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 200, true);
+            online_cbv_srv_uav_descriptor_heap[i].init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 300, true);
+
         }
 
     }
@@ -1266,7 +1279,7 @@ namespace d_dx12 {
         d3d12_resource.Reset();
     }
 
-    void Command_List::load_decoded_texture_from_memory(Texture* texture, Span<u8> data){
+    void Command_List::load_decoded_texture_from_memory(Texture* texture, Span<u8> data, bool create_mipchain){
 
         if(texture->usage != Texture::USAGE::USAGE_SAMPLED){
             OutputDebugString("Error (load_texture_from_memory): Invalid Texture Usage");
@@ -1291,10 +1304,19 @@ namespace d_dx12 {
 
             // Create a DirectXTex Scratch image for our image
             ScratchImage base_scratch_image;
-            hr = GenerateMipMaps(base_texture, TEX_FILTER_DEFAULT, 0, base_scratch_image);
-            if(FAILED(hr)){
-                OutputDebugString("Error (load_decoded_texture_from_memory): Error when creating mip_chain");
-                DEBUG_BREAK;
+            if(create_mipchain){
+                hr = GenerateMipMaps(base_texture, TEX_FILTER_DEFAULT, 0, base_scratch_image);
+                if(FAILED(hr)){
+                    OutputDebugString("Error (load_decoded_texture_from_memory): Error when creating mip_chain");
+                    DEBUG_BREAK;
+                }
+            } else {
+                //base_scratch_image.InitializeFromImage(base_texture);
+                hr = GenerateMipMaps(base_texture, TEX_FILTER_DEFAULT, 2, base_scratch_image);
+                if(FAILED(hr)){
+                    OutputDebugString("Error (load_decoded_texture_from_memory): Error when creating mip_chain");
+                    DEBUG_BREAK;
+                }
             }
 
             hr = CreateTexture(d3d12_device.Get(), base_scratch_image.GetMetadata(), texture->d3d12_resource.GetAddressOf());
@@ -1780,6 +1802,7 @@ namespace d_dx12 {
 
         // Waits for the new current value to make sure the resources are ready to write to
         direct_command_queue.wait_for_fence_value(frame_fence_values[current_backbuffer_index]);
+        
 
     }
 

@@ -1,3 +1,19 @@
+2/08/2023
+
+Got Normal Mapping working. With the option to not use normal mapping. Currently working on 
+Phong shading. Only have ambient and diffuse. Diffuse is shading the wrong side of the triangles,
+which makes me think that something is wrong with the normal / light direction vector.
+
+For specular shading: need the view position. Thinking this should go in a global constant buffer
+with the light position.
+
+TODO:
+1. Debug diffuse lighting direction.
+2. Add view_pos and light_pos to global constant buffer
+3. Finish Phong shading
+4. Find the problems with performance! Loading and FPS! Not too much, but it seems light there could
+be some easy gains lurking
+
 1/30/2023
 
 Mipmapping is working! Works a little funky with the upload buffer and having to remap it

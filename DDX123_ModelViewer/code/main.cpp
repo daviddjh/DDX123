@@ -108,12 +108,12 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
         mesh->draw_calls.alloc(mesh->primitive_groups.nitems);
 
         // Allocate cpu space for the verticies
-        Span<Vertex_Position_Color_Texcoord> verticies_buffer;
+        Span<Vertex_Position_Normal_Tangent_Color_Texturecoord> verticies_buffer;
         verticies_buffer.alloc(number_of_verticies);
 
         // Copy the verticies in all primitive groups to this buffer
-        Vertex_Position_Color_Texcoord* start_vertex_ptr = verticies_buffer.ptr;
-        Vertex_Position_Color_Texcoord* current_vertex_ptr = start_vertex_ptr;
+        Vertex_Position_Normal_Tangent_Color_Texturecoord* start_vertex_ptr = verticies_buffer.ptr;
+        Vertex_Position_Normal_Tangent_Color_Texturecoord* current_vertex_ptr = start_vertex_ptr;
 
         // Allocate cpu space for the indicies
         Span<u16> indicies_buffer;
@@ -129,7 +129,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
             D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
 
             // Copy the verticies
-            memcpy(current_vertex_ptr, primitive_group->verticies.ptr, primitive_group->verticies.nitems * sizeof(Vertex_Position_Color_Texcoord));
+            memcpy(current_vertex_ptr, primitive_group->verticies.ptr, primitive_group->verticies.nitems * sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord));
 
             // Copy the indicies
             memcpy(current_index_ptr, primitive_group->indicies.ptr, primitive_group->indicies.nitems * sizeof(u16));
@@ -149,12 +149,12 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
         // Vertex buffer
         Buffer_Desc vertex_buffer_desc = {};
         vertex_buffer_desc.number_of_elements = verticies_buffer.nitems;
-        vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Color_Texcoord);
+        vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
         vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
 
         mesh->vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", vertex_buffer_desc);
 
-        command_list->load_buffer(mesh->vertex_buffer, (u8*)verticies_buffer.ptr, verticies_buffer.nitems * sizeof(Vertex_Position_Color_Texcoord), sizeof(Vertex_Position_Color_Texcoord));//Fix: sizeof(Vertex_Position_Color));
+        command_list->load_buffer(mesh->vertex_buffer, (u8*)verticies_buffer.ptr, verticies_buffer.nitems * sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord), sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord));//Fix: sizeof(Vertex_Position_Color));
 
         #if 0
         for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
@@ -192,14 +192,23 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
 
         D_Material& material = test_model.materials.ptr[material_index];
 
-        // Texture
+        // Albedo Texture
         // TODO: This name is not useful, however I do not know how to handle wchar_t that resource needs, vs char that tinygltf gives me
-        material.texture = resource_manager.create_texture(L"Sampled_Texture", material.texture_desc);
+        material.albedo_texture.texture = resource_manager.create_texture(L"Albedo_Texture", material.albedo_texture.texture_desc);
 
-        if(material.cpu_texture_data.ptr){
-            command_list->load_decoded_texture_from_memory(material.texture, material.cpu_texture_data);
+        if(material.albedo_texture.cpu_texture_data.ptr){
+            command_list->load_decoded_texture_from_memory(material.albedo_texture.texture, material.albedo_texture.cpu_texture_data, true);
         }
 
+        // Normal Map
+        // TODO: This name is not useful, however I do not know how to handle wchar_t that resource needs, vs char that tinygltf gives me
+        if(material.material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
+            material.normal_texture.texture = resource_manager.create_texture(L"Normal_Texture", material.normal_texture.texture_desc);
+
+            if(material.normal_texture.cpu_texture_data.ptr){
+                command_list->load_decoded_texture_from_memory(material.normal_texture.texture, material.normal_texture.cpu_texture_data, false);
+            }
+        }
     }
 }
 
@@ -223,7 +232,12 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             D_Draw_Call draw_call = mesh->draw_calls.ptr[j];
 
             D_Material material   = model->materials.ptr[draw_call.material_index];
-            command_list->bind_texture(material.texture, &resource_manager, "albedo_texture");
+            command_list->bind_constant_arguments(&material.material_flags, 1, "material_flags");
+
+            command_list->bind_texture(material.albedo_texture.texture, &resource_manager, "albedo_texture");
+
+            if(material.material_flags & MATERIAL_FLAG_NORMAL_TEXTURE)
+                command_list->bind_texture(material.normal_texture.texture, &resource_manager, "normal_texture");
 
             command_list->draw_indexed(draw_call.index_count, draw_call.index_offset, draw_call.vertex_offset);
 
@@ -269,7 +283,11 @@ void D_Renderer::shutdown(){
 
     for(u32 i = 0; i < model->materials.nitems; i++){
 
-        model->materials.ptr[i].texture->d_dx12_release();
+        if(model->materials.ptr[i].albedo_texture.texture)
+            model->materials.ptr[i].albedo_texture.texture->d_dx12_release();
+
+        if(model->materials.ptr[i].normal_texture.texture)
+            model->materials.ptr[i].normal_texture.texture->d_dx12_release();
 
     }
 
@@ -382,12 +400,28 @@ int D_Renderer::init(){
 
     shader_desc.parameter_list.push_back(sampler_1);
 
-    // Texture Parameter
+    // Albedo Texture Parameter
     Shader_Desc::Parameter albedo_texture;
     albedo_texture.name                = "albedo_texture";
     albedo_texture.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
 
     shader_desc.parameter_list.push_back(albedo_texture);
+
+    // Normal Texture Parameter
+    Shader_Desc::Parameter normal_texture;
+    normal_texture.name                = "normal_texture";
+    normal_texture.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
+
+    shader_desc.parameter_list.push_back(normal_texture);
+
+    // Material Flags
+    Shader_Desc::Parameter material_flags;
+    material_flags.name                   = "material_flags";
+    material_flags.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+    material_flags.number_of_32bit_values = 1;
+
+    shader_desc.parameter_list.push_back(material_flags);
+
 
     // Model Matrix
     Shader_Desc::Parameter model_matrix;
@@ -408,8 +442,10 @@ int D_Renderer::init(){
     //  Input Layout
     /////////////////
 
-    shader_desc.input_layout.push_back({"POSITION", DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"COLOR"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({"NORMAL"     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({"TANGENT"    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
 
 
@@ -545,9 +581,11 @@ void D_Renderer::render(){
     ImGui::Begin("Info");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
+    #if 0
     ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
     ImGui::SliderFloat("Camera Speed", &camera.speed, 0.0, 20.0);
     ImGui::SliderFloat("Camera FOV", &camera.fov, 70.0, 130.0);
+    #endif
     ImGui::End();
     ImGui::Render();
 
@@ -598,6 +636,9 @@ void D_Renderer::render(){
     execute_command_list(command_list);
 
     present(using_v_sync);
+    
+    // Reset online descriptor heaps
+    resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].size = 0;
 
 }
 

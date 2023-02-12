@@ -1,5 +1,4 @@
 #include "model.h"
-#include "DirectXTex.h"
 
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
@@ -101,7 +100,7 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
                 for (auto &attribute : primitive.attributes){
                     if(attribute.first.compare("POSITION") == 0){
                         tg::Accessor accessor = tg_model.accessors[attribute.second];
-                        primative_group->verticies.alloc(accessor.count, sizeof(Vertex_Position_Color_Texcoord));
+                        primative_group->verticies.alloc(accessor.count, sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord));
                     }
                 }
 
@@ -126,7 +125,15 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
                             primative_group->verticies.ptr[i].position.z = -primative_group->verticies.ptr[i].position.z;
                         }
                     } else if(attribute.first.compare("NORMAL") == 0){
-                        // Normals not yet supported
+                        for(int i = 0; i < primative_group->verticies.nitems; i++){
+                            primative_group->verticies.ptr[i].normal = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                            primative_group->verticies.ptr[i].normal.z = -primative_group->verticies.ptr[i].normal.z;
+                        }
+                    } else if(attribute.first.compare("TANGENT") == 0){
+                        for(int i = 0; i < primative_group->verticies.nitems; i++){
+                            primative_group->verticies.ptr[i].tangent = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                            primative_group->verticies.ptr[i].tangent.z = -primative_group->verticies.ptr[i].tangent.z;
+                        }
                     } else if(attribute.first.compare("TEXCOORD_0") == 0){
                         for(int i = 0; i < primative_group->verticies.nitems; i++){
                             primative_group->verticies.ptr[i].texture_coordinates = ((DirectX::XMFLOAT2*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
@@ -148,6 +155,63 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
 
                 }
             }
+
+            #if 0
+            for (int vertex_index = 0; vertex_index < primative_group->verticies.nitems; vertex_index++) {
+                DirectX::XMVECTOR tangent = DirectX::XMVectorZero();
+                DirectX::XMVECTOR bitangent = DirectX::XMVectorZero();
+                u32 triangles_included = 0;
+
+                for (u32 index = 0; index < primative_group->indicies.nitems; index += 3) {
+
+                    u32 index0 = primative_group->indicies.ptr[index];
+                    u32 index1 = primative_group->indicies.ptr[index + 1];
+                    u32 index2 = primative_group->indicies.ptr[index + 2];
+
+                    // Only calc if a index matches our vertex
+                    if (index0 == vertex_index || index1 == vertex_index || index2 == vertex_index) {
+                        DirectX::XMVECTOR vertex0_pos = DirectX::XMLoadFloat3(&primative_group->verticies.ptr[index0].position);
+                        DirectX::XMVECTOR vertex1_pos = DirectX::XMLoadFloat3(&primative_group->verticies.ptr[index1].position);
+                        DirectX::XMVECTOR vertex2_pos = DirectX::XMLoadFloat3(&primative_group->verticies.ptr[index2].position);
+
+                        DirectX::XMFLOAT2 vertex0_uv = primative_group->verticies.ptr[index0].texture_coordinates;
+                        DirectX::XMFLOAT2 vertex1_uv = primative_group->verticies.ptr[index1].texture_coordinates;
+                        DirectX::XMFLOAT2 vertex2_uv = primative_group->verticies.ptr[index2].texture_coordinates;
+
+                        DirectX::XMVECTOR delta_pos0;
+                        delta_pos0 = DirectX::XMVectorSubtract(vertex1_pos, vertex0_pos);
+
+                        DirectX::XMVECTOR delta_pos1;
+                        delta_pos1 = DirectX::XMVectorSubtract(vertex2_pos, vertex0_pos);
+
+                        DirectX::XMFLOAT2 delta_uv0;
+                        delta_uv0.x = vertex1_uv.x - vertex0_uv.x;
+                        delta_uv0.y = vertex1_uv.y - vertex0_uv.y;
+
+                        DirectX::XMFLOAT2 delta_uv1;
+                        delta_uv1.x = vertex2_uv.x - vertex0_uv.x;
+                        delta_uv1.y = vertex2_uv.y - vertex0_uv.y;
+
+                        float f = 1.0 / (delta_uv0.x * delta_uv1.y - delta_uv0.y * delta_uv1.x);
+                        tangent += (delta_uv1.y * delta_pos0 - delta_pos1 * delta_uv0.y) * f;
+                        bitangent += (delta_pos1 * delta_uv0.x - delta_pos0 * delta_uv1.x) * f;
+                        triangles_included += 1;
+                    }
+                }
+
+                if (triangles_included > 0) {
+                    tangent /= triangles_included;
+                    bitangent /= triangles_included;
+                    tangent = DirectX::XMVector3Normalize(tangent);
+                    bitangent = DirectX::XMVector3Normalize(bitangent);
+                }
+
+                XMStoreFloat3(&primative_group->verticies.ptr[vertex_index].tangent, tangent);
+                XMStoreFloat3(&primative_group->verticies.ptr[vertex_index].bitangent, bitangent);
+
+            }
+            #endif
+
             primative_group->material_index = primitive.material;
         }
     }
@@ -179,6 +243,10 @@ void load_materials(D_Model& d_model, tg::Model& tg_model){
         // Load each material from tg_model
         for(u16 j = 0; j < tg_model.materials.size(); j++){
 
+            /////////////////////
+            // Albedo Texture
+            /////////////////////
+
             // Here, we are only storing, and using, the base color texture
             u32 texture_index = tg_model.materials[j].pbrMetallicRoughness.baseColorTexture.index;
             tg::Texture &tex = tg_model.textures[texture_index];
@@ -192,8 +260,8 @@ void load_materials(D_Model& d_model, tg::Model& tg_model){
                 // Load the image corresponding to the texture
                 tg::Image &image = tg_model.images[tex.source];
 
-                material.texture_desc.width = image.width;
-                material.texture_desc.height = image.height;
+                material.albedo_texture.texture_desc.width = image.width;
+                material.albedo_texture.texture_desc.height = image.height;
 
                 DXGI_FORMAT image_format = DXGI_FORMAT_UNKNOWN;
                 
@@ -221,15 +289,75 @@ void load_materials(D_Model& d_model, tg::Model& tg_model){
                 }
 
                 // Store a description of the texture
-                material.texture_desc.format     = image_format;
-                material.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
-                material.texture_desc.pixel_size = image.component * image.bits / 8;
+                material.albedo_texture.texture_desc.format     = image_format;
+                material.albedo_texture.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
+                material.albedo_texture.texture_desc.pixel_size = image.component * image.bits / 8;
 
                 // Allocate enough room for the raw image data
-                material.cpu_texture_data.alloc(image.image.size());
+                material.albedo_texture.cpu_texture_data.alloc(image.image.size());
                 // Copy the raw image data over to d_model material j
-                memcpy(material.cpu_texture_data.ptr, &image.image.at(0), image.image.size());
+                memcpy(material.albedo_texture.cpu_texture_data.ptr, &image.image.at(0), image.image.size());
+
                 
+            }
+
+            /////////////////////
+            // Normal Map
+            /////////////////////
+
+            // Here, we are only storing, and using, the normal texture
+            texture_index = tg_model.materials[j].normalTexture.index;
+
+            // If the texture intex is valid (isn't when we don't have a normal texture)
+            if(texture_index != UINT_MAX){
+
+                tex = tg_model.textures[texture_index];
+
+                // Get reference to corresponding material in d_model
+                material = d_model.materials.ptr[j];
+                material.material_flags |= MATERIAL_FLAG_NORMAL_TEXTURE;
+
+                // Load the image corresponding to the texture
+                tg::Image &image = tg_model.images[tex.source];
+
+                material.normal_texture.texture_desc.width = image.width;
+                material.normal_texture.texture_desc.height = image.height;
+
+                DXGI_FORMAT image_format = DXGI_FORMAT_UNKNOWN;
+                
+                // Store the image_format
+                if(image.component == 1){
+                    if(image.bits == 8){
+                        image_format = DXGI_FORMAT_R8_UINT;
+                    } else if(image.bits == 16){
+                        image_format = DXGI_FORMAT_R16_UINT;
+                    }
+                } else if (image.component == 2){
+                    if(image.bits == 8){
+                        image_format = DXGI_FORMAT_R8G8_UINT;
+                    } else if(image.bits == 16){
+                        image_format = DXGI_FORMAT_R16G16_UINT;
+                    }
+                } else if (image.component == 3){
+                    // ?
+                } else if (image.component == 4){
+                    if(image.bits == 8){
+                        image_format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    } else if(image.bits == 16){
+                        image_format = DXGI_FORMAT_R16G16B16A16_UINT;
+                    }
+                }
+
+                // Store a description of the texture
+                material.normal_texture.texture_desc.format     = image_format;
+                material.normal_texture.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
+                material.normal_texture.texture_desc.pixel_size = image.component * image.bits / 8;
+
+                // Allocate enough room for the raw image data
+                material.normal_texture.cpu_texture_data.alloc(image.image.size());
+                // Copy the raw image data over to d_model material j
+                memcpy(material.normal_texture.cpu_texture_data.ptr, &image.image.at(0), image.image.size());
+                        
             }
         }
     }

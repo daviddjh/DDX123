@@ -2,6 +2,7 @@
 *.rdbg
 *.code-workspace
 *.cap
+*.10x
 
 # Build Extras
 *.asm

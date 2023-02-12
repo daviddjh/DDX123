@@ -144,7 +144,9 @@ namespace d_dx12 {
         CD3DX12_GPU_DESCRIPTOR_HANDLE                   next_gpu_descriptor_handle;
         D3D12_DESCRIPTOR_HEAP_TYPE                      type;
         u32                                             descriptor_size;
-        bool                                            is_gpu_visible;
+        bool      is_gpu_visible;
+        u16       size;           
+        u16       capacity; 
 
         void init(D3D12_DESCRIPTOR_HEAP_TYPE type, u16 size, bool is_gpu_visible = false);
         Descriptor_Handle get_next_handle();
@@ -183,7 +185,7 @@ namespace d_dx12 {
             USAGE_DEPTH_STENCIL
         };
 
-        Microsoft::WRL::ComPtr<ID3D12Resource>    d3d12_resource;
+        Microsoft::WRL::ComPtr<ID3D12Resource>    d3d12_resource = NULL;
         Descriptor_Handle                         offline_descriptor_handle;
         Descriptor_Handle                         online_descriptor_handle;
         D3D12_RESOURCE_STATES                     state;
@@ -274,7 +276,7 @@ namespace d_dx12 {
         void clear_depth_stencil(Texture* ds, const float depth);
         void load_buffer(Buffer* buffer, u8* data, u64 size, u64 alignment);
         void load_texture_from_file(Texture* texture, const wchar_t* filename);
-        void load_decoded_texture_from_memory(Texture* texture, d_std::Span<u8> data);
+        void load_decoded_texture_from_memory(Texture* texture, d_std::Span<u8> data, bool create_mipchain);
         void reset();
         void close();
         void bind_vertex_buffer(Buffer* buffer, u32 slot);

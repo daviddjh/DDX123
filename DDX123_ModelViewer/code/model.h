@@ -4,18 +4,31 @@
 #include "main.h"
 #include "d_dx12.h"
 
-struct D_Material {
+enum D_Material_Flags : u8{
+    MATERIAL_FLAG_NONE           = 0x0,
+    MATERIAL_FLAG_NORMAL_TEXTURE = 0x1
+};
+
+struct D_Texture {
 
     d_std::Span<u8>  cpu_texture_data;
     d_dx12::Texture_Desc texture_desc;
-    d_dx12::Texture* texture;
+    d_dx12::Texture* texture = NULL;
+
+};
+
+struct D_Material {
+
+    D_Texture albedo_texture;
+    D_Texture normal_texture;
+    u32        material_flags = MATERIAL_FLAG_NONE;
 
 };
 
 struct D_Primitive_Group {
 
     D3D_PRIMITIVE_TOPOLOGY primitive_topology;
-    d_std::Span<Vertex_Position_Color_Texcoord> verticies;
+    d_std::Span<Vertex_Position_Normal_Tangent_Color_Texturecoord> verticies;
     d_std::Span<u16> indicies;
     u16 material_index = -1;
 
