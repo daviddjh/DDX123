@@ -1,3 +1,4 @@
+#define Tex2DSpace space1
 
 #define MATERIAL_FLAG_NONE           0x0
 #define MATERIAL_FLAG_NORMAL_TEXTURE 0x1
@@ -10,11 +11,19 @@ struct Material_Flags {
     uint flags;
 };
 
+struct TextureIndex
+{
+    int i;
+};
+
 ConstantBuffer<Color_Buffer> color_buffer: register(b0);
-Texture2D albedo_texture : register(t0);
-Texture2D normal_texture : register(t1);
+Texture2D texture_2d_table[] : register(t0, Tex2DSpace);
+
 SamplerState sampler_1   : register(s0);
 ConstantBuffer<Material_Flags> material_flags: register(b3);
+
+ConstantBuffer<TextureIndex> albedo_index: register(b4);
+ConstantBuffer<TextureIndex> normal_index: register(b5);
 
 struct PixelShaderInput
 {
@@ -42,7 +51,7 @@ float4 main(PixelShaderInput IN) : SV_Target
     float2 UV;
     UV.x = IN.TextureCoordinate.x;
     UV.y = IN.TextureCoordinate.y;
-    float4 albedo_texture_color = albedo_texture.Sample(sampler_1, UV);
+    float4 albedo_texture_color = texture_2d_table[albedo_index.i].Sample(sampler_1, UV);
 
     // This is to discard transparent pixels in textures. See: Chains and foliage in GLTF2.0 Sponza
     if (albedo_texture_color.a < 0.5) {
@@ -52,7 +61,7 @@ float4 main(PixelShaderInput IN) : SV_Target
     float3 wNormal;
     if((material_flags.flags & MATERIAL_FLAG_NORMAL_TEXTURE)){
 
-        float3 normal_texture_color = normal_texture.Sample(sampler_1, UV).xyz;
+        float3 normal_texture_color = texture_2d_table[normal_index.i].Sample(sampler_1, UV).xyz;
         float3 tNormal = (normal_texture_color * 2.) - 1.;
         wNormal = mul(TBN, tNormal);
 

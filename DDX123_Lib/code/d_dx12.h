@@ -141,15 +141,21 @@ namespace d_dx12 {
 
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>    d3d12_descriptor_heap = NULL;
         CD3DX12_CPU_DESCRIPTOR_HANDLE                   next_cpu_descriptor_handle;
+        CD3DX12_CPU_DESCRIPTOR_HANDLE                   next_cpu_texture_descriptor_handle;
         CD3DX12_GPU_DESCRIPTOR_HANDLE                   next_gpu_descriptor_handle;
+        CD3DX12_GPU_DESCRIPTOR_HANDLE                   next_gpu_texture_descriptor_handle;
         D3D12_DESCRIPTOR_HEAP_TYPE                      type;
         u32                                             descriptor_size;
         bool      is_gpu_visible;
         u16       size;           
+        u16       texture_table_size;           
         u16       capacity; 
 
         void init(D3D12_DESCRIPTOR_HEAP_TYPE type, u16 size, bool is_gpu_visible = false);
         Descriptor_Handle get_next_handle();
+        Descriptor_Handle get_next_texture_handle();
+        Descriptor_Handle get_handle_by_index(u16 index);
+        void reset();
 
         void d_dx12_release();
     };
@@ -282,8 +288,9 @@ namespace d_dx12 {
         void bind_vertex_buffer(Buffer* buffer, u32 slot);
         void bind_index_buffer(Buffer* buffer);
         void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, std::string binding_point);
-        void bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point);
+        u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point);
         void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, std::string parameter_name);
+        void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, std::string binding_point);
         Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
         void set_shader(Shader* shader);
         void set_render_targets(Texture* rt, Texture* ds);

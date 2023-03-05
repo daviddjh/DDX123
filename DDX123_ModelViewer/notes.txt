@@ -1,3 +1,37 @@
+3/5/2023
+
+Got bindless textures working! Ended up storing texture descriptor indicies in texture struct temporarily.
+Switched to RTX 4080, getting 300+ FPS in debug mode. Fixed building for release and release debug symbol mode. 
+Getting 3000 - 4000 FPS in release mode! Not going to try an optimize any more at this time.
+
+Going to work on PBR and d_core at the same time. Starting on formated strings in d_core, although I found
+a memory bug.
+
+2/28/2023
+
+Began adding bindles textrues tonight. A bit sloppy. Don't really like how we're dividing up the descriptor
+heap by default for GPU visible heaps, because what if that changes in the future. Guess I will fix it then.
+Right now, we need to "bind" (copy descriptors over to texture section of online heap) all of the textures, then
+really bind the texture section of the online heap, then draw the model. Some problems are arising here, such as: 
+what happens when we have multiple models? How do we keep track of texture indicies after copying over all of the
+texture descriptors (need to supply that information per draw call)?
+
+2/12/2023
+
+Got phong shading working! Z axis flip got me tripped up again. Had to flip both normal and tangent.
+Now that the render is able to use mipmapping and phong shading, I will begin working on a base library
+for the application. Goal is to remove std lib stuff.
+
+TODO (start with):
+1. Memory Management - overall and per frame arenas
+2. String Strategy   - create new strings, format strings.. 
+3. Print Paths       - Debug print with formating options
+4. Containers        - Array, Map, any other container I need
+5. Profiling         - Replace chrono using custom solution
+
+In the future I could add more to this list, but I'd like to do all of these before I continue developing
+the renderer.
+
 2/08/2023
 
 Got Normal Mapping working. With the option to not use normal mapping. Currently working on 

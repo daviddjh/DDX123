@@ -219,28 +219,71 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
     model_matrix = DirectX::XMMatrixMultiply(translation_matrix, DirectX::XMMatrixIdentity());
     command_list->bind_constant_arguments(&model_matrix, sizeof(DirectX::XMMATRIX) / 4, "model_matrix");
 
+    // Begin by initializing each textures binding table index to an invalid value
+    for(u64 i = 0; i < model->materials.nitems; i++){
+        model->materials.ptr[i].albedo_texture.texture_binding_table_index = -1;
+        model->materials.ptr[i].normal_texture.texture_binding_table_index = -1;
+    }
+
+    // Then, we copy all the texture descriptors to the texture table in online_descriptor_heap
+    for(u64 i = 0; i < model->meshes.nitems; i++){
+        D_Mesh* mesh = model->meshes.ptr + i;
+
+        // For each draw call
+        for(u64 j = 0; j < mesh->draw_calls.nitems; j++){
+
+            D_Draw_Call draw_call = mesh->draw_calls.ptr[j];
+            
+            // Check if table index is < 0 (-1). Only bind albedo texture if it needs to be bound to avoid unncessary descriptor copies
+            if(model->materials.ptr[draw_call.material_index].albedo_texture.texture_binding_table_index < 0){
+                model->materials.ptr[draw_call.material_index].albedo_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].albedo_texture.texture, &resource_manager, "albedo_texture");
+            }
+
+            // If this material uses a normal map
+            if(model->materials.ptr[draw_call.material_index].material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
+
+                // Check if table index is < 0 (-1). Only bind albedo texture if it needs to be bound to avoid unncessary descriptor copies
+                if(model->materials.ptr[draw_call.material_index].normal_texture.texture_binding_table_index < 0){
+                    model->materials.ptr[draw_call.material_index].normal_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].normal_texture.texture, &resource_manager, "normal_texture");
+                }
+
+            }
+
+        }
+    }
+
+    // Now be bind the texture table to the root signature. 
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, "texture_2d_table");
+
     for(u64 i = 0; i < model->meshes.nitems; i++){
         D_Mesh* mesh = model->meshes.ptr + i;
 
         // Bind the buffers to the command list somewhere in the root signature
         command_list->bind_vertex_buffer(mesh->vertex_buffer, 0);
         command_list->bind_index_buffer(mesh->index_buffer);
-        
+
         // For each draw call
         for(u64 j = 0; j < mesh->draw_calls.nitems; j++){
 
             D_Draw_Call draw_call = mesh->draw_calls.ptr[j];
 
-            D_Material material   = model->materials.ptr[draw_call.material_index];
+            D_Material material = model->materials.ptr[draw_call.material_index];
             command_list->bind_constant_arguments(&material.material_flags, 1, "material_flags");
 
-            command_list->bind_texture(material.albedo_texture.texture, &resource_manager, "albedo_texture");
+            // Pass the index of the albedo texture in the texture table to the shader
+            command_list->bind_constant_arguments(&material.albedo_texture.texture_binding_table_index, 1, "albedo_index");
 
-            if(material.material_flags & MATERIAL_FLAG_NORMAL_TEXTURE)
-                command_list->bind_texture(material.normal_texture.texture, &resource_manager, "normal_texture");
+            if(material.material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
+
+                // Pass the index of the normal texture in the texture table to the shader
+                command_list->bind_constant_arguments(&material.normal_texture.texture_binding_table_index, 1, "normal_index");
+
+            }
 
             command_list->draw_indexed(draw_call.index_count, draw_call.index_offset, draw_call.vertex_offset);
 
+            draw_call.albedo_texture_index = -1;
+            draw_call.normal_texture_index = -1;
         }
     }
 }
@@ -400,19 +443,13 @@ int D_Renderer::init(){
 
     shader_desc.parameter_list.push_back(sampler_1);
 
-    // Albedo Texture Parameter
-    Shader_Desc::Parameter albedo_texture;
-    albedo_texture.name                = "albedo_texture";
-    albedo_texture.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
+    // Bindless Texture Table - Where all our texture descriptors should go. Index is used by our shader to retrieve texture
+    Shader_Desc::Parameter texture_2d_table;
+    texture_2d_table.name                = "texture_2d_table";
+    texture_2d_table.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
 
-    shader_desc.parameter_list.push_back(albedo_texture);
+    shader_desc.parameter_list.push_back(texture_2d_table);
 
-    // Normal Texture Parameter
-    Shader_Desc::Parameter normal_texture;
-    normal_texture.name                = "normal_texture";
-    normal_texture.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
-
-    shader_desc.parameter_list.push_back(normal_texture);
 
     // Material Flags
     Shader_Desc::Parameter material_flags;
@@ -422,6 +459,19 @@ int D_Renderer::init(){
 
     shader_desc.parameter_list.push_back(material_flags);
 
+    // Albedo Index
+    Shader_Desc::Parameter albedo_index;
+    albedo_index.name                   = "albedo_index";
+    albedo_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+    albedo_index.number_of_32bit_values = 1;
+    shader_desc.parameter_list.push_back(albedo_index);
+
+    // Normal Index
+    Shader_Desc::Parameter normal_index;
+    normal_index.name                   = "normal_index";
+    normal_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+    normal_index.number_of_32bit_values = 1;
+    shader_desc.parameter_list.push_back(normal_index);
 
     // Model Matrix
     Shader_Desc::Parameter model_matrix;

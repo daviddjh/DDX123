@@ -14,6 +14,7 @@ struct D_Texture {
     d_std::Span<u8>  cpu_texture_data;
     d_dx12::Texture_Desc texture_desc;
     d_dx12::Texture* texture = NULL;
+    s16 texture_binding_table_index;
 
 };
 
@@ -36,10 +37,10 @@ struct D_Primitive_Group {
 
 struct D_Draw_Call {
 
-    int material_index;
-    int vertex_offset;
-    int index_offset;
-    int index_count;
+    u16 material_index;
+    u32 vertex_offset;
+    u32 index_offset;
+    u32 index_count;
 
 };
 

@@ -4,6 +4,7 @@
 #include "DirectXTex.h"
 
 #define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
+#define DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE 75
 
 // Are we using WARP ?
 #define USING_WARP 0
@@ -109,13 +110,14 @@ namespace d_dx12 {
                 }
             }
 
-            if (FAILED(D3D12CreateDevice(temp_adapter4.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(temp_device.GetAddressOf())))) {
+            if (FAILED(D3D12CreateDevice(temp_adapter4.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(temp_device.ReleaseAndGetAddressOf())))) {
                 OutputDebugString("Failed to create d3d12 device\n");
                 DEBUG_BREAK;
             }
 
             
-            d3d12_device = temp_device.Detach();
+            d3d12_device = temp_device.Get();
+            temp_device.Reset();
         }
 
         // If no adapters were found, use WARP
@@ -124,7 +126,8 @@ namespace d_dx12 {
             ThrowIfFailed(dxgi_factory->EnumWarpAdapter(IID_PPV_ARGS(warp_adapter.GetAddressOf())));
             ThrowIfFailed(D3D12CreateDevice(warp_adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(temp_device.GetAddressOf())));
 
-            d3d12_device = temp_device.Detach();
+            d3d12_device = temp_device.Get();
+            temp_device.Reset();
         }
 
     #if defined(_DEBUG)
@@ -452,11 +455,19 @@ namespace d_dx12 {
                 {
                     Shader::Binding_Point * shader_binding_point = &(shader->binding_points[desc.parameter_list[j].name]);
                     D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
-                    descriptor_range->NumDescriptors                    = shader_binding_point->d3d12_binding_desc.BindCount;
+
                     descriptor_range->BaseShaderRegister                = shader_binding_point->d3d12_binding_desc.BindPoint,
                     descriptor_range->RegisterSpace                     = shader_binding_point->d3d12_binding_desc.Space;
                     descriptor_range->OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
                     descriptor_range->Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+
+                    descriptor_range->NumDescriptors                    = shader_binding_point->d3d12_binding_desc.BindCount;
+                    // If the number of descriptors is 0, then we assume it's an unbound descriptor array
+                    if(descriptor_range->NumDescriptors == 0){
+                        descriptor_range->NumDescriptors = DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE;
+                        descriptor_range->Flags |= D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+                    }
+
 
                     switch(desc.parameter_list[j].usage_type){
                         case(Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER):
@@ -696,10 +707,10 @@ namespace d_dx12 {
     // Sets a fence value from the GPU side
     u64 Command_Queue::signal()
     {
-        u64 signalFenceValue = fence_value++;
-        ThrowIfFailed(d3d12_command_queue->Signal(d3d12_fence.Get(), signalFenceValue));
+        fence_value++;
+        ThrowIfFailed(d3d12_command_queue->Signal(d3d12_fence.Get(), fence_value));
 
-        return signalFenceValue;
+        return fence_value;
     }
 
     // Flushes all commands out of a command queue
@@ -750,8 +761,9 @@ namespace d_dx12 {
         if(type != D3D12_COMMAND_LIST_TYPE_COPY){
 
             // Need to reset the (current) online descriptor heap every time we render because we always add things to it!
-            resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].next_cpu_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].d3d12_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
-            resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].next_gpu_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].d3d12_descriptor_heap->GetGPUDescriptorHandleForHeapStart();
+            //resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].next_cpu_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].d3d12_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
+            //resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].next_gpu_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].d3d12_descriptor_heap->GetGPUDescriptorHandleForHeapStart();
+            resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].reset();
 
             ID3D12DescriptorHeap* ppDescriptorHeap[] = {
                 resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].d3d12_descriptor_heap.Get()
@@ -906,7 +918,7 @@ namespace d_dx12 {
     *   Descriptor Heap!
     */
 
-    // Initializes a Descriptor Heap with size amount of descriptors
+    // Initializes a Descriptor Heap with capacity + DEFUALT_UNBOUND_DESCRIPTOR_TABLE_SIZE amount of descriptors
     void Descriptor_Heap::init(D3D12_DESCRIPTOR_HEAP_TYPE type, u16 capacity, bool is_gpu_visible){
         
         // TODO: Should check the size here to ensure it's OK
@@ -917,6 +929,11 @@ namespace d_dx12 {
             OutputDebugString("Error(Descriptor_Heap::init) This Descriptor Heap type cannot be GPU visible");
             DEBUG_BREAK;
         }
+        
+        if(is_gpu_visible && capacity <= DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE){
+            OutputDebugString("Error(Descriptor_Heap::init) This Descriptor Heap will not be big enough to fit the texture descriptors");
+            DEBUG_BREAK;
+        }
 
         this->is_gpu_visible = is_gpu_visible;
         this->type           = type;
@@ -924,20 +941,31 @@ namespace d_dx12 {
         // Create the heap
         D3D12_DESCRIPTOR_HEAP_DESC Descriptor_Heap_Desc = { };
         Descriptor_Heap_Desc.Type = type;
-        Descriptor_Heap_Desc.NumDescriptors = this->capacity;
+        Descriptor_Heap_Desc.NumDescriptors = this->capacity + DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE;
         if(is_gpu_visible) Descriptor_Heap_Desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         ThrowIfFailed(d3d12_device->CreateDescriptorHeap(&Descriptor_Heap_Desc, IID_PPV_ARGS(&d3d12_descriptor_heap)));
+
+        // Descriptor size
+        descriptor_size = d3d12_device->GetDescriptorHandleIncrementSize(type);
 
         // Descriptor Heap start within d3d12_descriptor_heap
         next_cpu_descriptor_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(d3d12_descriptor_heap->GetCPUDescriptorHandleForHeapStart());
 
+        // GPU Visible Descriptor Heap:
+        // [{------------ Texture Descriptors ---------------}{-------------- Rest of Descriptors ------------------}]
+
         if(is_gpu_visible){
+
+            // Need to offset to make room for unbound texture table
+            next_cpu_texture_descriptor_handle = next_cpu_descriptor_handle;
+            next_cpu_descriptor_handle.Offset(descriptor_size * DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE);
+
             next_gpu_descriptor_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(d3d12_descriptor_heap->GetGPUDescriptorHandleForHeapStart());
+            // Need to offset to make room for unbound texture table
+            next_gpu_texture_descriptor_handle = next_gpu_descriptor_handle;
+            next_gpu_descriptor_handle.Offset(descriptor_size * DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE);
         }
 
-        // Descriptor size
-        descriptor_size = d3d12_device->GetDescriptorHandleIncrementSize(type);
-        
     }
 
     void Descriptor_Heap::d_dx12_release(){
@@ -948,7 +976,7 @@ namespace d_dx12 {
     Descriptor_Handle Descriptor_Heap::get_next_handle(){
 
         // TODO: Check size/index before doing this? Don't go off the end, ring buffer?
-        if( this-> size < this->capacity){
+        if(this-> size < this->capacity){
 
             if(d3d12_descriptor_heap == NULL){
                 OutputDebugString("Error (Descriptor_Heap::get_next_handle): The d3d12 Descriptor Heap hasn't been created yet");
@@ -973,6 +1001,104 @@ namespace d_dx12 {
             DEBUG_BREAK;
             return { };
         }
+
+    }
+
+    // Returns a handle in the heap based on index
+    Descriptor_Handle Descriptor_Heap::get_handle_by_index(u16 index){
+
+        if(index >= 0 && index < this->capacity){
+
+            if(d3d12_descriptor_heap == NULL){
+                OutputDebugString("Error (Descriptor_Heap::get_next_handle): The d3d12 Descriptor Heap hasn't been created yet");
+                DEBUG_BREAK;
+            }
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE cpu_descriptor_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(d3d12_descriptor_heap->GetCPUDescriptorHandleForHeapStart());
+            CD3DX12_GPU_DESCRIPTOR_HANDLE gpu_descriptor_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(d3d12_descriptor_heap->GetGPUDescriptorHandleForHeapStart());
+
+            cpu_descriptor_handle.Offset(descriptor_size * index);
+            gpu_descriptor_handle.Offset(descriptor_size * index);
+            
+            Descriptor_Handle handle = {
+                cpu_descriptor_handle,
+                gpu_descriptor_handle,
+                this->type
+            };
+
+            return handle;
+
+        } else {
+            OutputDebugString("Error (get_next_handle): Invalid Index!");
+            DEBUG_BREAK;
+            return { };
+        }
+
+    }
+
+    // Returns the next handle in the heap
+    // TODO: 
+    // Not the best naming for this, should probably have one function that has "Spaces" or something to key off of. This could be
+    // confusing
+    Descriptor_Handle Descriptor_Heap::get_next_texture_handle(){
+
+        if(!this->is_gpu_visible){
+            OutputDebugString("Error (Descriptor_Heap::get_next_handle): This Descriptor Heap doesn't support texture descriptors for unbound texture arrays");
+            DEBUG_BREAK;
+        }
+
+        // TODO: Check size/index before doing this? Don't go off the end, ring buffer?
+        if( this->texture_table_size < DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE){
+
+            if(d3d12_descriptor_heap == NULL){
+                OutputDebugString("Error (Descriptor_Heap::get_next_handle): The d3d12 Descriptor Heap hasn't been created yet");
+                DEBUG_BREAK;
+            }
+
+            Descriptor_Handle handle = {
+                next_cpu_texture_descriptor_handle,
+                next_gpu_texture_descriptor_handle,
+                this->type
+            };
+
+            this->texture_table_size += 1;
+
+            next_cpu_texture_descriptor_handle.Offset(descriptor_size);
+            if(is_gpu_visible) next_gpu_texture_descriptor_handle.Offset(descriptor_size);
+
+            return handle;
+
+        } else {
+            OutputDebugString("Error (get_next_handle): No more handles left!");
+            DEBUG_BREAK;
+            return { };
+        }
+
+
+    }
+
+    void Descriptor_Heap::reset(){
+
+        // Descriptor Heap start within d3d12_descriptor_heap
+        next_cpu_descriptor_handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(d3d12_descriptor_heap->GetCPUDescriptorHandleForHeapStart());
+
+        // GPU Visible Descriptor Heap:
+        // [{------------ Texture Descriptors ---------------}{-------------- Rest of Descriptors ------------------}]
+
+        if(is_gpu_visible){
+
+            // Need to offset to make room for unbound texture table
+            next_cpu_texture_descriptor_handle = next_cpu_descriptor_handle;
+            next_cpu_descriptor_handle.Offset(descriptor_size * DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE);
+
+            next_gpu_descriptor_handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(d3d12_descriptor_heap->GetGPUDescriptorHandleForHeapStart());
+            // Need to offset to make room for unbound texture table
+            next_gpu_texture_descriptor_handle = next_gpu_descriptor_handle;
+            next_gpu_descriptor_handle.Offset(descriptor_size * DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE);
+        }
+
+        size = 0;
+        texture_table_size = 0;
 
     }
 
@@ -1325,6 +1451,11 @@ namespace d_dx12 {
                 DEBUG_BREAK;
             }
 
+            // The above "CreateTexture" function creates the texture with this state
+            texture->state = D3D12_RESOURCE_STATE_COPY_DEST;
+
+            texture->d3d12_resource->SetName(L"Texture");
+
             std::vector<D3D12_SUBRESOURCE_DATA> subresources;
             hr = PrepareUpload(d3d12_device.Get(), base_scratch_image.GetImages(), 
                 base_scratch_image.GetImageCount(), base_scratch_image.GetMetadata(), subresources);
@@ -1344,6 +1475,8 @@ namespace d_dx12 {
             
             // Remap after Update Subresources unmaps
             upload_buffer.d3d12_resource->Map(0, &CD3DX12_RANGE(0, upload_buffer.capacity), (void**)&(upload_buffer.start_cpu));
+
+            this->transition_texture(texture, D3D12_RESOURCE_STATE_COMMON);
 
             /*
             // Problems because it Maps and Unmaps
@@ -1529,6 +1662,7 @@ namespace d_dx12 {
         // Describes subresource data
         D3D12_SUBRESOURCE_DATA subresource_data;
 
+        #if 0 // Linking problems..
         HRESULT hr = DirectX::LoadWICTextureFromFile(
             *(d3d12_device.GetAddressOf()),
             filename,
@@ -1540,6 +1674,7 @@ namespace d_dx12 {
             OutputDebugString("Failed Texture Upload!");
             DEBUG_BREAK;
         }
+        #endif
 
         if(decoded_file_data.get()){
 
@@ -1696,7 +1831,7 @@ namespace d_dx12 {
         }
     }
 
-    void Command_List::bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point){
+    u8 Command_List::bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point){
         
         switch(texture->usage){
             case(Texture::USAGE::USAGE_SAMPLED):
@@ -1712,13 +1847,14 @@ namespace d_dx12 {
                 }
 
                 // OOF thats a long line, descriptive though..
-                texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+                texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();
 
                 // Copy offline descriptor to online descriptor
                 d3d12_device->CopyDescriptorsSimple(1, texture->online_descriptor_handle.cpu_descriptor_handle, texture->offline_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
                 // Set descriptor in Root Signature
-                d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, texture->online_descriptor_handle.gpu_descriptor_handle);
+                // No longer needed! Textures now bound to root signature with bind_online_descriptor_heap_texture_table
+                //d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, texture->online_descriptor_handle.gpu_descriptor_handle);
             }
             break;
 
@@ -1730,6 +1866,26 @@ namespace d_dx12 {
 
         }
 
+        // Returns the index of the most recently added texture descriptor
+        return resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size - 1;
+
+    }
+
+    // Bind an array of textures starting at the beginning of the online_cbv_srv_uav_descriptor_heap
+    void Command_List::bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, std::string binding_point){
+        
+        if(resource_manager == NULL){
+            OutputDebugString("Error (Command_List::bind_texture): no valid resource_manager");
+            DEBUG_BREAK;
+        }
+
+        // Get the first handle in the online heap, this is the first handle of the texture table
+        Descriptor_Handle handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(0);
+
+        // Set descriptor in Root Signature
+        d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, handle.gpu_descriptor_handle);
+
+        return;
     }
 
     Descriptor_Handle Command_List::bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count){
