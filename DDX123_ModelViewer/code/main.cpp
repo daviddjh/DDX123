@@ -282,8 +282,6 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
 
             command_list->draw_indexed(draw_call.index_count, draw_call.index_offset, draw_call.vertex_offset);
 
-            draw_call.albedo_texture_index = -1;
-            draw_call.normal_texture_index = -1;
         }
     }
 }
