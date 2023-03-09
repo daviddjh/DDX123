@@ -247,8 +247,9 @@ namespace d_dx12 {
     void reflect_shader(Shader_Desc& desc, Shader* shader){
 
 
+        #define MAX_FILE_SIZE _1MB
         HANDLE hFile; 
-        u8*    ReadBuffer = (u8*)calloc(_32KB, sizeof(u8));
+        u8*    ReadBuffer = (u8*)calloc(MAX_FILE_SIZE, sizeof(u8));
         OVERLAPPED overlapped_flag = {0};
         DWORD number_of_bytes_read;
 
@@ -274,7 +275,7 @@ namespace d_dx12 {
             // Read one character less than the buffer size to save room for
             // the terminating NULL character. 
 
-            if( FALSE == ReadFile(hFile, ReadBuffer, _32KB - 1, &number_of_bytes_read, &overlapped_flag) )
+            if( FALSE == ReadFile(hFile, ReadBuffer, MAX_FILE_SIZE - 1, &number_of_bytes_read, &overlapped_flag) )
             {
                 char* buffer = (char*)calloc(500, sizeof(char));
                 OutputDebugString("Terminal failure: Unable to read from file.\n");
@@ -287,11 +288,20 @@ namespace d_dx12 {
 
 
             Microsoft::WRL::ComPtr<ID3D12ShaderReflection> shader_reflection;
-            D3DReflect(ReadBuffer, number_of_bytes_read, IID_PPV_ARGS(shader_reflection.GetAddressOf()));
+            HRESULT hr = D3DReflect(ReadBuffer, number_of_bytes_read, IID_PPV_ARGS(shader_reflection.GetAddressOf()));
+            if(FAILED(hr)){
+                DWORD error = GetLastError();
+                OutputDebugString("Unable to reflect shader file");
+                DEBUG_BREAK;
+            }
 
             D3D12_SHADER_DESC shader_reflection_desc;
-            shader_reflection->GetDesc(&shader_reflection_desc);
-
+            if(shader_reflection){
+                shader_reflection->GetDesc(&shader_reflection_desc);
+            } else {
+                OutputDebugString("Unable to reflect shader file");
+                DEBUG_BREAK;
+            }
 
             for (int i = 0; i < shader_reflection_desc.BoundResources; i++){
 
@@ -338,7 +348,7 @@ namespace d_dx12 {
             // Read one character less than the buffer size to save room for
             // the terminating NULL character. 
 
-            if( FALSE == ReadFile(hFile, ReadBuffer, _32KB - 1, &number_of_bytes_read, &overlapped_flag) )
+            if( FALSE == ReadFile(hFile, ReadBuffer, MAX_FILE_SIZE - 1, &number_of_bytes_read, &overlapped_flag) )
             {
                 char* buffer = (char*)calloc(500, sizeof(char));
                 OutputDebugString("Terminal failure: Unable to read from file.\n");
@@ -351,10 +361,20 @@ namespace d_dx12 {
 
 
             Microsoft::WRL::ComPtr<ID3D12ShaderReflection> shader_reflection;
-            D3DReflect(ReadBuffer, number_of_bytes_read, IID_PPV_ARGS(&shader_reflection));
+            HRESULT hr = D3DReflect(ReadBuffer, number_of_bytes_read, IID_PPV_ARGS(shader_reflection.GetAddressOf()));
+            if(FAILED(hr)){
+                DWORD error = GetLastError();
+                OutputDebugString("Unable to reflect shader file");
+                DEBUG_BREAK;
+            }
 
             D3D12_SHADER_DESC shader_reflection_desc;
-            shader_reflection->GetDesc(&shader_reflection_desc);
+            if(shader_reflection){
+                shader_reflection->GetDesc(&shader_reflection_desc);
+            } else {
+                OutputDebugString("Unable to reflect shader file");
+                DEBUG_BREAK;
+            }
 
             for (int i = 0; i < shader_reflection_desc.BoundResources; i++){
 

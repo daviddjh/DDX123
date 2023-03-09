@@ -10,8 +10,10 @@ pushd C:\dev\DDX123\DDX123_ModelViewer\build
 :: remedybg.exe stop-debugging
 
 :: Compile Shaders
-"C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\FXC.exe" /Od /Zi /T vs_5_1 /enable_unbounded_descriptor_tables /Fo VertexShader.cso ..\code\VertexShader.hlsl
-"C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\FXC.exe" /Od /Zi /T ps_5_1 /enable_unbounded_descriptor_tables /Fo PixelShader.cso  ..\code\PixelShader.hlsl
+"C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\FXC.exe" /Od /Zi /T vs_5_1 /enable_unbounded_descriptor_tables /Fo VertexShader.cso ..\code\VertexShader.hlsl
+"C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\FXC.exe" /Od /Zi /T ps_5_1 /enable_unbounded_descriptor_tables /Fo PixelShader.cso  ..\code\PixelShader.hlsl
+"C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\FXC.exe" /Od /Zi /T vs_5_1 /enable_unbounded_descriptor_tables /Fo PBRVertexShader.cso ..\code\PBRVertexShader.hlsl
+"C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\FXC.exe" /Od /Zi /T ps_5_1 /enable_unbounded_descriptor_tables /Fo PBRPixelShader.cso  ..\code\PBRPixelShader.hlsl
 
 :: Old flags: /Yc"pch.h"
 set flags= /FeDDX123 /FAs /EHsc

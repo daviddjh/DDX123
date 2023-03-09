@@ -6,7 +6,8 @@
 
 enum D_Material_Flags : u8{
     MATERIAL_FLAG_NONE           = 0x0,
-    MATERIAL_FLAG_NORMAL_TEXTURE = 0x1
+    MATERIAL_FLAG_NORMAL_TEXTURE = 0x1,
+    MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE = 0x2
 };
 
 struct D_Texture {
@@ -22,6 +23,7 @@ struct D_Material {
 
     D_Texture albedo_texture;
     D_Texture normal_texture;
+    D_Texture roughness_metallic_texture;
     u32        material_flags = MATERIAL_FLAG_NONE;
 
 };

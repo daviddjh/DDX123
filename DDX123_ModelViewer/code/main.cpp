@@ -209,6 +209,16 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
                 command_list->load_decoded_texture_from_memory(material.normal_texture.texture, material.normal_texture.cpu_texture_data, false);
             }
         }
+
+        // RoughnessMetallic Map
+        // TODO: This name is not useful, however I do not know how to handle wchar_t that resource needs, vs char that tinygltf gives me
+        if(material.material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE){
+            material.roughness_metallic_texture.texture = resource_manager.create_texture(L"RoughnessMetallic_Texture", material.roughness_metallic_texture.texture_desc);
+
+            if(material.roughness_metallic_texture.cpu_texture_data.ptr){
+                command_list->load_decoded_texture_from_memory(material.roughness_metallic_texture.texture, material.roughness_metallic_texture.cpu_texture_data, false);
+            }
+        }
     }
 }
 
@@ -249,6 +259,15 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
 
             }
 
+            // If this material uses roughness metallic map
+            if(model->materials.ptr[draw_call.material_index].material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE){
+
+                // Check if table index is < 0 (-1). Only bind albedo texture if it needs to be bound to avoid unncessary descriptor copies
+                if(model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture_binding_table_index < 0){
+                    model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture, &resource_manager, "roughness_metallic_texture");
+                }
+
+            }
         }
     }
 
@@ -277,6 +296,13 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
 
                 // Pass the index of the normal texture in the texture table to the shader
                 command_list->bind_constant_arguments(&material.normal_texture.texture_binding_table_index, 1, "normal_index");
+
+            }
+
+            if(material.material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE){
+
+                // Pass the index of the normal texture in the texture table to the shader
+                command_list->bind_constant_arguments(&material.roughness_metallic_texture.texture_binding_table_index, 1, "roughness_metallic_index");
 
             }
 
@@ -419,8 +445,8 @@ int D_Renderer::init(){
     //  Set compiled shader code
     //////////////////////////////////
 
-    shader_desc.vertex_shader = L"VertexShader.cso";
-    shader_desc.pixel_shader  = L"PixelShader.cso";
+    shader_desc.vertex_shader = L"PBRVertexShader.cso";
+    shader_desc.pixel_shader  = L"PBRPixelShader.cso";
 
 
     //////////////////////////////////
@@ -471,6 +497,13 @@ int D_Renderer::init(){
     normal_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(normal_index);
 
+    // Roughness-Metallic Index
+    Shader_Desc::Parameter roughness_metallic_index;
+    roughness_metallic_index.name                   = "roughness_metallic_index";
+    roughness_metallic_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+    roughness_metallic_index.number_of_32bit_values = 1;
+    shader_desc.parameter_list.push_back(roughness_metallic_index);
+
     // Model Matrix
     Shader_Desc::Parameter model_matrix;
     model_matrix.name                   = "model_matrix";
@@ -483,6 +516,14 @@ int D_Renderer::init(){
     view_projection_matrix.name                   = "view_projection_matrix";
     view_projection_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     view_projection_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
+
+    shader_desc.parameter_list.push_back(view_projection_matrix);
+
+    // Camera Pos
+    Shader_Desc::Parameter camera_pos;
+    view_projection_matrix.name                   = "camera_position_buffer";
+    view_projection_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+    view_projection_matrix.number_of_32bit_values = sizeof(DirectX::XMVECTOR);
 
     shader_desc.parameter_list.push_back(view_projection_matrix);
 
@@ -671,6 +712,7 @@ void D_Renderer::render(){
     // vickylovesyou!!
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, "view_projection_matrix");
+    command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR), "camera_position_buffer");
     bind_and_draw_model(command_list, &renderer.models.ptr[0]);
     
     // Render ImGui on top of everything

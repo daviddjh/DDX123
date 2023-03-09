@@ -359,6 +359,68 @@ void load_materials(D_Model& d_model, tg::Model& tg_model){
                 memcpy(material.normal_texture.cpu_texture_data.ptr, &image.image.at(0), image.image.size());
                         
             }
+
+            /////////////////////
+            // Roughness Metallic Texture
+            /////////////////////
+
+            // Here, we are only storing, and using, the base color texture
+            texture_index = tg_model.materials[j].pbrMetallicRoughness.metallicRoughnessTexture.index;
+
+            if(texture_index != UINT_MAX){
+
+                tex = tg_model.textures[texture_index];
+
+                // Get reference to corresponding material in d_model
+                material = d_model.materials.ptr[j];
+                material.material_flags |= MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE;
+
+                // If we have a baseColorTexture
+                if(tex.source >= 0){
+
+                    // Load the image corresponding to the texture
+                    tg::Image &image = tg_model.images[tex.source];
+
+                    material.roughness_metallic_texture.texture_desc.width = image.width;
+                    material.roughness_metallic_texture.texture_desc.height = image.height;
+
+                    DXGI_FORMAT image_format = DXGI_FORMAT_UNKNOWN;
+                    
+                    // Store the image_format
+                    if(image.component == 1){
+                        if(image.bits == 8){
+                            image_format = DXGI_FORMAT_R8_UINT;
+                        } else if(image.bits == 16){
+                            image_format = DXGI_FORMAT_R16_UINT;
+                        }
+                    } else if (image.component == 2){
+                        if(image.bits == 8){
+                            image_format = DXGI_FORMAT_R8G8_UINT;
+                        } else if(image.bits == 16){
+                            image_format = DXGI_FORMAT_R16G16_UINT;
+                        }
+                    } else if (image.component == 3){
+                        // ?
+                    } else if (image.component == 4){
+                        if(image.bits == 8){
+                            image_format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        } else if(image.bits == 16){
+                            image_format = DXGI_FORMAT_R16G16B16A16_UINT;
+                        }
+                    }
+
+                    // Store a description of the texture
+                    material.roughness_metallic_texture.texture_desc.format     = image_format;
+                    material.roughness_metallic_texture.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
+                    material.roughness_metallic_texture.texture_desc.pixel_size = image.component * image.bits / 8;
+
+                    // Allocate enough room for the raw image data
+                    material.roughness_metallic_texture.cpu_texture_data.alloc(image.image.size());
+                    // Copy the raw image data over to d_model material j
+                    memcpy(material.roughness_metallic_texture.cpu_texture_data.ptr, &image.image.at(0), image.image.size());
+
+                }
+            }
         }
     }
 }
