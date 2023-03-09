@@ -145,11 +145,13 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     }
 
-    float3 N = normalize(IN.n);
+    float3 N = normalize(wNormal);
     float3 V = normalize(camera_position_buffer.camera_position - IN.Frag_World_Position);
-    float3 light_position = float3(10., 10., 10.);
-    float3 light_color    = float3(1., 1., 1.);
+    float3 light_position = float3(00., 10., 00.);
+    float3 light_color    = float3(100., 100., 100.);
     float3 Lo = float3(0., 0., 0.);
+    float3 F0 = float3(0.04, 0.04, 0.04); 
+    F0 = lerp(F0, albedo_texture_color, metallic);
 
     // Only doing this once because we have one light
     for (int i = 0; i < 1; i++){
@@ -157,12 +159,10 @@ float4 main(PixelShaderInput IN) : SV_Target {
         float3 H = normalize(V + L);
 
         float distance = length(light_position - IN.Frag_World_Position);
-        float attenuation = 1.0 / (distance * distance);
+        float attenuation = 1.0 / distance;//(distance * distance);
         float3 radiance = light_color * attenuation;
         
         // For Frensel - F0 = surface reflection at zero incidence
-        float3 F0 = float3(0.04, 0.04, 0.04); 
-        F0 = lerp(F0, albedo_texture_color, metallic);
         float3 F  = fresnelSchlick(max(dot(H, V), 0.0), F0);
 
         float NDF = DistributionGGX(wNormal, H, roughness);
@@ -184,14 +184,23 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     }
 
+    float3 ambient = float3(0.03, 0.03, 0.03) * albedo_texture_color;
+    //Lo.r += 0.5;
+    float3 color = ambient + Lo;
+	
+    color = color / (color + float3(1.0, 1.0, 1.0));
+    color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  
+   
+    return float4(color, 1.0);
+
     /*
     Lo /= 30.;
     Lo.r += metallic;
     Lo.g += roughness;
     Lo.b = 1.;
     */
-    Lo += albedo_texture_color;
+    //Lo += albedo_texture_color;
 
     
-    return float4(Lo, 1.0);
+    //return float4(Lo, 1.0);
 }

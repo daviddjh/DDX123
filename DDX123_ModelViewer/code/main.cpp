@@ -233,6 +233,7 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
     for(u64 i = 0; i < model->materials.nitems; i++){
         model->materials.ptr[i].albedo_texture.texture_binding_table_index = -1;
         model->materials.ptr[i].normal_texture.texture_binding_table_index = -1;
+        model->materials.ptr[i].roughness_metallic_texture.texture_binding_table_index = -1;
     }
 
     // Then, we copy all the texture descriptors to the texture table in online_descriptor_heap
