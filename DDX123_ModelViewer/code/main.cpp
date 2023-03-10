@@ -18,7 +18,7 @@ using namespace DirectX;
 #define BUFFER_OFFSET(i) ((char *)0 + (i))
 
 // Sets window, rendertargets to 4k resolution
-//#define d_4k
+#define d_4k
 
 struct D_Camera {
     DirectX::XMVECTOR eye_position;
@@ -206,7 +206,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
             material.normal_texture.texture = resource_manager.create_texture(L"Normal_Texture", material.normal_texture.texture_desc);
 
             if(material.normal_texture.cpu_texture_data.ptr){
-                command_list->load_decoded_texture_from_memory(material.normal_texture.texture, material.normal_texture.cpu_texture_data, false);
+                command_list->load_decoded_texture_from_memory(material.normal_texture.texture, material.normal_texture.cpu_texture_data, true);
             }
         }
 
@@ -216,7 +216,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
             material.roughness_metallic_texture.texture = resource_manager.create_texture(L"RoughnessMetallic_Texture", material.roughness_metallic_texture.texture_desc);
 
             if(material.roughness_metallic_texture.cpu_texture_data.ptr){
-                command_list->load_decoded_texture_from_memory(material.roughness_metallic_texture.texture, material.roughness_metallic_texture.cpu_texture_data, false);
+                command_list->load_decoded_texture_from_memory(material.roughness_metallic_texture.texture, material.roughness_metallic_texture.cpu_texture_data, true);
             }
         }
     }

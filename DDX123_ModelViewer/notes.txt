@@ -1,5 +1,21 @@
 3/5/2023
 
+Got Physically Based Rendering in the sponza scene! I was having a problem because I was using the wrong
+(unnormalized) normal, after fixing that, it worked! Transforming albedo from sRGB to linear made it look
+better too. Planning on going back over the shader to comment on it and understand it more.
+
+Noticing that I have to ender a very large light intensity for specular lights to work. Also have to tone 
+down the attenuation, need to revert in the future. Think its related to my MVP matricies and the meshes 
+being "far" from each other. Ex: still seeing z buffer max out an back of scene disapear at times.
+
+TODO:
+Notes on PBR shader.
+Look into attenuation.
+Directional "sun" light.
+Shadows? (multi pass...)
+
+3/5/2023
+
 Got bindless textures working! Ended up storing texture descriptor indicies in texture struct temporarily.
 Switched to RTX 4080, getting 300+ FPS in debug mode. Fixed building for release and release debug symbol mode. 
 Getting 3000 - 4000 FPS in release mode! Not going to try an optimize any more at this time.

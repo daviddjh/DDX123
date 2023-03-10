@@ -110,7 +110,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     UV.x = IN.TextureCoordinate.x;
     UV.y = IN.TextureCoordinate.y;
 
-    float4 albedo_texture_color = texture_2d_table[albedo_index.i].Sample(sampler_1, UV);
+    float4 albedo_texture_color = pow(texture_2d_table[albedo_index.i].Sample(sampler_1, UV), 2.2);
 
     // This is to discard transparent pixels in textures. See: Chains and foliage in GLTF2.0 Sponza
     if (albedo_texture_color.a < 0.5) {
@@ -148,7 +148,8 @@ float4 main(PixelShaderInput IN) : SV_Target {
     float3 N = normalize(wNormal);
     float3 V = normalize(camera_position_buffer.camera_position - IN.Frag_World_Position);
     float3 light_position = float3(00., 10., 00.);
-    float3 light_color    = float3(100., 100., 100.);
+    float3 light_direction = float3(.1, -.8, 00.);
+    float3 light_color    = float3(1000., 1000., 1000.);
     float3 Lo = float3(0., 0., 0.);
     float3 F0 = float3(0.04, 0.04, 0.04); 
     F0 = lerp(F0, albedo_texture_color, metallic);
@@ -156,6 +157,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     // Only doing this once because we have one light
     for (int i = 0; i < 1; i++){
         float3 L = normalize(light_position - IN.Frag_World_Position);
+        //float3 L = normalize(-light_direction);
         float3 H = normalize(V + L);
 
         float distance = length(light_position - IN.Frag_World_Position);
@@ -165,12 +167,12 @@ float4 main(PixelShaderInput IN) : SV_Target {
         // For Frensel - F0 = surface reflection at zero incidence
         float3 F  = fresnelSchlick(max(dot(H, V), 0.0), F0);
 
-        float NDF = DistributionGGX(wNormal, H, roughness);
-        float G   = GeometrySmith(wNormal, V, L, roughness);
+        float NDF = DistributionGGX(N, H, roughness);
+        float G   = GeometrySmith(N, V, L, roughness);
 
         // Cook-Torrance BRDF
         float3 numerator = NDF * G * F; 
-        float denominator = 4.0 * max(dot(wNormal, V), 0.0) * max(dot(wNormal, L), 0.0)  + 0.0001;
+        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0)  + 0.0001;
         float specular = numerator / denominator;
 
         float3 kS = F;
@@ -179,7 +181,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
         // Metalic materials dont refract..
         kD *= 1.0 - metallic;
 
-        float NdotL = max(dot(wNormal, L), 0.0);
+        float NdotL = max(dot(N, L), 0.0);
         Lo += (kD * albedo_texture_color / PI + specular) * radiance * NdotL;
 
     }
