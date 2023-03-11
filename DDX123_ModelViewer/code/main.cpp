@@ -18,13 +18,13 @@ using namespace DirectX;
 #define BUFFER_OFFSET(i) ((char *)0 + (i))
 
 // Sets window, rendertargets to 4k resolution
-#define d_4k
+// #define d_4k
 
 struct D_Camera {
     DirectX::XMVECTOR eye_position;
     DirectX::XMVECTOR eye_direction;
     DirectX::XMVECTOR up_direction;
-    float speed = 8.;
+    float speed = 0.8;
     float fov   = 100.;
 };
 
@@ -225,8 +225,10 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
 void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model){
 
     DirectX::XMMATRIX model_matrix = DirectX::XMMatrixIdentity();
+    DirectX::XMMATRIX scale_matrix = DirectX::XMMatrixScaling(0.1, 0.1, 0.1);
+    model_matrix = DirectX::XMMatrixMultiply(scale_matrix, DirectX::XMMatrixIdentity());
     DirectX::XMMATRIX translation_matrix = DirectX::XMMatrixTranslation(model->coords.x, model->coords.y, model->coords.z);
-    model_matrix = DirectX::XMMatrixMultiply(translation_matrix, DirectX::XMMatrixIdentity());
+    model_matrix = DirectX::XMMatrixMultiply(translation_matrix, model_matrix);
     command_list->bind_constant_arguments(&model_matrix, sizeof(DirectX::XMMATRIX) / 4, "model_matrix");
 
     // Begin by initializing each textures binding table index to an invalid value

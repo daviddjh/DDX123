@@ -149,7 +149,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     float3 V = normalize(camera_position_buffer.camera_position - IN.Frag_World_Position);
     float3 light_position = float3(00., 10., 00.);
     float3 light_direction = float3(.1, -.8, 00.);
-    float3 light_color    = float3(1000., 1000., 1000.);
+    float3 light_color    = float3(200., 200., 200.);
     float3 Lo = float3(0., 0., 0.);
     float3 F0 = float3(0.04, 0.04, 0.04); 
     F0 = lerp(F0, albedo_texture_color, metallic);
@@ -161,7 +161,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
         float3 H = normalize(V + L);
 
         float distance = length(light_position - IN.Frag_World_Position);
-        float attenuation = 1.0 / distance;//(distance * distance);
+        float attenuation = 1.0 / (distance * distance);
         float3 radiance = light_color * attenuation;
         
         // For Frensel - F0 = surface reflection at zero incidence
@@ -186,7 +186,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     }
 
-    float3 ambient = float3(0.03, 0.03, 0.03) * albedo_texture_color;
+    float3 ambient = float3(0.005, 0.005, 0.005) * albedo_texture_color;
     //Lo.r += 0.5;
     float3 color = ambient + Lo;
 	
