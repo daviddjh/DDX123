@@ -1670,6 +1670,92 @@ namespace d_dx12 {
         return;
     }
 
+    
+    void Dynamic_Buffer::init(){
+
+        HRESULT hr = d3d12_device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_UPLOAD ),    
+            D3D12_HEAP_FLAG_NONE, 
+            &CD3DX12_RESOURCE_DESC::Buffer( DYNAMIC_BUFFER_SIZE ), 
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,  
+            IID_PPV_ARGS( &d3d12_resource )
+        );    
+
+        if(FAILED(hr)){
+            os_debug_print("Failed to init Dynamic Buffer\n");
+            DEBUG_BREAK;
+            return;
+        }
+
+        // No CPU reads will be done from the resource.
+        CD3DX12_RANGE readRange(0, 0);
+        m_spUploadBuffer->Map( 0, &readRange, &((void*)absolute_beginning_ptr)); 
+        inuse_beginning_ptr = absolute_beginning_ptr;
+        inuse_end_ptr = inuse_beginning_ptr;
+        absolute_ending_ptr = absolute_beginning_ptr + DYNAMIC_BUFFER_SIZE;
+
+    }
+
+    u8* Dynamic_Buffer::allocate(u64 size, u64 alignment){
+
+        u64 aligned_size = AlignPow2Up(size, alignment);
+        u8* return_ptr = 0;
+
+        // If our requested allocation fits in the free space
+        if( DYNAMIC_BUFFER_SIZE - ( inuse_beginning_ptr - absolute_beginning_ptr) + (absolute_ending_ptr - inuse_end_ptr) >= aligned_size ){
+
+            if(inuse_end_ptr + aligned_size <= absolute_ending_ptr){
+
+                // If the allocation doesn't run past the end of the buffer
+                return_ptr = inuse_end_ptr;
+                return_ptr = AlignPow2Up(return_ptr, alignment);
+                inuse_end_ptr += aligned_size;
+                return return_ptr;
+
+            } else {
+
+                // If the allocation runs past the end of the buffer, need to check if we can wrap around
+                if(inuse_beginning_ptr - absolute_beginning_ptr <= aligned_size){
+
+                    return_ptr = absolute_beginning_ptr + aligned_size; 
+                    return_ptr = AlignPow2Up(return_ptr, alignment);
+                    inuse_end_ptr = return_ptr + aligned_size;
+
+                } else {
+
+                    OutputDebugString("Error (Dyamic_Buffer::allocate): Out of space");
+                    DEBUG_BREAK;
+                    return return_ptr;
+
+                }
+            }
+        }
+        return return_ptr;
+    }
+
+    void Dynamic_Buffer::reset_frame(u8 frame){
+
+        if(frame >= sizeof(frame_beginning_ptrs)){
+            OutputDebugString("Error (save_frame_ptr): Invalid Frame");
+            DEBUG_BREAK;
+            return;
+        }
+
+        // TODO: Any checks needed?
+
+        inuse_beginning_ptr = frame_ending_ptrs[frame];
+    }
+
+    void Dynamic_Buffer::save_frame_ptr(u8 frame){
+        if(frame >= sizeof(frame_beginning_ptrs)){
+            OutputDebugString("Error (save_frame_ptr): Invalid Frame");
+            DEBUG_BREAK;
+            return;
+        }
+
+        frame_ending_ptrs[frame] = inuse_end_ptr;
+    }
+
     void Command_List::load_texture_from_file(Texture* texture, const wchar_t* filename){
 
         if(texture->usage != Texture::USAGE::USAGE_SAMPLED){

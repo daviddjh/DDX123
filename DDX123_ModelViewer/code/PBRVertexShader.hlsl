@@ -59,13 +59,10 @@ VertexShaderOutput main(Vertex_Position_Normal_Tangent_Color_Texturecoord IN)
 {
     VertexShaderOutput OUT;
 
-    // Tangent, Bitangent, Normal matrix:
+    // Convert Tangent, Normal vectors to world space:
     float3 n = normalize((mul(model_matrix.M, float4(IN.Normal.xyz, 0.0))).xyz);
     float3 t = normalize((mul(model_matrix.M, float4(IN.Tangent.xyz, 0.0))).xyz);
     
-    //DONT DO THIS, n and t havent been interpolated yet!!
-    //float3 b = normalize((mul(model_matrix.M, float4((cross(IN.Normal, IN.Tangent.xyz) * -1), 0.0))).xyz);
-
     // I think this is right..
     matrix mvp_matrix     = mul(view_projection_matrix.VP, model_matrix.M);
 

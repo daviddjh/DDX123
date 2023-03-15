@@ -336,8 +336,6 @@ void D_Renderer::shutdown(){
     }
 
     ds->d_dx12_release();
-    //sampled_texture->d_dx12_release();
-    //vertex_buffer->d_dx12_release();
     constant_buffer->d_dx12_release();
 
     // Release model resources
@@ -415,7 +413,6 @@ int D_Renderer::init(){
     Texture_Desc rt_desc;
     rt_desc.usage = Texture::USAGE::USAGE_RENDER_TARGET;
     rt_desc.rtv_connect_to_next_swapchain_buffer = true;
-
 
     for(int i = 0; i < NUM_BACK_BUFFERS; i++){
         rt[i] = resource_manager.create_texture(L"Render Target", rt_desc);
@@ -730,9 +727,6 @@ void D_Renderer::render(){
 
     present(using_v_sync);
     
-    // Reset online descriptor heaps
-    resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].size = 0;
-
 }
 
 /*
@@ -823,62 +817,7 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                 io.AddMousePosEvent(mouse_x, mouse_y);
 
 			}
-				break;
-
-#if 0
-			case WM_LBUTTONDOWN:
-			{
-				MouseButtonEventArgs args = { DH_MOUSE_BUTTON_L };
-				game_ptr->OnMouseButtonPressed(args);
-			}
-				break;
-
-			case WM_LBUTTONUP:
-			{
-				MouseButtonEventArgs args = { DH_MOUSE_BUTTON_L | DH_MOUSE_BUTTON_UP };
-				game_ptr->OnMouseButtonPressed(args);
-			}
-				break;
-
-			case WM_MOUSEMOVE:
-			{
-				MouseMotionEventArgs args = {
-					GET_X_LPARAM(lParam),
-					GET_Y_LPARAM(lParam)
-				};
-				game_ptr->OnMouseMoved(args);
-			}
-				break;
-
-			case WM_KEYDOWN:
-			{
-				bool alt = (::GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-				switch (wParam) {
-				case VK_ESCAPE:
-				case 'W':
-				case 'A':
-				case 'S':
-				case 'D':
-				{
-					KeyEventArgs args = { alt, wParam };
-					game_ptr->OnKeyPressed(args);
-				}
-				break;
-				case 'V':
-					GraphicsCore::m_Vsync = !GraphicsCore::m_Vsync;
-					break;
-				case VK_RETURN:
-					if (alt)
-					{
-				case VK_F11:
-					GraphicsCore::SetFullscreen(!GraphicsCore::m_Fullscreen);
-					}
-					break;
-				 }
-			}
-			break;
-#endif
-
+            break;
 			case WM_KEYDOWN:
 			{
 				bool alt = (::GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
@@ -945,63 +884,6 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                 GetWindowRect(renderer.hWnd, &test);
             }
             break;
-            #if 0
-            // Closes the program
-            case(WM_SIZING): 
-            {
-                OutputDebugString("Resizing!\n");
-            }
-            break;
-            case(WM_SIZE): 
-            {
-                OutputDebugString("Resized!\n");
-            }
-            break;
-            case(WM_MOVING): 
-            {
-                OutputDebugString("Moving!\n");
-            }
-            break;
-            case(WM_WINDOWPOSCHANGING): 
-            {
-                OutputDebugString("Position Changing!\n");
-                result = DefWindowProc(hWnd, msg, wParam, lParam);
-            }
-            break;
-            case(WM_WINDOWPOSCHANGED): 
-            {
-                OutputDebugString("Position Changed!\n");
-                result = DefWindowProc(hWnd, msg, wParam, lParam);
-            }
-            break;
-            case(WM_LBUTTONDOWN): 
-            {
-                OutputDebugString("Left Click Down!\n");
-            }
-            break;
-            case(WM_LBUTTONUP): 
-            {
-                OutputDebugString("Left Click Up!\n");
-            }
-            break;
-            case(WM_NCLBUTTONDOWN): 
-            {
-                OutputDebugString("Non-Client Left Click Down!\n");
-                result = DefWindowProc(hWnd, msg, wParam, lParam);
-            }
-            break;
-            case(WM_NCLBUTTONUP): 
-            {
-                OutputDebugString("Non-Client Left Click Up!\n");
-                result = DefWindowProc(hWnd, msg, wParam, lParam);
-            }
-            break;
-            case(WM_ENTERSIZEMOVE): 
-            {
-                OutputDebugString("Enter Size Move Loop!\n");
-            }
-            break;
-            #endif
             case(WM_EXITSIZEMOVE): 
             {
                 OutputDebugString("Exit size move loop!\n");

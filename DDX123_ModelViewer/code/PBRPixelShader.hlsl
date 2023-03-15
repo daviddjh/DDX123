@@ -56,10 +56,19 @@ struct PixelShaderInput
     float2 TextureCoordinate   : TEXCOORD;
 };
 
+// Describes the ratio of light that gets reflected over the light that gets refracted
+// F0 is the base reflectivity of the surface
 float3 fresnelSchlick(float cosTheta, float3 F0){
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+// Given a roughness value, statistically estimates the relative surface area of microfacets that
+// are aligned to the halfway vector
+//
+// Low roughness = lots of microfacets aligned in small area = bright specular spot
+// high roughness = some microfacets aligned over large area = no bright spot, much larger surface area lit to a smaller degree
+//
+// The specific normal distribution fucntion we are using is Trowbridge-Reitz GGX
 float DistributionGGX(float3 N, float3 H, float roughness)
 {
     float a      = roughness*roughness;
@@ -74,6 +83,10 @@ float DistributionGGX(float3 N, float3 H, float roughness)
     return num / denom;
 }
 
+// The Geometry function approximates relative surface area where microfacets
+// oclude light that would've made it to the camera based on roughness
+//
+// Rough microfacets == microfacets more likely to occlude light = less light
 float GeometrySchlickGGX(float NdotV, float roughness)
 {
     float r = (roughness + 1.0);
@@ -84,6 +97,8 @@ float GeometrySchlickGGX(float NdotV, float roughness)
 	
     return num / denom;
 }
+
+// Need to calc Geometry function for View direction and light direction, since both can be occluded
 float GeometrySmith(float3 N, float3 V, float3 L, float roughness)
 {
     float NdotV = max(dot(N, V), 0.0);
@@ -100,7 +115,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     // Get Texture Values    
     ////////////////////////
 
-    // TBN
+    // Create Tangent-Bitangent-Normal matrix to convert Tangent Space normal to world space normal
     // https://stackoverflow.com/questions/16555669/hlsl-normal-mapping-matrix-multiplication
     float3 b = normalize(cross(IN.n, IN.t) * 1.).xyz;
     float3x3 TBN = float3x3( normalize(IN.t), normalize(b), normalize(IN.n) );
@@ -151,6 +166,8 @@ float4 main(PixelShaderInput IN) : SV_Target {
     float3 light_direction = float3(.1, -.8, 00.);
     float3 light_color    = float3(200., 200., 200.);
     float3 Lo = float3(0., 0., 0.);
+    
+    // Approximation of base reflectivity for fresnel
     float3 F0 = float3(0.04, 0.04, 0.04); 
     F0 = lerp(F0, albedo_texture_color, metallic);
 
@@ -175,34 +192,25 @@ float4 main(PixelShaderInput IN) : SV_Target {
         float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0)  + 0.0001;
         float specular = numerator / denominator;
 
+        // Fresnel gives us ratio of specular light
         float3 kS = F;
+        // Diffuse is whatever is left
         float3 kD = float3(1.0, 1.0, 1.0) - kS;
 
         // Metalic materials dont refract..
         kD *= 1.0 - metallic;
 
+        // Final Cook Torrance Reflectance Equation
         float NdotL = max(dot(N, L), 0.0);
         Lo += (kD * albedo_texture_color / PI + specular) * radiance * NdotL;
 
     }
 
     float3 ambient = float3(0.005, 0.005, 0.005) * albedo_texture_color;
-    //Lo.r += 0.5;
     float3 color = ambient + Lo;
 	
     color = color / (color + float3(1.0, 1.0, 1.0));
     color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  
    
     return float4(color, 1.0);
-
-    /*
-    Lo /= 30.;
-    Lo.r += metallic;
-    Lo.g += roughness;
-    Lo.b = 1.;
-    */
-    //Lo += albedo_texture_color;
-
-    
-    //return float4(Lo, 1.0);
 }

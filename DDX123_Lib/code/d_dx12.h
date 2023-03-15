@@ -324,6 +324,23 @@ namespace d_dx12 {
 
     };
 
+    #define DYNAMIC_BUFFER_SIZE _64MB
+    struct Dynamic_Buffer {
+
+        Microsoft::WRL::ComPtr<ID3D12Resource2> d3d12_resource;
+
+        u8*  inuse_beginning_ptr;        // Beginning of the range of memory in use
+        u8*  inuse_end_ptr;	             // Ending of the range of memory in use
+        u8*  absolute_beginning_ptr;     // Beginning of the range of memory in use
+        u8*  absolute_ending_ptr;        // Ending of the entire ring buffer allocation
+        u64  size;                       // Capacity of the dynamic buffer
+        u8*  frame_ending_ptrs[NUM_BACK_BUFFERS] = {0}; 
+        void init();
+        u8*  allocate(u64 size, u64 alignment);
+        void reset_frame(u8 frame);
+        void save_frame_ptr(u8 frame);
+    };
+
     // Display (Basically Just swapchain)
     struct Display {
         Microsoft::WRL::ComPtr<IDXGISwapChain4>         d3d12_swap_chain;
