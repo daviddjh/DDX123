@@ -20,6 +20,7 @@ namespace d_dx12 {
     u64                                             frame_fence_values[NUM_BACK_BUFFERS];
     Display                                         display;
     Upload_Buffer                                   upload_buffer;
+    Dynamic_Buffer                                  dynamic_buffer;
 	
     u8 current_backbuffer_index = 0;
     bool is_tearing_supported = false;
@@ -163,8 +164,11 @@ namespace d_dx12 {
         // Flush Command Queue 0
         direct_command_queue.flush();
 
-        // Set up the Upload Buffer
+        // Set up the Upload Buffer (allocate GPU memory, map memory, set ptrs)
         upload_buffer.init();
+
+        // Set up the Dynamic Ring Buffer (allocate GPU memory, map memory, set ptrs)
+        dynamic_buffer.init();
     }
 
     void d_dx12_shutdown(){
@@ -1682,14 +1686,14 @@ namespace d_dx12 {
         );    
 
         if(FAILED(hr)){
-            os_debug_print("Failed to init Dynamic Buffer\n");
+            OutputDebugString("Failed to init Dynamic Buffer\n");
             DEBUG_BREAK;
             return;
         }
 
         // No CPU reads will be done from the resource.
         CD3DX12_RANGE readRange(0, 0);
-        m_spUploadBuffer->Map( 0, &readRange, &((void*)absolute_beginning_ptr)); 
+        d3d12_resource->Map( 0, &readRange, &((void*)absolute_beginning_ptr)); 
         inuse_beginning_ptr = absolute_beginning_ptr;
         inuse_end_ptr = inuse_beginning_ptr;
         absolute_ending_ptr = absolute_beginning_ptr + DYNAMIC_BUFFER_SIZE;
@@ -1708,7 +1712,7 @@ namespace d_dx12 {
 
                 // If the allocation doesn't run past the end of the buffer
                 return_ptr = inuse_end_ptr;
-                return_ptr = AlignPow2Up(return_ptr, alignment);
+                return_ptr = (u8*)AlignPow2Up((u_ptr)return_ptr, alignment);
                 inuse_end_ptr += aligned_size;
                 return return_ptr;
 
@@ -1718,7 +1722,7 @@ namespace d_dx12 {
                 if(inuse_beginning_ptr - absolute_beginning_ptr <= aligned_size){
 
                     return_ptr = absolute_beginning_ptr + aligned_size; 
-                    return_ptr = AlignPow2Up(return_ptr, alignment);
+                    return_ptr = (u8*)AlignPow2Up((u_ptr)return_ptr, alignment);
                     inuse_end_ptr = return_ptr + aligned_size;
 
                 } else {
@@ -1735,7 +1739,7 @@ namespace d_dx12 {
 
     void Dynamic_Buffer::reset_frame(u8 frame){
 
-        if(frame >= sizeof(frame_beginning_ptrs)){
+        if(frame >= sizeof(frame_ending_ptrs)){
             OutputDebugString("Error (save_frame_ptr): Invalid Frame");
             DEBUG_BREAK;
             return;
@@ -1747,7 +1751,7 @@ namespace d_dx12 {
     }
 
     void Dynamic_Buffer::save_frame_ptr(u8 frame){
-        if(frame >= sizeof(frame_beginning_ptrs)){
+        if(frame >= sizeof(frame_ending_ptrs)){
             OutputDebugString("Error (save_frame_ptr): Invalid Frame");
             DEBUG_BREAK;
             return;
@@ -2055,6 +2059,7 @@ namespace d_dx12 {
         UINT syncInterval = using_v_sync ? 1 : 0;
         UINT presentFlags = is_tearing_supported && !using_v_sync ? DXGI_PRESENT_ALLOW_TEARING : 0;
 
+        dynamic_buffer.save_frame_ptr(current_backbuffer_index);
         ThrowIfFailed(display.d3d12_swap_chain->Present(syncInterval, presentFlags));
 
         frame_fence_values[current_backbuffer_index] = direct_command_queue.signal();
@@ -2064,6 +2069,7 @@ namespace d_dx12 {
 
         // Waits for the new current value to make sure the resources are ready to write to
         direct_command_queue.wait_for_fence_value(frame_fence_values[current_backbuffer_index]);
+        dynamic_buffer.reset_frame(current_backbuffer_index);
         
 
     }
