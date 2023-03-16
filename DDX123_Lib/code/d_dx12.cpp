@@ -1705,8 +1705,21 @@ namespace d_dx12 {
         u64 aligned_size = AlignPow2Up(size, alignment);
         u8* return_ptr = 0;
 
+        u64 free_space = 0;
+
+        if (inuse_beginning_ptr < inuse_end_ptr){
+
+            u64 used_space = inuse_end_ptr - inuse_beginning_ptr;
+            free_space = DYNAMIC_BUFFER_SIZE - used_space;
+
+        } else {
+
+            free_space = inuse_beginning_ptr - inuse_end_ptr;
+
+        }
+
         // If our requested allocation fits in the free space
-        if( DYNAMIC_BUFFER_SIZE - ( inuse_beginning_ptr - absolute_beginning_ptr) + (absolute_ending_ptr - inuse_end_ptr) >= aligned_size ){
+        if( free_space >= aligned_size ){
 
             if(inuse_end_ptr + aligned_size <= absolute_ending_ptr){
 
