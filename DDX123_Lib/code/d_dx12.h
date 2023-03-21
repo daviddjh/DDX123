@@ -177,6 +177,7 @@ namespace d_dx12 {
         void init();
         Texture* create_texture(wchar_t* name, Texture_Desc& desc);
         Buffer*  create_buffer(wchar_t* name, Buffer_Desc& desc);
+        Descriptor_Handle load_dyanamic_frame_data(void* ptr, u64 size, u64 alignment);
         void d_dx12_release();
     };
 
@@ -287,6 +288,7 @@ namespace d_dx12 {
         void close();
         void bind_vertex_buffer(Buffer* buffer, u32 slot);
         void bind_index_buffer(Buffer* buffer);
+        void bind_handle(Descriptor_Handle handle, std::string binding_point);
         void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, std::string binding_point);
         u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point);
         void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, std::string parameter_name);
@@ -327,6 +329,14 @@ namespace d_dx12 {
     #define DYNAMIC_BUFFER_SIZE _64MB
     struct Dynamic_Buffer {
 
+        struct Allocation {
+            D3D12_GPU_VIRTUAL_ADDRESS gpu_addr;
+            u8* cpu_addr;
+            u32 resource_offset;
+            Microsoft::WRL::ComPtr<ID3D12Resource2> d3d12_resource;
+            u64 aligned_size;
+        };
+
         Microsoft::WRL::ComPtr<ID3D12Resource2> d3d12_resource;
 
         u8*  inuse_beginning_ptr;        // Beginning of the range of memory in use
@@ -336,7 +346,7 @@ namespace d_dx12 {
         u64  size;                       // Capacity of the dynamic buffer
         u8*  frame_ending_ptrs[NUM_BACK_BUFFERS] = {0}; 
         void init();
-        u8*  allocate(u64 size, u64 alignment);
+        Allocation allocate(u64 size, u64 alignment);
         void reset_frame(u8 frame);
         void save_frame_ptr(u8 frame);
     };

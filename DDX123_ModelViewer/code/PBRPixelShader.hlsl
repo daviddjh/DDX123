@@ -33,6 +33,11 @@ struct Camera_Position {
 };
 ConstantBuffer<Camera_Position> camera_position_buffer: register(b4);
 
+struct Light_Position {
+    float3 light_position;
+};
+ConstantBuffer<Light_Position> light_position_buffer: register(b8);
+
 struct TextureIndex
 {
     int i;
@@ -162,7 +167,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     float3 N = normalize(wNormal);
     float3 V = normalize(camera_position_buffer.camera_position - IN.Frag_World_Position);
-    float3 light_position = float3(00., 10., 00.);
+    float3 light_position = light_position_buffer.light_position;
     float3 light_direction = float3(.1, -.8, 00.);
     float3 light_color    = float3(200., 200., 200.);
     float3 Lo = float3(0., 0., 0.);

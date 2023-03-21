@@ -1306,6 +1306,7 @@ namespace d_dx12 {
 
                 // Not sure where to find this, just showed up in an error...
                 // Guess we need to align CB size to 256
+                // Old NVidia requirement?
                 u16 alignment = 256;
                 u32 remainder = total_size % alignment;
                 u32 aligned_total_size = total_size + (alignment - remainder);
@@ -1339,6 +1340,25 @@ namespace d_dx12 {
 
         return buffer;
 
+    }
+
+    Descriptor_Handle Resource_Manager::load_dyanamic_frame_data(void* input_data_ptr, u64 size, u64 alignment){
+
+        // Allocate from dyanamic buffer and copy data over
+        Dynamic_Buffer::Allocation allocation = dynamic_buffer.allocate(size, alignment);
+        memcpy(allocation.cpu_addr, input_data_ptr, size);
+
+        // Aquire a handle from the online descriptor heap
+        Descriptor_Handle handle = this->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+        // Initialize Descriptor
+        D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc;
+        cbv_desc.BufferLocation = allocation.gpu_addr;
+        // Constant buffer requirement
+        cbv_desc.SizeInBytes = AlignPow2Up(allocation.aligned_size, 256); 
+        d3d12_device->CreateConstantBufferView(&cbv_desc, handle.cpu_descriptor_handle);
+
+        return handle;
     }
 
     void Resource_Manager::d_dx12_release(){
@@ -1700,14 +1720,14 @@ namespace d_dx12 {
 
     }
 
-    u8* Dynamic_Buffer::allocate(u64 size, u64 alignment){
+    Dynamic_Buffer::Allocation Dynamic_Buffer::allocate(u64 size, u64 alignment){
 
         u64 aligned_size = AlignPow2Up(size, alignment);
         u8* return_ptr = 0;
 
         u64 free_space = 0;
 
-        if (inuse_beginning_ptr < inuse_end_ptr){
+        if (inuse_beginning_ptr <= inuse_end_ptr){
 
             u64 used_space = inuse_end_ptr - inuse_beginning_ptr;
             free_space = DYNAMIC_BUFFER_SIZE - used_space;
@@ -1727,7 +1747,6 @@ namespace d_dx12 {
                 return_ptr = inuse_end_ptr;
                 return_ptr = (u8*)AlignPow2Up((u_ptr)return_ptr, alignment);
                 inuse_end_ptr += aligned_size;
-                return return_ptr;
 
             } else {
 
@@ -1742,12 +1761,20 @@ namespace d_dx12 {
 
                     OutputDebugString("Error (Dyamic_Buffer::allocate): Out of space");
                     DEBUG_BREAK;
-                    return return_ptr;
+                    return {0};
 
                 }
             }
         }
-        return return_ptr;
+
+        Allocation allocation;
+        allocation.cpu_addr = return_ptr;
+        allocation.resource_offset = return_ptr - absolute_beginning_ptr;
+        allocation.gpu_addr = d3d12_resource->GetGPUVirtualAddress() + allocation.resource_offset;
+        allocation.d3d12_resource = d3d12_resource;
+        allocation.aligned_size = aligned_size;
+
+        return allocation;
     }
 
     void Dynamic_Buffer::reset_frame(u8 frame){
@@ -1928,6 +1955,13 @@ namespace d_dx12 {
 
     }
 
+    void Command_List::bind_handle(Descriptor_Handle handle, std::string binding_point){
+
+        d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, handle.gpu_descriptor_handle);
+        return;
+
+    }
+
     void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, std::string binding_point){
 
         if(buffer->usage != Buffer::USAGE::USAGE_CONSTANT_BUFFER){
@@ -1943,9 +1977,9 @@ namespace d_dx12 {
             // OOF thats a long line, descriptive though..
             buffer->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
 
+            // Need to copy offline descriptor to online descriptor
             d3d12_device->CopyDescriptorsSimple(1, buffer->online_descriptor_handle.cpu_descriptor_handle, buffer->offline_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-            // Need to copy offline descriptor to online descriptor
             d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
 
         } else {

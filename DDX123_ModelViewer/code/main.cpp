@@ -46,6 +46,7 @@ struct D_Renderer {
     RECT window_rect;
     Span<D_Model> models;
     D_Camera camera;
+    float light_pos[3] = {10., 10., 10.};    
 
     int  init();
     void render();
@@ -521,11 +522,19 @@ int D_Renderer::init(){
 
     // Camera Pos
     Shader_Desc::Parameter camera_pos;
-    view_projection_matrix.name                   = "camera_position_buffer";
-    view_projection_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
-    view_projection_matrix.number_of_32bit_values = sizeof(DirectX::XMVECTOR);
+    camera_pos.name                   = "camera_position_buffer";
+    camera_pos.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+    camera_pos.number_of_32bit_values = sizeof(DirectX::XMVECTOR);
 
-    shader_desc.parameter_list.push_back(view_projection_matrix);
+    shader_desc.parameter_list.push_back(camera_pos);
+
+    // Light Pos
+    Shader_Desc::Parameter light_pos;
+    light_pos.name                   = "light_position_buffer";
+    light_pos.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER;
+    light_pos.number_of_32bit_values = sizeof(float) / 4;
+
+    shader_desc.parameter_list.push_back(light_pos);
 
     /////////////////
     //  Input Layout
@@ -670,6 +679,7 @@ void D_Renderer::render(){
     ImGui::Begin("Info");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
+    ImGui::DragFloat3("Light Position", (this->light_pos));
     #if 0
     ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
     ImGui::SliderFloat("Camera Speed", &camera.speed, 0.0, 20.0);
@@ -711,6 +721,10 @@ void D_Renderer::render(){
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     // vickylovesyou!!
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)this->light_pos, sizeof(this->light_pos), 256);
+    command_list->bind_handle(handle, "light_position_buffer");
+
     command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, "view_projection_matrix");
     command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR), "camera_position_buffer");
     bind_and_draw_model(command_list, &renderer.models.ptr[0]);
