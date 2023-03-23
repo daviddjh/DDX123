@@ -33,10 +33,11 @@ struct Camera_Position {
 };
 ConstantBuffer<Camera_Position> camera_position_buffer: register(b4);
 
-struct Light_Position {
-    float3 light_position;
+struct Per_Frame_Data {
+    float3 light_position;    
+    float3 light_color;
 };
-ConstantBuffer<Light_Position> light_position_buffer: register(b8);
+ConstantBuffer<Per_Frame_Data> per_frame_data: register(b8);
 
 struct TextureIndex
 {
@@ -167,9 +168,9 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     float3 N = normalize(wNormal);
     float3 V = normalize(camera_position_buffer.camera_position - IN.Frag_World_Position);
-    float3 light_position = light_position_buffer.light_position;
-    float3 light_direction = float3(.1, -.8, 00.);
-    float3 light_color    = float3(200., 200., 200.);
+    float3 light_position = per_frame_data.light_position;
+    float3 light_direction = per_frame_data.light_position;
+    float3 light_color    = per_frame_data.light_color;
     float3 Lo = float3(0., 0., 0.);
     
     // Approximation of base reflectivity for fresnel
@@ -178,12 +179,12 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     // Only doing this once because we have one light
     for (int i = 0; i < 1; i++){
-        float3 L = normalize(light_position - IN.Frag_World_Position);
-        //float3 L = normalize(-light_direction);
+        //float3 L = normalize(light_position - IN.Frag_World_Position);
+        float3 L = normalize(-light_direction);
         float3 H = normalize(V + L);
 
         float distance = length(light_position - IN.Frag_World_Position);
-        float attenuation = 1.0 / (distance * distance);
+        float attenuation = 1.0; // (distance * distance);
         float3 radiance = light_color * attenuation;
         
         // For Frensel - F0 = surface reflection at zero incidence

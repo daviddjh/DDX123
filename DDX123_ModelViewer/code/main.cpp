@@ -28,6 +28,12 @@ struct D_Camera {
     float fov   = 100.;
 };
 
+struct Per_Frame_Data {
+    float light_pos[3] = {10., 10., 10.};    
+    float padding = 0.;
+    float light_color[3] = {200., 200., 200.};
+};
+
 // Global Vars, In order of creation
 struct D_Renderer {
 
@@ -46,7 +52,7 @@ struct D_Renderer {
     RECT window_rect;
     Span<D_Model> models;
     D_Camera camera;
-    float light_pos[3] = {10., 10., 10.};    
+    Per_Frame_Data per_frame_data;
 
     int  init();
     void render();
@@ -529,12 +535,12 @@ int D_Renderer::init(){
     shader_desc.parameter_list.push_back(camera_pos);
 
     // Light Pos
-    Shader_Desc::Parameter light_pos;
-    light_pos.name                   = "light_position_buffer";
-    light_pos.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER;
-    light_pos.number_of_32bit_values = sizeof(float) / 4;
+    Shader_Desc::Parameter per_frame_data;
+    per_frame_data.name                   = "per_frame_data";
+    per_frame_data.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER;
+    per_frame_data.number_of_32bit_values = sizeof(Per_Frame_Data) / 4;
 
-    shader_desc.parameter_list.push_back(light_pos);
+    shader_desc.parameter_list.push_back(per_frame_data);
 
     /////////////////
     //  Input Layout
@@ -679,7 +685,8 @@ void D_Renderer::render(){
     ImGui::Begin("Info");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
-    ImGui::DragFloat3("Light Position", (this->light_pos));
+    ImGui::DragFloat3("Light Position", (this->per_frame_data.light_pos));
+    ImGui::DragFloat3("Light Color", (this->per_frame_data.light_color));
     #if 0
     ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
     ImGui::SliderFloat("Camera Speed", &camera.speed, 0.0, 20.0);
@@ -722,8 +729,9 @@ void D_Renderer::render(){
     // vickylovesyou!!
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)this->light_pos, sizeof(this->light_pos), 256);
-    command_list->bind_handle(handle, "light_position_buffer");
+    // Constant Buffer requires 256 byte alignment
+    Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+    command_list->bind_handle(handle, "per_frame_data");
 
     command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, "view_projection_matrix");
     command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR), "camera_position_buffer");
