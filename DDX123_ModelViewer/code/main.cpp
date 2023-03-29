@@ -43,6 +43,7 @@ struct D_Renderer {
     Command_List*  direct_command_lists[NUM_BACK_BUFFERS];
     Texture*       rt[NUM_BACK_BUFFERS];
     Texture*       ds;
+    Texture*       shadow_ds;
     Texture*       sampled_texture;
     Buffer*        vertex_buffer;
     Buffer*        index_buffer;
@@ -431,6 +432,13 @@ int D_Renderer::init(){
     ds_desc.height = display_height;
 
     ds = resource_manager.create_texture(L"Depth Stencil", ds_desc);
+
+    Texture_Desc shadow_ds_desc;
+    ds_desc.usage = Texture::USAGE::USAGE_DEPTH_STENCIL;
+    ds_desc.width = display_width;
+    ds_desc.height = display_height;
+
+    shadow_ds = resource_manager.create_texture(L"Shadow Depth Stencil", shadow_ds_desc);
 
 
     ///////////////////////////////////////////////

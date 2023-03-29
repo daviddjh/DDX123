@@ -1,3 +1,13 @@
+3/26/2023
+
+Made a dynameic per-frame data upload buffer. Implemented as a ring buffer. Currently using for direction
+and color of directional light. Want to implement shadow map next. Looks like it will cause some changes
+to dx12 idea of "render pass". Need to make multiple render passes integrate easier.
+
+TODO:
+Implement "render_pass" structs.
+Use them to do shadow mapping.
+
 3/5/2023
 
 Got Physically Based Rendering in the sponza scene! I was having a problem because I was using the wrong
