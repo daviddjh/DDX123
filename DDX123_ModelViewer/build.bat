@@ -10,8 +10,8 @@ pushd C:\dev\DDX123\DDX123_ModelViewer\build
 :: remedybg.exe stop-debugging
 
 :: Compile Shaders
-"%WindowsSdkVerBinPath%x64\FXC.exe" /Od /Zi /T vs_5_1 /enable_unbounded_descriptor_tables /Fo VertexShader.cso ..\code\VertexShader.hlsl
-"%WindowsSdkVerBinPath%x64\FXC.exe" /Od /Zi /T ps_5_1 /enable_unbounded_descriptor_tables /Fo PixelShader.cso  ..\code\PixelShader.hlsl
+"%WindowsSdkVerBinPath%x64\FXC.exe" /Od /Zi /T vs_5_1 /enable_unbounded_descriptor_tables /Fo ShadowMapVertexShader.cso ..\code\ShadowMapVertexShader.hlsl
+"%WindowsSdkVerBinPath%x64\FXC.exe" /Od /Zi /T ps_5_1 /enable_unbounded_descriptor_tables /Fo ShadowMapPixelShader.cso  ..\code\ShadowMapPixelShader.hlsl
 "%WindowsSdkVerBinPath%x64\FXC.exe" /Od /Zi /T vs_5_1 /enable_unbounded_descriptor_tables /Fo PBRVertexShader.cso ..\code\PBRVertexShader.hlsl
 "%WindowsSdkVerBinPath%x64\FXC.exe" /Od /Zi /T ps_5_1 /enable_unbounded_descriptor_tables /Fo PBRPixelShader.cso  ..\code\PBRPixelShader.hlsl
 

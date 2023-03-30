@@ -29,31 +29,32 @@ struct D_Camera {
 };
 
 struct Per_Frame_Data {
-    float light_pos[3] = {10., 10., 10.};    
+    float light_pos[3] = {2., -7., 2.};    
     float padding = 0.;
-    float light_color[3] = {200., 200., 200.};
+    float light_color[3] = {20., 20., 20.};
 };
 
 // Global Vars, In order of creation
 struct D_Renderer {
 
-    HWND hWnd;
-    Resource_Manager resource_manager;
-    Shader* shader;
-    Command_List*  direct_command_lists[NUM_BACK_BUFFERS];
-    Texture*       rt[NUM_BACK_BUFFERS];
-    Texture*       ds;
-    Texture*       shadow_ds;
-    Texture*       sampled_texture;
-    Buffer*        vertex_buffer;
-    Buffer*        index_buffer;
-    Buffer*        constant_buffer;
-    d_dx12::Descriptor_Handle imgui_font_handle;
-    bool fullscreen_mode = false;
-    RECT window_rect;
-    Span<D_Model> models;
-    D_Camera camera;
-    Per_Frame_Data per_frame_data;
+    HWND              hWnd;
+    Resource_Manager  resource_manager;
+    Shader*           pbr_shader;
+    Shader*           shadow_map_shader;
+    Command_List*     direct_command_lists[NUM_BACK_BUFFERS];
+    Texture*          rt[NUM_BACK_BUFFERS];
+    Texture*          ds;
+    Texture*          shadow_ds;
+    Texture*          sampled_texture;
+    Buffer*           vertex_buffer;
+    Buffer*           index_buffer;
+    Buffer*           constant_buffer;
+    Descriptor_Handle imgui_font_handle;
+    bool              fullscreen_mode = false;
+    RECT              window_rect;
+    Span<D_Model>     models;
+    D_Camera          camera;
+    Per_Frame_Data    per_frame_data;
 
     int  init();
     void render();
@@ -336,7 +337,7 @@ void D_Renderer::shutdown(){
     // d_dx12 shutdown
 
     resource_manager.d_dx12_release();
-    shader->d_dx12_release();
+    pbr_shader->d_dx12_release();
 
     for(int i = 0; i < NUM_BACK_BUFFERS; i++){
         direct_command_lists[i]->d_dx12_release();
@@ -434,9 +435,9 @@ int D_Renderer::init(){
     ds = resource_manager.create_texture(L"Depth Stencil", ds_desc);
 
     Texture_Desc shadow_ds_desc;
-    ds_desc.usage = Texture::USAGE::USAGE_DEPTH_STENCIL;
-    ds_desc.width = display_width;
-    ds_desc.height = display_height;
+    shadow_ds_desc.usage = Texture::USAGE::USAGE_DEPTH_STENCIL;
+    shadow_ds_desc.width = display_width;
+    shadow_ds_desc.height = display_height;
 
     shadow_ds = resource_manager.create_texture(L"Shadow Depth Stencil", shadow_ds_desc);
 
@@ -450,122 +451,185 @@ int D_Renderer::init(){
     }
 
 
-    //////////////////////////////////
-    //  Create our shader / PSO
-    //////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    //  PBR Shader
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    Shader_Desc shader_desc;
+    {
 
-    //////////////////////////////////
-    //  Set compiled shader code
-    //////////////////////////////////
+        //////////////////////////////////
+        //  Create our shader / PSO
+        //////////////////////////////////
 
-    shader_desc.vertex_shader = L"PBRVertexShader.cso";
-    shader_desc.pixel_shader  = L"PBRPixelShader.cso";
+        Shader_Desc shader_desc;
 
+        //////////////////////////////////
+        //  Set compiled shader code
+        //////////////////////////////////
 
-    //////////////////////////////////
-    //  Specify our shader Parameters
-    //////////////////////////////////
-
-    // Sampler Parameter
-    Shader_Desc::Parameter::Static_Sampler_Desc sampler_1_ssd;
-    sampler_1_ssd.filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    sampler_1_ssd.comparison_func  = D3D12_COMPARISON_FUNC_NEVER;
-    sampler_1_ssd.min_lod          = 0;
-    sampler_1_ssd.max_lod          = D3D12_FLOAT32_MAX;
-
-    Shader_Desc::Parameter sampler_1;
-    sampler_1.name                = "sampler_1";
-    sampler_1.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_STATIC_SAMPLER;
-    sampler_1.static_sampler_desc = sampler_1_ssd;
-
-    shader_desc.parameter_list.push_back(sampler_1);
-
-    // Bindless Texture Table - Where all our texture descriptors should go. Index is used by our shader to retrieve texture
-    Shader_Desc::Parameter texture_2d_table;
-    texture_2d_table.name                = "texture_2d_table";
-    texture_2d_table.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
-
-    shader_desc.parameter_list.push_back(texture_2d_table);
+        shader_desc.vertex_shader = L"PBRVertexShader.cso";
+        shader_desc.pixel_shader  = L"PBRPixelShader.cso";
 
 
-    // Material Flags
-    Shader_Desc::Parameter material_flags;
-    material_flags.name                   = "material_flags";
-    material_flags.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
-    material_flags.number_of_32bit_values = 1;
+        //////////////////////////////////
+        //  Specify our shader Parameters
+        //////////////////////////////////
 
-    shader_desc.parameter_list.push_back(material_flags);
+        // Sampler Parameter
+        Shader_Desc::Parameter::Static_Sampler_Desc sampler_1_ssd;
+        sampler_1_ssd.filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler_1_ssd.comparison_func  = D3D12_COMPARISON_FUNC_NEVER;
+        sampler_1_ssd.min_lod          = 0;
+        sampler_1_ssd.max_lod          = D3D12_FLOAT32_MAX;
 
-    // Albedo Index
-    Shader_Desc::Parameter albedo_index;
-    albedo_index.name                   = "albedo_index";
-    albedo_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
-    albedo_index.number_of_32bit_values = 1;
-    shader_desc.parameter_list.push_back(albedo_index);
+        Shader_Desc::Parameter sampler_1;
+        sampler_1.name                = "sampler_1";
+        sampler_1.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_STATIC_SAMPLER;
+        sampler_1.static_sampler_desc = sampler_1_ssd;
 
-    // Normal Index
-    Shader_Desc::Parameter normal_index;
-    normal_index.name                   = "normal_index";
-    normal_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
-    normal_index.number_of_32bit_values = 1;
-    shader_desc.parameter_list.push_back(normal_index);
+        shader_desc.parameter_list.push_back(sampler_1);
 
-    // Roughness-Metallic Index
-    Shader_Desc::Parameter roughness_metallic_index;
-    roughness_metallic_index.name                   = "roughness_metallic_index";
-    roughness_metallic_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
-    roughness_metallic_index.number_of_32bit_values = 1;
-    shader_desc.parameter_list.push_back(roughness_metallic_index);
+        // Bindless Texture Table - Where all our texture descriptors should go. Index is used by our shader to retrieve texture
+        Shader_Desc::Parameter texture_2d_table;
+        texture_2d_table.name                = "texture_2d_table";
+        texture_2d_table.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
 
-    // Model Matrix
-    Shader_Desc::Parameter model_matrix;
-    model_matrix.name                   = "model_matrix";
-    model_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
-    model_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
-    shader_desc.parameter_list.push_back(model_matrix);
-
-    // View Matrix
-    Shader_Desc::Parameter view_projection_matrix;
-    view_projection_matrix.name                   = "view_projection_matrix";
-    view_projection_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
-    view_projection_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
-
-    shader_desc.parameter_list.push_back(view_projection_matrix);
-
-    // Camera Pos
-    Shader_Desc::Parameter camera_pos;
-    camera_pos.name                   = "camera_position_buffer";
-    camera_pos.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
-    camera_pos.number_of_32bit_values = sizeof(DirectX::XMVECTOR);
-
-    shader_desc.parameter_list.push_back(camera_pos);
-
-    // Light Pos
-    Shader_Desc::Parameter per_frame_data;
-    per_frame_data.name                   = "per_frame_data";
-    per_frame_data.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER;
-    per_frame_data.number_of_32bit_values = sizeof(Per_Frame_Data) / 4;
-
-    shader_desc.parameter_list.push_back(per_frame_data);
-
-    /////////////////
-    //  Input Layout
-    /////////////////
-
-    shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"NORMAL"     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"TANGENT"    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
+        shader_desc.parameter_list.push_back(texture_2d_table);
 
 
-    /////////////////////////////////////////
-    //  Create PSO using shader reflection
-    /////////////////////////////////////////
+        // Material Flags
+        Shader_Desc::Parameter material_flags;
+        material_flags.name                   = "material_flags";
+        material_flags.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        material_flags.number_of_32bit_values = 1;
 
-    shader = create_shader(shader_desc);
+        shader_desc.parameter_list.push_back(material_flags);
+
+        // Albedo Index
+        Shader_Desc::Parameter albedo_index;
+        albedo_index.name                   = "albedo_index";
+        albedo_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        albedo_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(albedo_index);
+
+        // Normal Index
+        Shader_Desc::Parameter normal_index;
+        normal_index.name                   = "normal_index";
+        normal_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        normal_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(normal_index);
+
+        // Roughness-Metallic Index
+        Shader_Desc::Parameter roughness_metallic_index;
+        roughness_metallic_index.name                   = "roughness_metallic_index";
+        roughness_metallic_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        roughness_metallic_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(roughness_metallic_index);
+
+        // Model Matrix
+        Shader_Desc::Parameter model_matrix;
+        model_matrix.name                   = "model_matrix";
+        model_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        model_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
+        shader_desc.parameter_list.push_back(model_matrix);
+
+        // View Matrix
+        Shader_Desc::Parameter view_projection_matrix;
+        view_projection_matrix.name                   = "view_projection_matrix";
+        view_projection_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        view_projection_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
+
+        shader_desc.parameter_list.push_back(view_projection_matrix);
+
+        // Camera Pos
+        Shader_Desc::Parameter camera_pos;
+        camera_pos.name                   = "camera_position_buffer";
+        camera_pos.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        camera_pos.number_of_32bit_values = sizeof(DirectX::XMVECTOR);
+
+        shader_desc.parameter_list.push_back(camera_pos);
+
+        // Light Pos
+        Shader_Desc::Parameter per_frame_data;
+        per_frame_data.name                   = "per_frame_data";
+        per_frame_data.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER;
+        per_frame_data.number_of_32bit_values = sizeof(Per_Frame_Data) / 4;
+
+        shader_desc.parameter_list.push_back(per_frame_data);
+
+        /////////////////
+        //  Input Layout
+        /////////////////
+
+        shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"NORMAL"     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"TANGENT"    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
+
+
+        /////////////////////////////////////////
+        //  Create PSO using shader reflection
+        /////////////////////////////////////////
+
+        pbr_shader = create_shader(shader_desc);
+
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    //  Shadow Map Shader
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    {
+
+        //////////////////////////////////
+        //  Create our shader / PSO
+        //////////////////////////////////
+
+        Shader_Desc shader_desc;
+
+        //////////////////////////////////
+        //  Set compiled shader code
+        //////////////////////////////////
+
+        shader_desc.vertex_shader = L"ShadowMapVertexShader.cso";
+        shader_desc.pixel_shader  = L"ShadowMapPixelShader.cso";
+
+
+        // Model Matrix
+        Shader_Desc::Parameter model_matrix;
+        model_matrix.name                   = "model_matrix";
+        model_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        model_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
+        shader_desc.parameter_list.push_back(model_matrix);
+
+        // Light Space Matrix
+        Shader_Desc::Parameter light_space_matrix;
+        light_space_matrix.name                   = "light_matrix";
+        light_space_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        light_space_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
+        shader_desc.parameter_list.push_back(light_space_matrix);
+
+
+        /////////////////
+        //  Input Layout
+        /////////////////
+
+        shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"NORMAL"     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"TANGENT"    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
+
+
+        /////////////////////////////////////////
+        //  Create PSO using shader reflection
+        /////////////////////////////////////////
+
+        shadow_map_shader = create_shader(shader_desc);
+
+    }
 
 
     ////////////////////////////
@@ -676,9 +740,11 @@ void D_Renderer::render(){
     // Resets command list, command allocator, and online cbv_srv_uav descriptor heap in resource manager
     command_list->reset();
 
-    //////////////////////
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /// Dear IMGUI
-    //////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
     // Bind IMGUI Fonts
     Descriptor_Handle online_imgui_font_handle = command_list->bind_descriptor_handles_to_online_descriptor_heap(imgui_font_handle, 1);
     ImGuiIO& imgui_io = ImGui::GetIO();
@@ -695,20 +761,47 @@ void D_Renderer::render(){
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
     ImGui::DragFloat3("Light Position", (this->per_frame_data.light_pos));
     ImGui::DragFloat3("Light Color", (this->per_frame_data.light_color));
-    #if 0
-    ImGui::DragFloat3("Model Position", &renderer.models.ptr[0].coords.x);
-    ImGui::SliderFloat("Camera Speed", &camera.speed, 0.0, 20.0);
-    ImGui::SliderFloat("Camera FOV", &camera.fov, 70.0, 130.0);
-    #endif
     ImGui::End();
     ImGui::Render();
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Shadow Map
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    DirectX::XMVECTOR light_position = DirectX::XMVectorSet((-per_frame_data.light_pos[0] * 50), (-per_frame_data.light_pos[1] * 50), (-per_frame_data.light_pos[2] * 50), 1.0);
+    DirectX::XMVECTOR light_direction = DirectX::XMVectorSet((per_frame_data.light_pos[0]), (per_frame_data.light_pos[1]), (per_frame_data.light_pos[2]), 1.0);
+    DirectX::XMMATRIX light_view_matrix = DirectX::XMMatrixLookToRH(light_position, DirectX::XMVector4Normalize(light_direction), camera.up_direction);
+    DirectX::XMMATRIX light_projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500.0f);
+    DirectX::XMMATRIX light_view_projection_matrix = DirectX::XMMatrixMultiply(light_view_matrix, light_projection_matrix);
+
+    // Fill the command list:
+    command_list->set_shader(shadow_map_shader);
+
+    // Transition the DS to DS_WRITE
+    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_DEPTH_WRITE);
+
+    // Set up render targets. Here, we are just using a depth buffer
+    command_list->set_viewport(display.viewport);
+    command_list->set_scissor_rect(display.scissor_rect);
+    command_list->set_render_targets(0, NULL, shadow_ds);
+
+    command_list->clear_depth_stencil(ds, 1.0f);
+
+    command_list->bind_constant_arguments(&light_view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, "light_matrix");
+
+    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+    
+    // Transition shadow ds to Pixel Resource State
+    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Physically based shading
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     ////////////////////////////
     /// Update Camera Matricies
     ////////////////////////////
 
     DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
-    
     DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500.0f);
     DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
 
@@ -717,12 +810,14 @@ void D_Renderer::render(){
     //////////////////////
 
     // Fill the command list:
-    command_list->set_shader(shader);
+    command_list->set_shader(pbr_shader);
 
     // Transition the RT
     command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    command_list->set_render_targets(rt[current_backbuffer_index], ds);
+    command_list->set_viewport(display.viewport);
+    command_list->set_scissor_rect(display.scissor_rect);
+    command_list->set_render_targets(1, rt[current_backbuffer_index], ds);
 
     // Clear the render target and depth stencil
     FLOAT clear_color[] = {0.2f, 0.2, 0.7f, 1.0f};

@@ -295,7 +295,11 @@ namespace d_dx12 {
         void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, std::string binding_point);
         Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
         void set_shader(Shader* shader);
-        void set_render_targets(Texture* rt, Texture* ds);
+        void set_render_targets(u8 num_render_targets, Texture* rt, Texture* ds);
+        void set_viewport(float top_left_x, float top_left_y, float width, float height);
+        void set_viewport(D3D12_VIEWPORT viewport);
+        void set_scissor_rect(float left, float top, float right, float bottom);
+        void set_scissor_rect(D3D12_RECT scissor_rect);
         void draw(u32 number_of_verticies);
         void draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset);
         void d_dx12_release();

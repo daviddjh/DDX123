@@ -273,6 +273,7 @@ namespace d_dx12 {
             if (hFile == INVALID_HANDLE_VALUE) 
             { 
                 OutputDebugString("Terminal failure: unable to open shader file for read.\n");
+                DEBUG_BREAK;
                 return; 
             }
 
@@ -346,6 +347,7 @@ namespace d_dx12 {
             if (hFile == INVALID_HANDLE_VALUE) 
             { 
                 OutputDebugString("Terminal failure: unable to open shader file for read.\n");
+                DEBUG_BREAK;
                 return; 
             }
 
@@ -2036,11 +2038,16 @@ namespace d_dx12 {
             DEBUG_BREAK;
         }
 
-        // Get the first handle in the online heap, this is the first handle of the texture table
-        Descriptor_Handle handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(0);
+        // If the shader contains this binding point
+        if(current_bound_shader->binding_points.count(binding_point)){
 
-        // Set descriptor in Root Signature
-        d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, handle.gpu_descriptor_handle);
+            // Get the first handle in the online heap, this is the first handle of the texture table
+            Descriptor_Handle handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(0);
+
+            // Set descriptor in Root Signature
+            d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, handle.gpu_descriptor_handle);
+
+        }
 
         return;
     }
@@ -2063,19 +2070,31 @@ namespace d_dx12 {
         // TODO...
         if(this->type == D3D12_COMMAND_LIST_TYPE_DIRECT){
 
-            Shader::Binding_Point* binding_point = &this->current_bound_shader->binding_points[parameter_name];
-            u32 root_signature_index = binding_point->root_signature_index;
+            // If the shader contains this binding point
+            if(&this->current_bound_shader->binding_points.count(parameter_name)){
 
-            d3d12_command_list->SetGraphicsRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);
+                Shader::Binding_Point* binding_point = &this->current_bound_shader->binding_points[parameter_name];
+                u32 root_signature_index = binding_point->root_signature_index;
+
+                d3d12_command_list->SetGraphicsRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);
+
+            }
 
         } else if(this->type == D3D12_COMMAND_LIST_TYPE_COMPUTE){
 
-            Shader::Binding_Point* binding_point = &this->current_bound_shader->binding_points[parameter_name];
-            u32 root_signature_index = binding_point->root_signature_index;
+            // If the shader contains this binding point
+            if(&this->current_bound_shader->binding_points.count(parameter_name)){
 
-            d3d12_command_list->SetComputeRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);
+                Shader::Binding_Point* binding_point = &this->current_bound_shader->binding_points[parameter_name];
+                u32 root_signature_index = binding_point->root_signature_index;
+
+                d3d12_command_list->SetComputeRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);
+            
+            }
         } else {
+
             OutputDebugString("Error (set_inline_constants): Cannot set inline constants for this command list type");
+
         }
     }
 
@@ -2085,12 +2104,32 @@ namespace d_dx12 {
         d3d12_command_list->SetPipelineState(shader->d3d12_pipeline_state.Get());
     }
 
-    void Command_List::set_render_targets(Texture* rt, Texture* ds){
+    void Command_List::set_render_targets(u8 num_render_targets, Texture* rt, Texture* ds){
 
-        d3d12_command_list->RSSetViewports(1, &display.viewport);
-        d3d12_command_list->RSSetScissorRects(1, &display.scissor_rect);
-        d3d12_command_list->OMSetRenderTargets(1, &rt->offline_descriptor_handle.cpu_descriptor_handle, FALSE, &ds->offline_descriptor_handle.cpu_descriptor_handle);
+        if(num_render_targets > 0){
+            // If you have multiple render targets, they must be sequential in the descriptor heap
+            d3d12_command_list->OMSetRenderTargets(num_render_targets, &rt->offline_descriptor_handle.cpu_descriptor_handle, FALSE, &ds->offline_descriptor_handle.cpu_descriptor_handle);
+        } else {
+            d3d12_command_list->OMSetRenderTargets(0, NULL, FALSE, &ds->offline_descriptor_handle.cpu_descriptor_handle);
+        }
 
+    }
+
+    void Command_List::set_viewport(float top_left_x, float top_left_y, float width, float height){
+
+        d3d12_command_list->RSSetViewports(1, &CD3DX12_VIEWPORT(top_left_x, top_left_y, width, height));
+    }
+    void Command_List::set_viewport(D3D12_VIEWPORT viewport){
+
+        d3d12_command_list->RSSetViewports(1, &viewport);
+    }
+    void Command_List::set_scissor_rect(float left, float top, float right, float bottom){
+
+        d3d12_command_list->RSSetScissorRects(1, &CD3DX12_RECT(left, top, right, bottom));
+    }
+    void Command_List::set_scissor_rect(D3D12_RECT scissor_rect){
+
+        d3d12_command_list->RSSetScissorRects(1, &scissor_rect);
     }
 
     void Command_List::draw(u32 number_of_indicies){

@@ -1,3 +1,17 @@
+3/29/2023
+
+Jumped right into the Shadow Map pass. Found lots of problems with d_dx12 layer assumptions (automatic
+viewport and scissor_rect selection).
+
+Wrote a Shadow Map Shader. All it does is generate a depth texture in light space.
+
+Do we really need to pass all the vertex attributes to the shadow map shader if it's only reading the
+position??
+
+Need to do a clean up pass where I try to remove code and naming inconsitincies. ("binding_point" vs "parameter_name")
+
+Also need to do a NVidia Profile. Why is debug build 55fps???? Was gettign 300fps+ before???
+
 3/26/2023
 
 Made a dynameic per-frame data upload buffer. Implemented as a ring buffer. Currently using for direction
