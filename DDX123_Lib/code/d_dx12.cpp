@@ -3,9 +3,6 @@
 #include "WICTextureLoader.h"
 #include "DirectXTex.h"
 
-#define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
-#define DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE 75
-
 // Are we using WARP ?
 #define USING_WARP 0
 
@@ -790,6 +787,7 @@ namespace d_dx12 {
             //resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].next_cpu_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].d3d12_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
             //resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].next_gpu_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].d3d12_descriptor_heap->GetGPUDescriptorHandleForHeapStart();
             resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].reset();
+            resource_manager->reset_is_bound_online();
 
             ID3D12DescriptorHeap* ppDescriptorHeap[] = {
                 resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].d3d12_descriptor_heap.Get()
@@ -814,6 +812,7 @@ namespace d_dx12 {
 
         // Inserts the barrier into the command list
         d3d12_command_list->ResourceBarrier(1, &barrier_to_render_target);
+
 
     }
 
@@ -956,10 +955,12 @@ namespace d_dx12 {
             DEBUG_BREAK;
         }
         
+        #if 0
         if(is_gpu_visible && capacity <= DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE){
             OutputDebugString("Error(Descriptor_Heap::init) This Descriptor Heap will not be big enough to fit the texture descriptors");
             DEBUG_BREAK;
         }
+        #endif
 
         this->is_gpu_visible = is_gpu_visible;
         this->type           = type;
@@ -1023,7 +1024,7 @@ namespace d_dx12 {
             return handle;
 
         } else {
-            OutputDebugString("Error (get_next_handle): No more handles left!");
+            OutputDebugString("Error (get_next_handle): No more handles left!\n");
             DEBUG_BREAK;
             return { };
         }
@@ -1055,7 +1056,7 @@ namespace d_dx12 {
             return handle;
 
         } else {
-            OutputDebugString("Error (get_next_handle): Invalid Index!");
+            OutputDebugString("Error (get_next_handle): Invalid Index!\n");
             DEBUG_BREAK;
             return { };
         }
@@ -1095,7 +1096,7 @@ namespace d_dx12 {
             return handle;
 
         } else {
-            OutputDebugString("Error (get_next_handle): No more handles left!");
+            OutputDebugString("Error (get_next_texture_handle): No more handles left!\n");
             DEBUG_BREAK;
             return { };
         }
@@ -1138,10 +1139,20 @@ namespace d_dx12 {
         rtv_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 16);
         dsv_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 16);
         offline_cbv_srv_uav_descriptor_heap.init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 300);
+
         for(int i = 0; i < NUM_BACK_BUFFERS; i++){
-
             online_cbv_srv_uav_descriptor_heap[i].init(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 300, true);
+        }
 
+        reset_is_bound_online();
+
+    }
+    
+    void Resource_Manager::reset_is_bound_online(){
+
+        // Need to fill is_bound_online table with invalid online_descriptor_heap_index values
+        for(int i = 0; i < IS_BOUND_ONLINE_TABLE_SIZE; i++){
+            is_bound_online[i] = ((u16)-1);
         }
 
     }
@@ -1151,6 +1162,10 @@ namespace d_dx12 {
         Texture* texture = new Texture;
         texture->usage = desc.usage;
         texture->name  = desc.name;
+
+        // Reserve an index into the "is_bound_online" table - used to check if already in the online descriptor table
+        texture->is_bound_index = is_bound_online_index;
+        is_bound_online_index++;
 
         switch(desc.usage){
             case(Texture::USAGE::USAGE_RENDER_TARGET):
@@ -1175,6 +1190,7 @@ namespace d_dx12 {
                     texture->width = swap_chain_desc.Width;
                     texture->height = swap_chain_desc.Height;
 
+                    texture->state = D3D12_RESOURCE_STATE_COMMON;
                 }
 
             }
@@ -1199,6 +1215,8 @@ namespace d_dx12 {
                     &optimizedClearValue,
                     IID_PPV_ARGS(&texture->d3d12_resource)
                 ));
+
+                texture->state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
 
                 texture->d3d12_resource->SetName(name);
 
@@ -1228,7 +1246,6 @@ namespace d_dx12 {
                 texture->pixel_size = desc.pixel_size;
 
                 // Empty to start, need to load a file into a resource and connect it to this texture
-                // -> LoadTextureFromFile();
 
             }
             break;
@@ -1237,8 +1254,6 @@ namespace d_dx12 {
                 OutputDebugString("Error (create_texture): Invalid Texture Usage");
                 DEBUG_BREAK;
         }
-
-        texture->state = D3D12_RESOURCE_STATE_COMMON;
 
         return texture;
 
@@ -1251,6 +1266,10 @@ namespace d_dx12 {
         buffer->number_of_elements = desc.number_of_elements;
         buffer->size_of_each_element = desc.size_of_each_element;
         u32 total_size = desc.number_of_elements * desc.size_of_each_element;
+
+        // Reserve an index into the "is_bound_online" table - used to check if already in the online descriptor table
+        buffer->is_bound_index = is_bound_online_index;
+        is_bound_online_index++;
 
         buffer->state = D3D12_RESOURCE_STATE_COPY_DEST;
 
@@ -1522,7 +1541,7 @@ namespace d_dx12 {
             // Remap after Update Subresources unmaps
             upload_buffer.d3d12_resource->Map(0, &CD3DX12_RANGE(0, upload_buffer.capacity), (void**)&(upload_buffer.start_cpu));
 
-            this->transition_texture(texture, D3D12_RESOURCE_STATE_COMMON);
+            //this->transition_texture(texture, D3D12_RESOURCE_STATE_COMMON);
 
             /*
             // Problems because it Maps and Unmaps
@@ -1976,21 +1995,32 @@ namespace d_dx12 {
                 this->transition_buffer(buffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
             }
 
-            // OOF thats a long line, descriptive though..
-            buffer->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+            if(resource_manager->is_bound_online[buffer->is_bound_index] == ((u16)-1)){
 
-            // Need to copy offline descriptor to online descriptor
-            d3d12_device->CopyDescriptorsSimple(1, buffer->online_descriptor_handle.cpu_descriptor_handle, buffer->offline_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                // OOF thats a long line, descriptive though..
+                buffer->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
 
-            d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
+                // Need to copy offline descriptor to online descriptor
+                d3d12_device->CopyDescriptorsSimple(1, buffer->online_descriptor_handle.cpu_descriptor_handle, buffer->offline_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+                d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
+
+                // Don't need to save the index into the descriptor heap because these aren't bindless buffers
+                resource_manager->is_bound_online[buffer->is_bound_index] = 1;
+
+            }
 
         } else {
             OutputDebugString("Error: bind_buffer currently requires a buffer with usage: USAGE_CONSTANT_BUFFER");
             DEBUG_BREAK;
         }
+
+        return;
     }
 
     u8 Command_List::bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point){
+
+        u16 index_to_return = -1;
         
         switch(texture->usage){
             case(Texture::USAGE::USAGE_SAMPLED):
@@ -2005,11 +2035,66 @@ namespace d_dx12 {
                     this->transition_texture(texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                 }
 
-                // OOF thats a long line, descriptive though..
-                texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();
+                if(resource_manager->is_bound_online[texture->is_bound_index] == ((u16)-1)){
 
-                // Copy offline descriptor to online descriptor
-                d3d12_device->CopyDescriptorsSimple(1, texture->online_descriptor_handle.cpu_descriptor_handle, texture->offline_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                    // OOF thats a long line, descriptive though..
+                    texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();
+
+                    // Copy offline descriptor to online descriptor
+                    d3d12_device->CopyDescriptorsSimple(1, texture->online_descriptor_handle.cpu_descriptor_handle, texture->offline_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                    index_to_return = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size - 1;
+                    
+                    // Remember that we have bound this texture to the online_descriptor_heap
+                    resource_manager->is_bound_online[texture->is_bound_index] = index_to_return;
+
+                } else {
+
+                    index_to_return = resource_manager->is_bound_online[texture->is_bound_index];
+
+                }
+
+                // Set descriptor in Root Signature
+                // No longer needed! Textures now bound to root signature with bind_online_descriptor_heap_texture_table
+                //d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, texture->online_descriptor_handle.gpu_descriptor_handle);
+            }
+            case(Texture::USAGE::USAGE_DEPTH_STENCIL):
+            {
+
+                if(resource_manager == NULL){
+                    OutputDebugString("Error (Command_List::bind_texture): no valid resource_manager");
+                    DEBUG_BREAK;
+                }
+
+                if(texture->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE){
+                    this->transition_texture(texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                }
+
+                if(resource_manager->is_bound_online[texture->is_bound_index] == ((u16)-1)){
+
+                    // OOF thats a long line, descriptive though..
+                    texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();
+                    index_to_return = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size - 1;
+
+                    // Create the shader resource view for the depth texture
+                    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                    srvDesc.Format                          = DXGI_FORMAT_R32_FLOAT; // Use R32_FLOAT for depth textures
+                    srvDesc.ViewDimension                   = D3D12_SRV_DIMENSION_TEXTURE2D;
+                    srvDesc.Texture2D.MipLevels             = 1;
+                    srvDesc.Texture2D.MostDetailedMip       = 0;
+                    srvDesc.Texture2D.PlaneSlice            = 0;
+                    srvDesc.Texture2D.ResourceMinLODClamp   = 0.0f;
+                    srvDesc.Shader4ComponentMapping         = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srvDesc, texture->online_descriptor_handle.cpu_descriptor_handle);
+
+                    
+                    // Remember that we have bound this texture to the online_descriptor_heap
+                    resource_manager->is_bound_online[texture->is_bound_index] = index_to_return;
+
+                } else {
+
+                    index_to_return = resource_manager->is_bound_online[texture->is_bound_index];
+
+                }
 
                 // Set descriptor in Root Signature
                 // No longer needed! Textures now bound to root signature with bind_online_descriptor_heap_texture_table
@@ -2026,7 +2111,7 @@ namespace d_dx12 {
         }
 
         // Returns the index of the most recently added texture descriptor
-        return resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size - 1;
+        return index_to_return;
 
     }
 
@@ -2071,9 +2156,9 @@ namespace d_dx12 {
         if(this->type == D3D12_COMMAND_LIST_TYPE_DIRECT){
 
             // If the shader contains this binding point
-            if(&this->current_bound_shader->binding_points.count(parameter_name)){
+            if(current_bound_shader->binding_points.count(parameter_name)){
 
-                Shader::Binding_Point* binding_point = &this->current_bound_shader->binding_points[parameter_name];
+                Shader::Binding_Point* binding_point = &current_bound_shader->binding_points[parameter_name];
                 u32 root_signature_index = binding_point->root_signature_index;
 
                 d3d12_command_list->SetGraphicsRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);
@@ -2083,9 +2168,9 @@ namespace d_dx12 {
         } else if(this->type == D3D12_COMMAND_LIST_TYPE_COMPUTE){
 
             // If the shader contains this binding point
-            if(&this->current_bound_shader->binding_points.count(parameter_name)){
+            if(current_bound_shader->binding_points.count(parameter_name)){
 
-                Shader::Binding_Point* binding_point = &this->current_bound_shader->binding_points[parameter_name];
+                Shader::Binding_Point* binding_point = &current_bound_shader->binding_points[parameter_name];
                 u32 root_signature_index = binding_point->root_signature_index;
 
                 d3d12_command_list->SetComputeRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);

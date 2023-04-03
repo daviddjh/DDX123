@@ -24,8 +24,10 @@
 	#undef max
 #endif
 
-
+#define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
+#define DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE 100
 #define NUM_BACK_BUFFERS 2
+#define IS_BOUND_ONLINE_TABLE_SIZE 500
 
 // TODO: Make a d_command_queue that has a dx12 command queue and a fence
 // TODO: Make a display/surface data structure that has surface size, swap chain, maybe RTV?, display size
@@ -167,6 +169,8 @@ namespace d_dx12 {
         Descriptor_Heap    dsv_descriptor_heap;
         Descriptor_Heap    offline_cbv_srv_uav_descriptor_heap;
         Descriptor_Heap    online_cbv_srv_uav_descriptor_heap[NUM_BACK_BUFFERS];
+        u16                is_bound_online[IS_BOUND_ONLINE_TABLE_SIZE];
+        u8                 is_bound_online_index = 0;
 
         // TODO: ...
         #if 0
@@ -178,6 +182,7 @@ namespace d_dx12 {
         Texture* create_texture(wchar_t* name, Texture_Desc& desc);
         Buffer*  create_buffer(wchar_t* name, Buffer_Desc& desc);
         Descriptor_Handle load_dyanamic_frame_data(void* ptr, u64 size, u64 alignment);
+        void reset_is_bound_online();
         void d_dx12_release();
     };
 
@@ -201,6 +206,7 @@ namespace d_dx12 {
         u16                                       height;
         u16                                       pixel_size;
         DXGI_FORMAT                               format;
+        u16                                       is_bound_index;
         wchar_t*                                  name = NULL;
 
         void d_dx12_release();
@@ -232,10 +238,11 @@ namespace d_dx12 {
         Descriptor_Handle                         offline_descriptor_handle;
         Descriptor_Handle                         online_descriptor_handle;
         D3D12_RESOURCE_STATES                     state;
-        USAGE usage                             = USAGE_NONE;
-        u64 number_of_elements;
-        u64 size_of_each_element;
+        USAGE                                     usage = USAGE_NONE;
+        u64                                       number_of_elements;
+        u64                                       size_of_each_element;
         wchar_t*                                  name;
+        u16                                       is_bound_index;
         union{
 
             D3D12_VERTEX_BUFFER_VIEW              vertex_buffer_view;

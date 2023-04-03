@@ -1,3 +1,20 @@
+4/2/2023
+
+Kindof got shadow mapping working? Doesn't look very good, I think the precition of the shadow map buffer
+is far too low. Seems like I have to adjust the BIAS value and camera position perfectly for it to work.
+
+Why is that?
+
+4/2/2023
+
+Shadow Pass is working, now use in PBR shader!!
+
+4/1/2023
+
+Problem: bind_and_draw_model inserts new descriptors into heap regardless of if they're already there.
+
+Solution: check if descriptor is already in online heap before placing in online heap.
+
 3/29/2023
 
 Jumped right into the Shadow Map pass. Found lots of problems with d_dx12 layer assumptions (automatic

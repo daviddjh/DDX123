@@ -5,7 +5,7 @@ struct PixelShaderInput
 
 float4 main(PixelShaderInput IN) : SV_Target
 {
-    discard;
+    // discard;
     // Appease compiler
     return IN.position;
 

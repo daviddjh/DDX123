@@ -24,9 +24,10 @@ Roughness
 #define MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE 0x2
 
 static const float PI = 3.14159265359;
+static const float SHADOW_BIAS = 0.0002;
 
 SamplerState sampler_1          : register(s0);
-Texture2D texture_2d_table[] : register(t0, Tex2DSpace);
+Texture2D texture_2d_table[]    : register(t0, Tex2DSpace);
 
 struct Camera_Position {
     float3 camera_position;
@@ -36,6 +37,8 @@ ConstantBuffer<Camera_Position> camera_position_buffer: register(b4);
 struct Per_Frame_Data {
     float3 light_position;    
     float3 light_color;
+    int    shadow_texture_index;
+    matrix light_space_matrix;
 };
 ConstantBuffer<Per_Frame_Data> per_frame_data: register(b8);
 
@@ -57,6 +60,7 @@ struct PixelShaderInput
 {
     float4 Position            : SV_Position;
     float4 Frag_World_Position : TEXCOORD4;
+    float4 Light_Space_Position: TEXCOORD5;
     float3 t                   : TEXCOORD2;
     float3 n                   : TEXCOORD3;
     float2 TextureCoordinate   : TEXCOORD;
@@ -113,6 +117,17 @@ float GeometrySmith(float3 N, float3 V, float3 L, float roughness)
     float ggx1  = GeometrySchlickGGX(NdotL, roughness);
 	
     return ggx1 * ggx2;
+}
+
+float calc_shadow_value(float4 frag_pos_light_space){
+    float3 proj_coords = frag_pos_light_space.xyz / frag_pos_light_space.w;
+    proj_coords = proj_coords * 0.5 + 0.5;
+    // NOTE: UV.. V is inverted when coming from light space coords
+    float closest_depth = texture_2d_table[per_frame_data.shadow_texture_index].Sample(sampler_1, float2(proj_coords.x, 1 - proj_coords.y)).r;
+    float current_depth = proj_coords.z;
+
+    float shadow = current_depth - SHADOW_BIAS > closest_depth ? 1.0 : 0.0;
+    return shadow;
 }
 
 float4 main(PixelShaderInput IN) : SV_Target {
@@ -213,7 +228,20 @@ float4 main(PixelShaderInput IN) : SV_Target {
     }
 
     float3 ambient = float3(0.005, 0.005, 0.005) * albedo_texture_color;
-    float3 color = ambient + Lo;
+    float shadow = calc_shadow_value(IN.Light_Space_Position);
+    float3 color = ambient + (1.0 - shadow) * Lo;
+    #if 0
+    float3 color;
+    if(shadow == 0.){
+        color = ambient + (1.0 - shadow) * Lo;
+    } else {
+        color = ambient + Lo;
+        shadow = (shadow - 0.999) / 0.001;
+        color.r += shadow * 10;
+        color.g *= 0.01;
+        color.b *= 0.01;
+    }
+    #endif
 	
     color = color / (color + float3(1.0, 1.0, 1.0));
     color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  

@@ -24,7 +24,7 @@ struct D_Camera {
     DirectX::XMVECTOR eye_position;
     DirectX::XMVECTOR eye_direction;
     DirectX::XMVECTOR up_direction;
-    float speed = 0.8;
+    float speed = 1.8;
     float fov   = 100.;
 };
 
@@ -32,6 +32,8 @@ struct Per_Frame_Data {
     float light_pos[3] = {2., -7., 2.};    
     float padding = 0.;
     float light_color[3] = {20., 20., 20.};
+    int   shadow_texture_index = 0;
+    DirectX::XMMATRIX light_space_matrix;
 };
 
 // Global Vars, In order of creation
@@ -776,22 +778,22 @@ void D_Renderer::render(){
     // Fill the command list:
     command_list->set_shader(shadow_map_shader);
 
-    // Transition the DS to DS_WRITE
-    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_DEPTH_WRITE);
-
+    if(shadow_ds->state != D3D12_RESOURCE_STATE_DEPTH_WRITE){
+        command_list->transition_texture(shadow_ds, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    }
     // Set up render targets. Here, we are just using a depth buffer
     command_list->set_viewport(display.viewport);
     command_list->set_scissor_rect(display.scissor_rect);
     command_list->set_render_targets(0, NULL, shadow_ds);
 
-    command_list->clear_depth_stencil(ds, 1.0f);
+    command_list->clear_depth_stencil(shadow_ds, 1.0f);
 
     command_list->bind_constant_arguments(&light_view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, "light_matrix");
 
     bind_and_draw_model(command_list, &renderer.models.ptr[0]);
     
     // Transition shadow ds to Pixel Resource State
-    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    command_list->transition_texture(shadow_ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Physically based shading
@@ -831,6 +833,10 @@ void D_Renderer::render(){
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     // vickylovesyou!!
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    // Bind Shadow Map
+    per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, "Shadow_Map");
+    per_frame_data.light_space_matrix = light_view_projection_matrix;
 
     // Constant Buffer requires 256 byte alignment
     Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);

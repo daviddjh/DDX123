@@ -1,3 +1,10 @@
+struct Per_Frame_Data {
+    float3 light_position;    
+    float3 light_color;
+    int    shadow_texture_index;
+    matrix light_space_matrix;
+};
+
 struct ViewProjection
 {
     matrix VP;
@@ -8,8 +15,14 @@ struct Model
     matrix M;
 };
 
-ConstantBuffer<ViewProjection> view_projection_matrix: register(b1);
-ConstantBuffer<Model> model_matrix:                    register(b2);
+struct Light_Space_Matrix_Buffer
+{
+    matrix m;
+};
+
+ConstantBuffer<ViewProjection> view_projection_matrix:  register(b1);
+ConstantBuffer<Model> model_matrix:                     register(b2);
+ConstantBuffer<Per_Frame_Data> per_frame_data:          register(b8);
 
 struct VertexPosColor
 {
@@ -39,11 +52,12 @@ struct VertexPositionNormalTexture
 
 struct VertexShaderOutput
 {
-    float4 Position      : SV_Position;
-    float4 Frag_Position : TEXCOORD4;
-    float3 t             : TEXCOORD2;
-    float3 n             : TEXCOORD3;
-    float2 TextureCoordinate : TEXCOORD;
+    float4 Position             : SV_Position;
+    float4 Frag_Position        : TEXCOORD4;
+    float4 Light_Space_Position : TEXCOORD5;
+    float3 t                    : TEXCOORD2;
+    float3 n                    : TEXCOORD3;
+    float2 TextureCoordinate    : TEXCOORD;
 };
 
 struct Vertex_Position_Normal_Tangent_Color_Texturecoord
@@ -67,8 +81,9 @@ VertexShaderOutput main(Vertex_Position_Normal_Tangent_Color_Texturecoord IN)
     matrix mvp_matrix     = mul(view_projection_matrix.VP, model_matrix.M);
 
     // I think this is right..
-    OUT.Position          = mul(mvp_matrix, float4(IN.Position, 1.0));
-    OUT.Frag_Position     = mul(model_matrix.M, float4(IN.Position, 1.0));
+    OUT.Position             = mul(mvp_matrix, float4(IN.Position, 1.0));
+    OUT.Frag_Position        = mul(model_matrix.M, float4(IN.Position, 1.0));
+    OUT.Light_Space_Position = mul(per_frame_data.light_space_matrix, OUT.Frag_Position);
     OUT.TextureCoordinate = IN.texCoord;
     OUT.t = t;
     OUT.n = n;
