@@ -24,7 +24,7 @@ Roughness
 #define MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE 0x2
 
 static const float PI = 3.14159265359;
-static const float SHADOW_BIAS = 0.0002;
+static const float SHADOW_BIAS = 0.002;
 
 SamplerState sampler_1          : register(s0);
 Texture2D texture_2d_table[]    : register(t0, Tex2DSpace);
@@ -121,10 +121,11 @@ float GeometrySmith(float3 N, float3 V, float3 L, float roughness)
 
 float calc_shadow_value(float4 frag_pos_light_space){
     float3 proj_coords = frag_pos_light_space.xyz / frag_pos_light_space.w;
+    float current_depth = proj_coords.z;
     proj_coords = proj_coords * 0.5 + 0.5;
+
     // NOTE: UV.. V is inverted when coming from light space coords
     float closest_depth = texture_2d_table[per_frame_data.shadow_texture_index].Sample(sampler_1, float2(proj_coords.x, 1 - proj_coords.y)).r;
-    float current_depth = proj_coords.z;
 
     float shadow = current_depth - SHADOW_BIAS > closest_depth ? 1.0 : 0.0;
     return shadow;
@@ -227,7 +228,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     }
 
-    float3 ambient = float3(0.005, 0.005, 0.005) * albedo_texture_color;
+    float3 ambient = float3(0.05, 0.05, 0.05) * albedo_texture_color;
     float shadow = calc_shadow_value(IN.Light_Space_Position);
     float3 color = ambient + (1.0 - shadow) * Lo;
     #if 0

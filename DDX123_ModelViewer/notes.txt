@@ -1,5 +1,11 @@
 4/2/2023
 
+Got orthographic shadow map working, could be better. Some blur in the shadows could help.
+Also, shadow mapping doesn't work when perpendicular to the ground. Due to "up" direction in view matrix.
+Just keep a view matrix and transform it, don't make a new one every frame.
+
+4/2/2023
+
 Kindof got shadow mapping working? Doesn't look very good, I think the precition of the shadow map buffer
 is far too low. Seems like I have to adjust the BIAS value and camera position perfectly for it to work.
 

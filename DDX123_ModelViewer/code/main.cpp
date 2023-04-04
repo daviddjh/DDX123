@@ -29,7 +29,7 @@ struct D_Camera {
 };
 
 struct Per_Frame_Data {
-    float light_pos[3] = {2., -7., 2.};    
+    float light_pos[3] = {0., -2., -1.};    
     float padding = 0.;
     float light_color[3] = {20., 20., 20.};
     int   shadow_texture_index = 0;
@@ -770,9 +770,11 @@ void D_Renderer::render(){
     // Shadow Map
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     DirectX::XMVECTOR light_position = DirectX::XMVectorSet((-per_frame_data.light_pos[0] * 50), (-per_frame_data.light_pos[1] * 50), (-per_frame_data.light_pos[2] * 50), 1.0);
-    DirectX::XMVECTOR light_direction = DirectX::XMVectorSet((per_frame_data.light_pos[0]), (per_frame_data.light_pos[1]), (per_frame_data.light_pos[2]), 1.0);
-    DirectX::XMMATRIX light_view_matrix = DirectX::XMMatrixLookToRH(light_position, DirectX::XMVector4Normalize(light_direction), camera.up_direction);
-    DirectX::XMMATRIX light_projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500.0f);
+    DirectX::XMVECTOR light_direction = DirectX::XMVectorSet((per_frame_data.light_pos[0]), (per_frame_data.light_pos[1]), (per_frame_data.light_pos[2]), 0.0);
+    light_direction = DirectX::XMVector4Normalize(light_direction);
+    DirectX::XMMATRIX light_view_matrix = DirectX::XMMatrixLookToRH(light_position, light_direction, camera.up_direction);
+    DirectX::XMMATRIX light_projection_matrix = DirectX::XMMatrixOrthographicOffCenterRH(-250, 250, -250, 250, -250, 250);
+    //DirectX::XMMATRIX light_projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500.0f);
     DirectX::XMMATRIX light_view_projection_matrix = DirectX::XMMatrixMultiply(light_view_matrix, light_projection_matrix);
 
     // Fill the command list:
