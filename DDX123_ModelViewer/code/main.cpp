@@ -761,7 +761,7 @@ void D_Renderer::render(){
     ImGui::Begin("Info");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
-    ImGui::DragFloat3("Light Position", (this->per_frame_data.light_pos));
+    ImGui::SliderFloat3("Light Position", (this->per_frame_data.light_pos), -10., 10);
     ImGui::DragFloat3("Light Color", (this->per_frame_data.light_color));
     ImGui::End();
     ImGui::Render();

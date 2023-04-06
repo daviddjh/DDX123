@@ -120,14 +120,27 @@ float GeometrySmith(float3 N, float3 V, float3 L, float roughness)
 }
 
 float calc_shadow_value(float4 frag_pos_light_space){
+
     float3 proj_coords = frag_pos_light_space.xyz / frag_pos_light_space.w;
+    // TODO: why is it work like this??? - Would've thought z coord needed [-1,1] -> [0,1] transform too? 
     float current_depth = proj_coords.z;
     proj_coords = proj_coords * 0.5 + 0.5;
 
-    // NOTE: UV.. V is inverted when coming from light space coords
-    float closest_depth = texture_2d_table[per_frame_data.shadow_texture_index].Sample(sampler_1, float2(proj_coords.x, 1 - proj_coords.y)).r;
+    float x_offset = 1./1920.;
+    float y_offset = 1./1080.;
 
-    float shadow = current_depth - SHADOW_BIAS > closest_depth ? 1.0 : 0.0;
+    float shadow = 0.0;
+
+    // NOTE: UV.. V is inverted when coming from light space coords
+    for(float y=-1.;y<=1.;y++){
+        for(float x=-1.;x<=1.;x++){
+            float2 uv = float2(proj_coords.x + (x*x_offset), 1 - proj_coords.y + (y*y_offset));
+            float closest_depth = texture_2d_table[per_frame_data.shadow_texture_index].Sample(sampler_1, uv).r;
+            shadow += (current_depth - SHADOW_BIAS > closest_depth ? 1.0 : 0.0);
+        }
+    }
+
+    shadow /= 9.;
     return shadow;
 }
 
@@ -228,7 +241,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     }
 
-    float3 ambient = float3(0.05, 0.05, 0.05) * albedo_texture_color;
+    float3 ambient = float3(0.10, 0.10, 0.10) * albedo_texture_color;
     float shadow = calc_shadow_value(IN.Light_Space_Position);
     float3 color = ambient + (1.0 - shadow) * Lo;
     #if 0

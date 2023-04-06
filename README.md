@@ -1,5 +1,9 @@
 # DDX123
 
+## Shadow Maps in [Sponza](https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Sponza) Scene - 4/5/23 
+
+![Physically Based Rendering in Sponza Scene](pics/shadow_maps.png)
+
 ## Physically Based Rendering in [Sponza](https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Sponza) Scene - 3/10/23 
 
 ![Physically Based Rendering in Sponza Scene](pics/PBR_Sponza.png)

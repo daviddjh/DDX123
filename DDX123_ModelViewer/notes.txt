@@ -1,3 +1,20 @@
+4/5/2023
+
+Shadows Mapping + Rough PCF is in! The PCF could definitely be improved, but scene looks decent!
+Feel proud of what I've made :D
+
+Goals in no specific order:
+
+- SSAO
+- SSR
+    - Defered rendering
+- Cleanup of code
+- Document code
+- Performance Analysis + Tune up
+- Custom cpu allocators + containers ( no more std )
+- Fix PCF with Stratified Poisson Sampling - http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-16-shadow-mapping/ 
+
+
 4/2/2023
 
 Got orthographic shadow map working, could be better. Some blur in the shadows could help.
