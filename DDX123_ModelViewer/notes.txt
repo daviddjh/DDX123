@@ -5,15 +5,16 @@ Feel proud of what I've made :D
 
 Goals in no specific order:
 
+- Add latest pic to my public site!!!
 - SSAO
 - SSR
     - Defered rendering
+- Decouple display resolution from render resolution with post pass
 - Cleanup of code
 - Document code
 - Performance Analysis + Tune up
 - Custom cpu allocators + containers ( no more std )
 - Fix PCF with Stratified Poisson Sampling - http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-16-shadow-mapping/ 
-
 
 4/2/2023
 
