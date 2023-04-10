@@ -2,7 +2,7 @@
 
 ## Shadow Maps in [Sponza](https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Sponza) Scene - 4/5/23 
 
-![Physically Based Rendering in Sponza Scene](pics/shadow_maps.png)
+![Shadow Maps in Sponza Scene](pics/shadow_mapping_2.png)
 
 ## Physically Based Rendering in [Sponza](https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Sponza) Scene - 3/10/23 
 

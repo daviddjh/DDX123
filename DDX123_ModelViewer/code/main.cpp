@@ -1117,9 +1117,11 @@ WinMain(HINSTANCE hInstance,
 
         OutputDebugString("Application Initialized!\n");
 
+
         // Show the window
         ShowWindow(renderer.hWnd, nCmdShow);
 
+        SetWindowPos(renderer.hWnd, HWND_NOTOPMOST, 0, 0, display_width, display_height, 0);
         // Message loop
         MSG msg = {};
         while (true) {

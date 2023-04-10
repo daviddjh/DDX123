@@ -66,6 +66,27 @@ struct PixelShaderInput
     float2 TextureCoordinate   : TEXCOORD;
 };
 
+static float2 poissonDisk[9] = {
+    float2(0.526, 0.786),
+    float2(0.265, 0.312),
+    float2(0.806, 0.223),
+    float2(0.919, 0.605),
+    float2(0.545, 0.116),
+    float2(0.082, 0.662),
+    float2(0.769, 0.958),
+    float2(0.155, 0.919),
+    float2(0.465, 0.491)
+};
+
+uint rand_xorshift(uint random_number)
+{
+    // Xorshift algorithm from George Marsaglia's paper
+    random_number ^= (random_number << 13);
+    random_number ^= (random_number >> 17);
+    random_number ^= (random_number << 5);
+    return random_number;
+}
+
 // Describes the ratio of light that gets reflected over the light that gets refracted
 // F0 is the base reflectivity of the surface
 float3 fresnelSchlick(float cosTheta, float3 F0){
@@ -119,7 +140,7 @@ float GeometrySmith(float3 N, float3 V, float3 L, float roughness)
     return ggx1 * ggx2;
 }
 
-float calc_shadow_value(float4 frag_pos_light_space){
+float calc_shadow_value(float4 frag_pos_light_space, float2 tex_coords){
 
     float3 proj_coords = frag_pos_light_space.xyz / frag_pos_light_space.w;
     // TODO: why is it work like this??? - Would've thought z coord needed [-1,1] -> [0,1] transform too? 
@@ -131,10 +152,18 @@ float calc_shadow_value(float4 frag_pos_light_space){
 
     float shadow = 0.0;
 
+    uint random_number = asuint(tex_coords.x + tex_coords.y);
+
     // NOTE: UV.. V is inverted when coming from light space coords
     for(float y=-1.;y<=1.;y++){
         for(float x=-1.;x<=1.;x++){
             float2 uv = float2(proj_coords.x + (x*x_offset), 1 - proj_coords.y + (y*y_offset));
+
+            //int poisson_index = (tex_coords.x * (x + 5) + tex_coords.y * (y + 4)) % 9;
+
+            random_number = rand_xorshift(random_number);
+            uv += (poissonDisk[random_number % 9] - 0.5) / 800.0;
+
             float closest_depth = texture_2d_table[per_frame_data.shadow_texture_index].Sample(sampler_1, uv).r;
             shadow += (current_depth - SHADOW_BIAS > closest_depth ? 1.0 : 0.0);
         }
@@ -242,7 +271,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     }
 
     float3 ambient = float3(0.10, 0.10, 0.10) * albedo_texture_color;
-    float shadow = calc_shadow_value(IN.Light_Space_Position);
+    float shadow = calc_shadow_value(IN.Light_Space_Position, IN.TextureCoordinate);
     float3 color = ambient + (1.0 - shadow) * Lo;
     #if 0
     float3 color;
