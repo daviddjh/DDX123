@@ -12,6 +12,7 @@
 #include <vector>
 #include <map>
 
+#define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include "windows.h"
 #include "windowsx.h"
@@ -26,12 +27,12 @@
 #include <dxgidebug.h>
 #endif
 
-#if defined(min)
-	#undef min
-#endif
-
-#if defined(max)
-	#undef max
+#ifdef _DEBUG
+#define DEBUG_LOG(x) os_debug_print(__FILE__ ":" stringerize(__LINE__) " - Log: " x "\n")
+#define DEBUG_ERROR(x) os_debug_print(__FILE__ ":" stringerize(__LINE__) " - ERROR: " x "\n"); DEBUG_BREAK
+#else 
+#define DEBUG_LOG(x)
+#define DEBUG_ERROR(x)
 #endif
 
 #if 0
@@ -52,6 +53,7 @@ inline void ThrowIfFailed(HRESULT hr)
 #endif
 
 // Debug Break
+#if 0
 #ifdef _DEBUG
 
 	#ifdef _MSC_VER
@@ -62,6 +64,7 @@ inline void ThrowIfFailed(HRESULT hr)
 	#define DEBUG_BREAK __debugbreak()
 	#endif
 
+#endif
 #endif
 
 #ifndef DEBUG_BREAK

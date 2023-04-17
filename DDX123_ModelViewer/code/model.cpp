@@ -8,6 +8,7 @@
 namespace tg = tinygltf;
 using namespace d_dx12;
 using namespace DirectX;
+using namespace d_std;
 
 tg::TinyGLTF model_loader;
 
@@ -431,6 +432,8 @@ void load_materials(D_Model& d_model, tg::Model& tg_model){
 */
 void load_gltf_model(D_Model& d_model, const char* filename){
 
+    DEBUG_LOG("Loading GLTF Model!");
+
     tg::Model tg_model;
     std::string err;
     std::string warn;
@@ -441,14 +444,15 @@ void load_gltf_model(D_Model& d_model, const char* filename){
         OutputDebugString(warn.c_str());
     }
 
+    #if 0
     if (!err.empty()) {
         OutputDebugString(err.c_str());
         DEBUG_BREAK;
     }
+    #endif
 
     if (!ret) {
-        OutputDebugString("Failed to parse glTF\n");
-        DEBUG_BREAK;
+        DEBUG_ERROR("Failed to parse glTF");
         return;
     }
 

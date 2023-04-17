@@ -17,9 +17,9 @@ pushd C:\dev\DDX123\DDX123_ModelViewer\build
 
 :: Old flags: /Yc"pch.h"
 set flags= /FeDDX123 /FAs /EHsc
-set code=..\code\main.cpp ..\code\model.cpp ..\..\third_party\imgui\imgui.cpp ..\..\third_party\imgui\imgui_draw.cpp ..\..\third_party\imgui\imgui_demo.cpp ..\..\third_party\imgui\imgui_tables.cpp ..\..\third_party\imgui\imgui_widgets.cpp ..\..\third_party\imgui\backends\imgui_impl_dx12.cpp ..\..\third_party\imgui\backends\imgui_impl_win32.cpp
+set code=..\code\main.cpp ..\..\third_party\imgui\imgui.cpp ..\..\third_party\imgui\imgui_draw.cpp ..\..\third_party\imgui\imgui_demo.cpp ..\..\third_party\imgui\imgui_tables.cpp ..\..\third_party\imgui\imgui_widgets.cpp ..\..\third_party\imgui\backends\imgui_impl_dx12.cpp ..\..\third_party\imgui\backends\imgui_impl_win32.cpp
 set includes=/I"C:\dev\DDX123\third_party\DirectXTex\DirectXTex" /I"C:\dev\DDX123\DDX123_Lib\code" /I"C:\dev\d_core" /I"C:\dev\DirectX\DirectXTK12\Inc" /I"C:\dev\DDX123\third_party\tinygltf" /I"C:\dev\DDX123\third_party\imgui" /I"C:\dev\DDX123\third_party\imgui\backends"
-set link_libs= Winmm.lib d3d12.lib dxgi.lib dxguid.lib D3Dcompiler.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib odbc32.lib odbccp32.lib C:\dev\DDX123\DDX123_Lib\build\d_dx12.lib
+set link_libs= Winmm.lib d3d12.lib dxgi.lib dxguid.lib dxcompiler.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib odbc32.lib odbccp32.lib C:\dev\DDX123\DDX123_Lib\build\d_dx12.lib
 
 :: Compile App
 if "%1" == "-d" (
@@ -39,6 +39,16 @@ if "%1" == "-d" (
 
     :: Compile this
     cl /MD /Zi %flags% %code% %includes% %link_libs% C:\dev\DDX123\third_party\DirectXTex\DirectXTex\Bin\Desktop_2019_Win10\x64\Profile\DirectXTex.lib
+
+    popd
+
+) else if "%1" == "-o" (
+
+    :: Compile d_dx12 lib
+    C:\dev\DDX123\DDX123_Lib\build.bat -rds
+
+    :: Compile this
+    cl /MD /O2 %flags% %code% %includes% %link_libs% C:\dev\DDX123\third_party\DirectXTex\DirectXTex\Bin\Desktop_2019_Win10\x64\Profile\DirectXTex.lib
 
     popd
 

@@ -16,14 +16,6 @@
 #include <dxgidebug.h>
 #endif
 
-#if defined(min)
-	#undef min
-#endif
-
-#if defined(max)
-	#undef max
-#endif
-
 #define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
 #define DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE 100
 #define NUM_BACK_BUFFERS 2
@@ -106,7 +98,6 @@ namespace d_dx12 {
 
     };
 
-    #define NUM_SHADER_BINDINGS 20
     struct Shader {
 
         // Parameter Description

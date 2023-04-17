@@ -9,7 +9,8 @@
 #include <chrono>
 #include "timeapi.h"
 
-#include "model.h"
+#include "d_core.cpp"
+#include "model.cpp"
 
 using namespace d_dx12;
 using namespace d_std;
@@ -68,6 +69,7 @@ struct D_Renderer {
 };
 
 D_Renderer renderer;
+Memory_Arena *linear_per_frame_arena;
 bool application_is_initialized = false;
 
 #define MAX_TICK_SAMPLES 20
@@ -469,8 +471,8 @@ int D_Renderer::init(){
         //  Set compiled shader code
         //////////////////////////////////
 
-        shader_desc.vertex_shader = L"PBRVertexShader.cso";
-        shader_desc.pixel_shader  = L"PBRPixelShader.cso";
+        shader_desc.vertex_shader = L"PBRVertexShader.hlsl";
+        shader_desc.pixel_shader  = L"PBRPixelShader.hlsl";
 
 
         //////////////////////////////////
@@ -576,6 +578,8 @@ int D_Renderer::init(){
 
         pbr_shader = create_shader(shader_desc);
 
+        DEBUG_LOG("Renderer Initialized!");
+
     }
 
 
@@ -595,8 +599,8 @@ int D_Renderer::init(){
         //  Set compiled shader code
         //////////////////////////////////
 
-        shader_desc.vertex_shader = L"ShadowMapVertexShader.cso";
-        shader_desc.pixel_shader  = L"ShadowMapPixelShader.cso";
+        shader_desc.vertex_shader = L"ShadowMapVertexShader.hlsl";
+        shader_desc.pixel_shader  = L"ShadowMapPixelShader.hlsl";
 
 
         // Model Matrix
@@ -1064,6 +1068,9 @@ WinMain(HINSTANCE hInstance,
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     timeBeginPeriod(1);
 
+    // Set up memory arenas
+    linear_per_frame_arena = d_std::make_arena_reserve(_1KB); 
+
     // Renderer Scope
     {
 
@@ -1108,15 +1115,15 @@ WinMain(HINSTANCE hInstance,
 
         // Checks that it worked
         if (renderer.hWnd == NULL) {
-            OutputDebugString("Couldn't Create Window");
+            DEBUG_ERROR("Couldn't Create Window");
+            DEBUG_BREAK;
             return -1;
         }
 
         // Initialize app
         renderer.init();
 
-        OutputDebugString("Application Initialized!\n");
-
+        DEBUG_LOG("Application Initialized!");
 
         // Show the window
         ShowWindow(renderer.hWnd, nCmdShow);
@@ -1141,6 +1148,7 @@ WinMain(HINSTANCE hInstance,
                 }
             } else {
                 renderer.render();
+                linear_per_frame_arena->reset();
             }
         }
 

@@ -9,12 +9,14 @@
 #include <string>
 #include <vector>
 #include <map>
+#include "stdio.h" // for shaders
 
 // To cuddle the vscode parser
 #ifdef UNICODE
 #undef UNICODE
 #endif
 
+#define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include "windows.h"
 
@@ -26,14 +28,6 @@
 
 #ifdef _DEBUG
 #include <dxgidebug.h>
-#endif
-
-#if defined(min)
-	#undef min
-#endif
-
-#if defined(max)
-	#undef max
 #endif
 
 #if 0

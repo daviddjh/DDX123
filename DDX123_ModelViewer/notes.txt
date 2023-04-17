@@ -1,3 +1,13 @@
+4/17/2023
+
+Made some updates to d_core. Added better debug logging to DDX123_ModelViewer::main.cpp.
+Need to get the changes in DDX123_Lib::d_dx12.cpp.
+Also should remove requirement for arena from _format_lit_string.
+
+Should I compile d_core to .lib? Should I include it into d_dx12.cpp? Should I include d_dx12.cpp directly into DDX123_ModelViewer::main?
+
+Idea: Make DDX123 root folder, ./code/main.cpp, ./code/d_dx12/d_dx12.cpp ./code/d_core/* ???
+
 4/5/2023
 
 Shadows Mapping + Rough PCF is in! The PCF could definitely be improved, but scene looks decent!
