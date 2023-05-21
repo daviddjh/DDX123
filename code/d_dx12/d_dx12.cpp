@@ -1,5 +1,5 @@
-#include "pch.h"
 #include "d_dx12.h"
+
 #include "WICTextureLoader.h"
 #include "DirectXTex.h"
 #include "dxcapi.h"
@@ -13,15 +13,15 @@ using namespace DirectX;
 
 namespace d_dx12 {
 
-    Microsoft::WRL::ComPtr<ID3D12Device2>           d3d12_device;
-    Command_Queue                                   direct_command_queue;
-    Command_Queue                                   copy_command_queue;
-    u64                                             frame_fence_values[NUM_BACK_BUFFERS];
-    Display                                         display;
-    Upload_Buffer                                   upload_buffer;
-    Dynamic_Buffer                                  dynamic_buffer;
+    Microsoft::WRL::ComPtr<ID3D12Device2>  d3d12_device;
+    Command_Queue                          direct_command_queue;
+    Command_Queue                          copy_command_queue;
+    u64                                    frame_fence_values[NUM_BACK_BUFFERS];
+    Display                                display;
+    Upload_Buffer                          upload_buffer;
+    Dynamic_Buffer                         dynamic_buffer;
 	
-    u8 current_backbuffer_index = 0;
+    u8   current_backbuffer_index = 0;
     bool is_tearing_supported = false;
 
 
@@ -146,7 +146,7 @@ namespace d_dx12 {
         info_queue_filter.DenyList.pSeverityList = severities;
         d3d12_info_queue->PushStorageFilter(&info_queue_filter);
         d3d12_info_queue->Release();
-        OutputDebugString("Debug Layer Enabled!\n");
+        DEBUG_LOG("Debug Layer Enabled!");
     #endif
 
         d3d12_device->SetName(L"Main d_dx12 DirectX Device");
@@ -1585,6 +1585,7 @@ namespace d_dx12 {
     *   Resource Manager!
     */
 
+    // Initialize the Resource Manager with online and offline descriptor heaps
     void Resource_Manager::init(){
         
         // Create descriptor heaps (For DSV and RTV)
@@ -1941,12 +1942,6 @@ namespace d_dx12 {
 
         offset += allocation_size;
 
-        /*
-        current_cpu += allocation_size;
-        current_gpu += allocation_size;
-        size        += allocation_size;
-        */
-
         return allocation;
 
     }
@@ -2040,55 +2035,6 @@ namespace d_dx12 {
                 subresources.data()
             );
             */
-
-            #if 0
-            D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
-            UINT row_count;
-            UINT64 row_size;
-            UINT64 size;
-            d3d12_device->GetCopyableFootprints(&texture->d3d12_resource->GetDesc(), 0, 1, 0,
-                                            &footprint, &row_count, &row_size, &size);
-
-            for(u64 i = 0; i < row_count; i++){
-
-                memcpy(upload_allocation.cpu_addr + row_size * i, data.ptr + texture->width * texture->pixel_size * i, texture->width * texture->pixel_size);
-
-            }
-
-            // Describe the destination location of the texture
-            CD3DX12_TEXTURE_COPY_LOCATION copy_dest(texture->d3d12_resource.Get(), 0);
-
-            // Describes a subresource within a parent
-            D3D12_SUBRESOURCE_FOOTPRINT texture_footprint = {};
-            texture_footprint.Format = footprint.Footprint.Format;
-            texture_footprint.Width = footprint.Footprint.Width;
-            texture_footprint.Height = footprint.Footprint.Height;
-            texture_footprint.Depth = 1;
-            //
-            // !!!!
-            // TODO: texture_footprint.RowPitch breaks if the image width isn't a multiple of 256. How do we fix this??
-            // !!!!
-            //
-            texture_footprint.RowPitch = footprint.Footprint.RowPitch;
-
-            // Describes a PLACED subresource within a parent. Note: Offset
-            D3D12_PLACED_SUBRESOURCE_FOOTPRINT placed_pitched_desc = {};
-            placed_pitched_desc.Offset = upload_allocation.resource_offset;
-            placed_pitched_desc.Footprint = texture_footprint;
-
-            // Describes the copy source of the texture.
-            // This would be the upload allocation we made in the Upload Buffer,
-            // plus an offset into the upload buffer resource.
-            CD3DX12_TEXTURE_COPY_LOCATION copy_src(upload_allocation.d3d12_resource.Get(), placed_pitched_desc);
-
-            // Copies the texture from the upload buffer into the commited resource created in LoadWICTextureFromFile
-            d3d12_command_list->CopyTextureRegion(
-                &copy_dest,
-                0, 0, 0,
-                &copy_src,
-                nullptr
-            );
-            #endif
             
             TexMetadata final_tex_metadata = base_scratch_image.GetMetadata();
             D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -2099,102 +2045,6 @@ namespace d_dx12 {
             srv_desc.Texture2D.MipLevels = final_tex_metadata.mipLevels;
 
             d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srv_desc, texture->offline_descriptor_handle.cpu_descriptor_handle);
-
-#if 0
-
-            D3D12_HEAP_PROPERTIES heap_properties = {};
-            heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT;
-            heap_properties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-            heap_properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-
-            D3D12_RESOURCE_DESC resourceDesc = {};
-            resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-            resourceDesc.Alignment = 0;
-            resourceDesc.Width = texture->width;
-            resourceDesc.Height = texture->height;
-            resourceDesc.DepthOrArraySize = 1;
-            resourceDesc.MipLevels = 1;
-            //resourceDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-            resourceDesc.Format = texture->format;
-            resourceDesc.SampleDesc = {1, 0};
-            resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-            resourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-            ThrowIfFailed(d3d12_device->CreateCommittedResource(
-                &heap_properties, D3D12_HEAP_FLAG_NONE, &resourceDesc,
-                D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture->d3d12_resource)));
-
-            
-            D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
-            UINT row_count;
-            UINT64 row_size;
-            UINT64 size;
-            d3d12_device->GetCopyableFootprints(&texture->d3d12_resource->GetDesc(), 0, 1, 0,
-                                            &footprint, &row_count, &row_size, &size);
-
-            // Row Pitch:   The row pitch, or width, or physical size, in bytes, of the subresource data
-            // Row Pitch = width * pixel size in bytes
-            // Slice Pitch: The depth pitch, or width, or physical size, in bytes, of the subresource data
-            // Slice Pitch = height * Row Pitch
-            // TODO: Break here to inspect Slice and Row pitch
-
-            u64 row_pitch = texture->width * texture->pixel_size;
-            u64 slice_pitch = texture->height * row_pitch;
-
-            size_t allocation_size = slice_pitch;
-            // TODO: Is this the correct align value???
-            Upload_Buffer::Allocation upload_allocation = upload_buffer.allocate(size, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
-
-            for(u64 i = 0; i < row_count; i++){
-
-                memcpy(upload_allocation.cpu_addr + row_size * i, data.ptr + texture->width * texture->pixel_size * i, texture->width * texture->pixel_size);
-
-            }
-
-            // Describe the destination location of the texture
-            CD3DX12_TEXTURE_COPY_LOCATION copy_dest(texture->d3d12_resource.Get(), 0);
-
-            // Describes a subresource within a parent
-            D3D12_SUBRESOURCE_FOOTPRINT texture_footprint = {};
-            texture_footprint.Format = footprint.Footprint.Format;
-            texture_footprint.Width = footprint.Footprint.Width;
-            texture_footprint.Height = footprint.Footprint.Height;
-            texture_footprint.Depth = 1;
-            //
-            // !!!!
-            // TODO: texture_footprint.RowPitch breaks if the image width isn't a multiple of 256. How do we fix this??
-            // !!!!
-            //
-            texture_footprint.RowPitch = footprint.Footprint.RowPitch;
-
-            // Describes a PLACED subresource within a parent. Note: Offset
-            D3D12_PLACED_SUBRESOURCE_FOOTPRINT placed_pitched_desc = {};
-            placed_pitched_desc.Offset = upload_allocation.resource_offset;
-            placed_pitched_desc.Footprint = texture_footprint;
-
-            // Describes the copy source of the texture.
-            // This would be the upload allocation we made in the Upload Buffer,
-            // plus an offset into the upload buffer resource.
-            CD3DX12_TEXTURE_COPY_LOCATION copy_src(upload_allocation.d3d12_resource.Get(), placed_pitched_desc);
-            //CD3DX12_TEXTURE_COPY_LOCATION copy_src(upload_allocation.d3d12_resource.Get(), footprint);
-
-            // Copies the texture from the upload buffer into the commited resource created in LoadWICTextureFromFile
-            d3d12_command_list->CopyTextureRegion(
-                &copy_dest,
-                0, 0, 0,
-                &copy_src,
-                nullptr
-            );
-           
-            D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-            srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            srv_desc.Format = texture->format;
-            // Only works for 2d, 1 MIP level textures currently
-            srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            srv_desc.Texture2D.MipLevels = 1;
-
-            d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srv_desc, texture->offline_descriptor_handle.cpu_descriptor_handle);
-#endif
         }
 
         return;
@@ -2759,11 +2609,11 @@ namespace d_dx12 {
 
     void present(bool using_v_sync){
 
-        UINT syncInterval = using_v_sync ? 1 : 0;
-        UINT presentFlags = is_tearing_supported && !using_v_sync ? DXGI_PRESENT_ALLOW_TEARING : 0;
+        UINT sync_interval = using_v_sync ? 1 : 0;
+        UINT present_flags = is_tearing_supported && !using_v_sync ? DXGI_PRESENT_ALLOW_TEARING : 0;
 
         dynamic_buffer.save_frame_ptr(current_backbuffer_index);
-        ThrowIfFailed(display.d3d12_swap_chain->Present(syncInterval, presentFlags));
+        ThrowIfFailed(display.d3d12_swap_chain->Present(sync_interval, present_flags));
 
         frame_fence_values[current_backbuffer_index] = direct_command_queue.signal();
 
@@ -2864,16 +2714,6 @@ namespace d_dx12 {
 
             RECT fullscreen_rect;
 
-            #if 0
-            if(display.d3d12_swap_chain){
-                Microsoft::WRL::ComPtr<IDXGIOutput> output;
-                ThrowIfFailed(display.d3d12_swap_chain->GetContainingOutput(&output));
-                DXGI_OUTPUT_DESC desc;
-                ThrowIfFailed(output->GetDesc(&desc));
-                fullscreen_rect = desc.DesktopCoordinates;
-            }
-            #endif
-
             // Get the settings of the primary display
             DEVMODE devMode = {};
             devMode.dmSize = sizeof(DEVMODE);
@@ -2924,74 +2764,5 @@ namespace d_dx12 {
         display.fullscreen_mode = !display.fullscreen_mode;
 
     }
-
-
-#if 0    
-
-    // Resizes the depth buffer
-    void resize_depth_buffer(Command_Queue* command_queue, u16 width, u16 height){
-
-        // Flush any GPU commands that might be referencing the depth buffer
-        command_queue->Flush(); 
-
-        // These cant be zero
-        width = width > 1u ? width : 1u;
-        height = height > 1u ? height : 1u;
-
-        /*
-        *
-        * Resize screen dependent resources...
-        *
-        * Create a depth buffer:
-        */
-        D3D12_CLEAR_VALUE optimizedClearValue = {};
-        optimizedClearValue.Format = DXGI_FORMAT_D32_FLOAT;
-        optimizedClearValue.DepthStencil = { 1.0f, 0 };
-
-        D3D12_HEAP_PROPERTIES depth_buffer_heap_properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-
-        D3D12_RESOURCE_DESC  depth_buffer_resource_description = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_D32_FLOAT, width, height,
-            1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
-
-        ThrowIfFailed(d3d12_device->CreateCommittedResource(
-            &depth_buffer_heap_properties,
-            D3D12_HEAP_FLAG_NONE,
-            &depth_buffer_resource_description,
-            D3D12_RESOURCE_STATE_DEPTH_WRITE,
-            &optimizedClearValue,
-            IID_PPV_ARGS(&d3d12_depth_buffer)
-        ));
-
-        d3d12_depth_buffer->SetName(L"Main Depth Buffer");
-
-        // Update the depth stencil view
-        D3D12_DEPTH_STENCIL_VIEW_DESC dsv = { };
-        dsv.Format = DXGI_FORMAT_D32_FLOAT;
-        dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-        dsv.Texture2D.MipSlice = 0;
-        dsv.Flags = D3D12_DSV_FLAG_NONE;
-
-        d3d12_device->CreateDepthStencilView(d3d12_depth_buffer.Get(), &dsv,
-            d3d12_DSV_descriptor_heap->GetCPUDescriptorHandleForHeapStart());
-    }
-
-    // Updates descriptors for our render targets
-    void UpdateRTVs(){
-
-        // Descriptor Heap start within d3d12_RTV_descriptor_heap
-        CD3DX12_CPU_DESCRIPTOR_HANDLE RTVHandle(d3d12_RTV_descriptor_heap->GetCPUDescriptorHandleForHeapStart());
-        // Descriptor offset
-        u32 RTVDescriptorSize = d3d12_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
-        // Loop through back buffers and update their respective descriptors in the d3d12_RTV_descriptor_heap
-        for (UINT i = 0; i < NUM_BACK_BUFFERS; i++) {
-            ThrowIfFailed(d3d12_swap_chain->GetBuffer(i, IID_PPV_ARGS((d3d12_display_buffers[i]).GetAddressOf())));
-            d3d12_display_buffers[i].Get()->SetName(L"Render Target Buffer");
-            d3d12_device->CreateRenderTargetView(d3d12_display_buffers[i].Get(), nullptr, RTVHandle);
-            RTVHandle.Offset(RTVDescriptorSize);
-        }
-
-    }
-#endif
 
 }

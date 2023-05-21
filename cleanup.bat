@@ -11,6 +11,12 @@ cd /d %~dp0
 mkdir .\build
 pushd .\build
 
-call .\DDX123.exe
+DEL /Q /F /S "*.pdb"
+DEL /Q /F /S "*.asm"
+DEL /Q /F /S "*.i"
+DEL /Q /F /S "*.obj"
+DEL /Q /F /S "*.bin"
+DEL /Q /F /S "*.cso"
+DEL /Q /F /S "*.ilk"
 
 popd

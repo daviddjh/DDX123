@@ -14,7 +14,7 @@
 *.i
 *.ini
 
-# Annoying .vs folder
+# Temp folders
 .vs/
 .vscode/
 pix_captures

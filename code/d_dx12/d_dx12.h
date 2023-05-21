@@ -1,28 +1,12 @@
 #pragma once
 
-#define WIN32_LEAN_AND_MEAN
-#include "windows.h"
-
-#include <d3d12.h>
+#include "../pch.h"
 #include "third_party/d3dx12.h"
-#include "dxgi1_6.h"
-#include <DirectXMath.h>
-#include "DirectXTex.h"
-#include <d3dcompiler.h>
-
-#include "d_include.h"
-
-#ifdef _DEBUG
-#include <dxgidebug.h>
-#endif
 
 #define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
 #define DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE 100
 #define NUM_BACK_BUFFERS 2
 #define IS_BOUND_ONLINE_TABLE_SIZE 500
-
-// TODO: Make a d_command_queue that has a dx12 command queue and a fence
-// TODO: Make a display/surface data structure that has surface size, swap chain, maybe RTV?, display size
 
 namespace d_dx12 {
 
@@ -37,9 +21,9 @@ namespace d_dx12 {
         wchar_t* vertex_shader; 
         wchar_t* pixel_shader; 
 
-        u8 num_render_targets              = 1;
+        u8           num_render_targets              = 1;
         DXGI_FORMAT* render_target_formats = nullptr;
-        bool depth_buffer_enabled          = true;
+        bool         depth_buffer_enabled          = true;
 
         // Root Parameters
         // TODO: Should I have different types for Constant Parameters and Descriptor Tables?? Problably..
@@ -89,8 +73,8 @@ namespace d_dx12 {
 
                 std::string name;
                 DXGI_FORMAT format;
-                UINT input_slot;    // Vertex buffer slot
-                UINT offset = D3D12_APPEND_ALIGNED_ELEMENT;
+                UINT        input_slot;    // Vertex buffer slot
+                UINT        offset = D3D12_APPEND_ALIGNED_ELEMENT;
 
             };
 
@@ -113,9 +97,9 @@ namespace d_dx12 {
         // Binding points
         struct Binding_Point {
             Shader_Desc::Parameter::Usage_Type usage_type;
-            D3D12_SHADER_INPUT_BIND_DESC d3d12_binding_desc;
-            D3D12_SHADER_VISIBILITY shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
-            u8 root_signature_index;
+            D3D12_SHADER_INPUT_BIND_DESC       d3d12_binding_desc;
+            D3D12_SHADER_VISIBILITY            shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
+            u8                                 root_signature_index;
         };
 
         std::map<std::string, Binding_Point> binding_points;
@@ -211,12 +195,12 @@ namespace d_dx12 {
     struct Texture_Desc{
 
         Texture::USAGE usage = Texture::USAGE::USAGE_NONE;
-        bool rtv_connect_to_next_swapchain_buffer = false;
-        u16  width;
-        u16  height;
-        u16  pixel_size;
-        DXGI_FORMAT format;
-        wchar_t* name = NULL;
+        bool           rtv_connect_to_next_swapchain_buffer = false;
+        u16            width;
+        u16            height;
+        u16            pixel_size;
+        DXGI_FORMAT    format;
+        wchar_t*       name = NULL;
 
     };
 
@@ -371,16 +355,9 @@ namespace d_dx12 {
         void d_dx12_release();
     };
 
-    extern Microsoft::WRL::ComPtr<ID3D12Device2>           d3d12_device;
-    extern Display           display;
-    extern u8 current_backbuffer_index;
-    //extern HANDLE                                          fence_event;
-    //extern Microsoft::WRL::ComPtr<ID3D12CommandAllocator>  d3d12_command_allocator[NUM_BACK_BUFFERS];
-    //extern Microsoft::WRL::ComPtr<ID3D12CommandList>       d3d12_command_lists[NUM_BACK_BUFFERS];
-    //extern Microsoft::WRL::ComPtr<ID3D12RootSignature>     d3d12_root_signature;
-    //extern Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_vertex_shader_blob;
-    //extern Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_pixel_shader_blob;
-    //extern Microsoft::WRL::ComPtr<ID3D12PipelineState>     d3d12_pipline_state;
+    extern Microsoft::WRL::ComPtr<ID3D12Device2>  d3d12_device;
+    extern Display                                display;
+    extern u8                                     current_backbuffer_index;
 
     void d_dx12_init(HWND hWnd, u16 display_width, u16 display_height);
     void d_dx12_shutdown();

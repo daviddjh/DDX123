@@ -237,7 +237,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     float3 ambient = float3(0.06, 0.06, 0.06) * albedo_texture_color.rgb;
     matrix light_space_matrix = per_frame_data.light_space_matrix;
     float4 frag_pos_light_space = mul(light_space_matrix, w_position);
-    float shadow = calc_shadow_value(frag_pos_light_space, UV);
+    float shadow = calc_shadow_value(frag_pos_light_space, float2(w_position.x * w_normal.z, albedo_texture_color.g * w_normal.x));
     float3 color = ambient + (1.0 - shadow) * Lo;
     #if 0
     if(shadow == 0.){

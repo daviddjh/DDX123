@@ -178,21 +178,6 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
 
         command_list->load_buffer(mesh->vertex_buffer, (u8*)verticies_buffer.ptr, verticies_buffer.nitems * sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord), sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord));//Fix: sizeof(Vertex_Position_Color));
 
-        #if 0
-        for(u64 j = 0; j < mesh->primitive_groups.nitems; j++){
-
-            D_Primitive_Group* primitive_group = mesh->primitive_groups.ptr + j;
-
-            for(u64 k = 0; k < primitive_group->indicies.nitems; k++){
-                current_index_ptr[k] = primitive_group->indicies.ptr[k] + start_index_ptr[k + current_index_ptr - start_index_ptr];
-            }
-
-            memcpy(current_index_ptr, primitive_group->indicies.ptr, primitive_group->indicies.nitems);
-            current_index_ptr += primitive_group->verticies.nitems;
-            
-        }
-        #endif
-
         // Index Buffer
         Buffer_Desc index_buffer_desc = {};
         index_buffer_desc.number_of_elements = indicies_buffer.nitems;
@@ -612,7 +597,6 @@ int D_Renderer::init(){
         shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
         shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
 
-
         /////////////////////////////////////////
         //  Create PSO using shader reflection
         /////////////////////////////////////////
@@ -727,7 +711,6 @@ int D_Renderer::init(){
         shader_desc.input_layout.push_back({"TANGENT"    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
         shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
         shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
-
 
         /////////////////////
         //  Render Targets
@@ -1015,6 +998,7 @@ int D_Renderer::init(){
 
     upload_command_list->load_buffer(full_screen_quad_index_buffer, (u8*)fsq_index_buffer, 6 * sizeof(u16), sizeof(u16));
 
+
     ///////////////////////
     //  Camera
     ///////////////////////
@@ -1119,7 +1103,6 @@ void D_Renderer::render(){
     light_direction = DirectX::XMVector4Normalize(light_direction);
     DirectX::XMMATRIX light_view_matrix = DirectX::XMMatrixLookToRH(light_position, light_direction, camera.up_direction);
     DirectX::XMMATRIX light_projection_matrix = DirectX::XMMatrixOrthographicOffCenterRH(-250, 250, -250, 250, -250, 250);
-    //DirectX::XMMATRIX light_projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500.0f);
     DirectX::XMMATRIX light_view_projection_matrix = DirectX::XMMatrixMultiply(light_view_matrix, light_projection_matrix);
 
     // Fill the command list:
@@ -1493,7 +1476,6 @@ WinMain(HINSTANCE hInstance,
     */
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
-
     /*
     *   docs.microsoft.com : Set the DPI awareness for the current thread to the provided value. 
     */
@@ -1592,7 +1574,6 @@ WinMain(HINSTANCE hInstance,
     *   docs.microsoft.com : Closes the COM library on the current thread, unloads all DLLs loaded by the thread,
     *   frees any other resources that the thread maintains, and forces all RPC connections on the thread to close.
     */
-
 
     CoUninitialize();
 

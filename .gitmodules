@@ -3,7 +3,10 @@
 	url = https://github.com/daviddjh/imgui.git
 [submodule "third_party/tinygltf"]
 	path = third_party/tinygltf
-	url = https://github.com/syoyo/tinygltf
+	url = https://github.com/syoyo/tinygltf.git
 [submodule "third_party/DirectXTex"]
 	path = third_party/DirectXTex
 	url = https://github.com/microsoft/DirectXTex.git
+[submodule "third_party/DirectXTK12"]
+	path = third_party/DirectXTK12
+	url = https://github.com/microsoft/DirectXTK12.git

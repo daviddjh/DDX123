@@ -1,3 +1,13 @@
+5/21/2023
+
+Updated directory to remove DDX123_Lib and DDX123_Base. Added d_core and d_dx12 under ./code.
+
+Added cleanup.bat - removes temp files in ./build
+
+Cleaned up build script. Learned a new strat to change shell CD to script file location. "cd /d %~dp0".
+Now scripts can be ran from anywhere, and the changes / execution will run from DDX123 folder.
+Because of this, I could make the build script relative. All scripts have been changed to this relative way of running.
+
 5/20/2023
 
 Deferred Rendering is now able to do lighting and shadows look like Forward Shading.
