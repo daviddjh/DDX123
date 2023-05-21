@@ -83,6 +83,7 @@ VertexShaderOutput main(Vertex_Position_Normal_Tangent_Color_Texturecoord IN)
     // I think this is right..
     OUT.Position             = mul(mvp_matrix, float4(IN.Position, 1.0));
     OUT.Frag_Position        = mul(model_matrix.M, float4(IN.Position, 1.0));
+    matrix light_space_matrix = per_frame_data.light_space_matrix;
     OUT.Light_Space_Position = mul(per_frame_data.light_space_matrix, OUT.Frag_Position);
     OUT.TextureCoordinate = IN.texCoord;
     OUT.t = t;

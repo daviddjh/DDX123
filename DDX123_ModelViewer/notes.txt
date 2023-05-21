@@ -1,3 +1,75 @@
+5/20/2023
+
+Deferred Rendering is now able to do lighting and shadows look like Forward Shading.
+
+Still some slight deviation in "grey hanging dish"
+
+NOW DO ALL THE OTHER STUFF YOU NEED TO DO!! :D
+
+5/16/2023
+
+Got deferred shading looking 95% identical to forward shading ( minus the shadows ). Theres some odd discoloration in the "grey hanging dish".
+
+Shadows don't work because deferred shading pass doesn't have light space position of fragment. Need to finish that and do final comparison.
+
+Seems like I'm getting a memory error in the debugger whenever I let it run for a few min. and flip back and forth between forward vs deferred.
+Need to debug my temp ring buffer.
+
+Still need to clean up project:
+- Delete unncessary folders / files
+- Check in d_dx12 and d_core to github
+
+5/7/2023
+
+Got Gbuffer geometry pass working. Deferred shading pass can output albedo and scale with display_width, display_height.
+
+Trying to output position in deferred shading pass creates a pipline creation error, probably something to do with shader compilation.
+
+Future todo: use string utilities in d_core to improve shader compilation. (Output bin file, use shader names, debug print statements).
+
+5/4/2023
+
+Started on the gbuffers today. Need to create them all at the same time so they're right next to each other
+in the descriptor heap. Due to the way OMSetRenderTargets works.
+
+Will need to create a Shader Resource View for them in `bind_texture` like we do for depth stencils. SRV is
+so shaders can sample from the texture
+
+5/1/2023
+
+Deferred Gbuffer shader now outputs an albedo buffer.
+
+Areas of needed improvement:
+- Look into using multiple vertex buffers? Why does shadow mapping need all those values in input_layout?
+- Finally add my memory and string printing functions
+- Delete all the unused code in create_shader
+- Improve create shader - Create shader debug files for Pix and Nsight (?)
+- Improve shader reflection
+- Fix ugly shadow blurring
+- Delete all old, unused code
+- Delete current code that doesn't need to be there
+
+TODO:
+
+- Create normal, position, and roughness/metallic textures for Gbuffer
+- Output normal, position, and roughness/metallic to respective textures
+- Use Gbuffer to shade scene
+- Add SSAO
+
+4/30/2023
+
+Both d_core and d_dx12 are now included directly into main.cpp.
+- I should eventually decide whether d_core should be in a seperate repo, included in this repo as a sub-repo. Leaning towards yes.
+
+Created code to switch between a forward and deferred rendering path.
+
+TODO:
+
+- Enable deferred rendering
+    - Create deferred rendering shaders
+    - Create g-buffer resources
+- Add SSAO
+
 4/17/2023
 
 Made some updates to d_core. Added better debug logging to DDX123_ModelViewer::main.cpp.

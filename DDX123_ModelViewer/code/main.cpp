@@ -10,6 +10,7 @@
 #include "timeapi.h"
 
 #include "d_core.cpp"
+#include "d_dx12.cpp"
 #include "model.cpp"
 
 using namespace d_dx12;
@@ -35,6 +36,7 @@ struct Per_Frame_Data {
     float light_color[3] = {20., 20., 20.};
     int   shadow_texture_index = 0;
     DirectX::XMMATRIX light_space_matrix;
+    float camera_pos[3] = {0., 0., 0.};
 };
 
 // Global Vars, In order of creation
@@ -43,14 +45,20 @@ struct D_Renderer {
     HWND              hWnd;
     Resource_Manager  resource_manager;
     Shader*           pbr_shader;
+    Shader*           deferred_g_buffer_shader;
+    Shader*           deferred_shading_shader;
     Shader*           shadow_map_shader;
     Command_List*     direct_command_lists[NUM_BACK_BUFFERS];
     Texture*          rt[NUM_BACK_BUFFERS];
     Texture*          ds;
     Texture*          shadow_ds;
+    Texture*          g_buffer_position;
+    Texture*          g_buffer_albedo;
+    Texture*          g_buffer_normal;
+    Texture*          g_buffer_rough_metal;
     Texture*          sampled_texture;
-    Buffer*           vertex_buffer;
-    Buffer*           index_buffer;
+    Buffer*           full_screen_quad_vertex_buffer;
+    Buffer*           full_screen_quad_index_buffer;
     Buffer*           constant_buffer;
     Descriptor_Handle imgui_font_handle;
     bool              fullscreen_mode = false;
@@ -58,6 +66,7 @@ struct D_Renderer {
     Span<D_Model>     models;
     D_Camera          camera;
     Per_Frame_Data    per_frame_data;
+    bool              deferred_rendering = false;
 
     int  init();
     void render();
@@ -445,6 +454,37 @@ int D_Renderer::init(){
 
     shadow_ds = resource_manager.create_texture(L"Shadow Depth Stencil", shadow_ds_desc);
 
+    Texture_Desc g_buffer_albedo_desc;
+    g_buffer_albedo_desc.width  = display_width;
+    g_buffer_albedo_desc.height = display_height;
+    g_buffer_albedo_desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    g_buffer_albedo_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
+
+    g_buffer_albedo = resource_manager.create_texture(L"Gbuffer Albedo", g_buffer_albedo_desc);
+
+    Texture_Desc g_buffer_position_desc;
+    g_buffer_position_desc.width  = display_width;
+    g_buffer_position_desc.height = display_height;
+    g_buffer_position_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    g_buffer_position_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
+
+    g_buffer_position = resource_manager.create_texture(L"Gbuffer Position", g_buffer_position_desc);
+
+    Texture_Desc g_buffer_normal_desc;
+    g_buffer_normal_desc.width  = display_width;
+    g_buffer_normal_desc.height = display_height;
+    g_buffer_normal_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    g_buffer_normal_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
+
+    g_buffer_normal = resource_manager.create_texture(L"Gbuffer Normal", g_buffer_normal_desc);
+
+    Texture_Desc g_buffer_rough_metal_desc;
+    g_buffer_rough_metal_desc.width  = display_width;
+    g_buffer_rough_metal_desc.height = display_height;
+    g_buffer_rough_metal_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    g_buffer_rough_metal_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
+
+    g_buffer_rough_metal = resource_manager.create_texture(L"Gbuffer Roughness and Metallic", g_buffer_rough_metal_desc);
 
     ///////////////////////////////////////////////
     //  Create command allocators and command lists
@@ -456,10 +496,11 @@ int D_Renderer::init(){
 
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
-    //  PBR Shader
+    //  Forward Render PBR Shader
     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
     {
+        DEBUG_LOG("Creating Forward Rendering PBR shader");
 
         //////////////////////////////////
         //  Create our shader / PSO
@@ -578,16 +619,262 @@ int D_Renderer::init(){
 
         pbr_shader = create_shader(shader_desc);
 
-        DEBUG_LOG("Renderer Initialized!");
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    //  Deferred Rendering G-Buffer Shader
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    {
+        DEBUG_LOG("Creating Deferred Rendering G-Buffer Shader");
+
+        //////////////////////////////////
+        //  Create our shader / PSO
+        //////////////////////////////////
+
+        Shader_Desc shader_desc;
+
+        //////////////////////////////////
+        //  Set compiled shader code
+        //////////////////////////////////
+
+        shader_desc.vertex_shader = L"Deferred_Gbuffer_Vertex_Shader.hlsl";
+        shader_desc.pixel_shader  = L"Deferred_Gbuffer_Pixel_Shader.hlsl";
+
+        //////////////////////////////////
+        //  Specify our shader Parameters
+        //////////////////////////////////
+
+        // Sampler Parameter
+        Shader_Desc::Parameter::Static_Sampler_Desc sampler_1_ssd;
+        sampler_1_ssd.filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler_1_ssd.comparison_func  = D3D12_COMPARISON_FUNC_NEVER;
+        sampler_1_ssd.min_lod          = 0;
+        sampler_1_ssd.max_lod          = D3D12_FLOAT32_MAX;
+
+        Shader_Desc::Parameter sampler_1;
+        sampler_1.name                = "sampler_1";
+        sampler_1.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_STATIC_SAMPLER;
+        sampler_1.static_sampler_desc = sampler_1_ssd;
+
+        shader_desc.parameter_list.push_back(sampler_1);
+
+        // Bindless Texture Table - Where all our texture descriptors should go. Index is used by our shader to retrieve texture
+        Shader_Desc::Parameter texture_2d_table;
+        texture_2d_table.name                = "texture_2d_table";
+        texture_2d_table.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
+
+        shader_desc.parameter_list.push_back(texture_2d_table);
+
+        // Material Flags
+        Shader_Desc::Parameter material_flags;
+        material_flags.name                   = "material_flags";
+        material_flags.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        material_flags.number_of_32bit_values = 1;
+
+        shader_desc.parameter_list.push_back(material_flags);
+
+        // Albedo Index
+        Shader_Desc::Parameter albedo_index;
+        albedo_index.name                   = "albedo_index";
+        albedo_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        albedo_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(albedo_index);
+
+        // Normal Index
+        Shader_Desc::Parameter normal_index;
+        normal_index.name                   = "normal_index";
+        normal_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        normal_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(normal_index);
+
+        // Roughness-Metallic Index
+        Shader_Desc::Parameter roughness_metallic_index;
+        roughness_metallic_index.name                   = "roughness_metallic_index";
+        roughness_metallic_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        roughness_metallic_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(roughness_metallic_index);
+
+        // Model Matrix
+        Shader_Desc::Parameter model_matrix;
+        model_matrix.name                   = "model_matrix";
+        model_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        model_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
+        shader_desc.parameter_list.push_back(model_matrix);
+
+        // View Matrix
+        Shader_Desc::Parameter view_projection_matrix;
+        view_projection_matrix.name                   = "view_projection_matrix";
+        view_projection_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        view_projection_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
+
+        shader_desc.parameter_list.push_back(view_projection_matrix);
+
+        // Camera Pos
+        Shader_Desc::Parameter camera_pos;
+        camera_pos.name                   = "camera_position_buffer";
+        camera_pos.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        camera_pos.number_of_32bit_values = sizeof(DirectX::XMVECTOR);
+
+        shader_desc.parameter_list.push_back(camera_pos);
+
+        /////////////////////
+        //  Input Layout
+        /////////////////////
+
+        shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"NORMAL"     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"TANGENT"    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+        shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
+
+
+        /////////////////////
+        //  Render Targets
+        /////////////////////
+
+        DXGI_FORMAT rt_formats[] = {
+
+            DXGI_FORMAT_R8G8B8A8_UNORM,
+            DXGI_FORMAT_R16G16B16A16_FLOAT,
+            DXGI_FORMAT_R16G16B16A16_FLOAT,
+            DXGI_FORMAT_R16G16B16A16_FLOAT
+
+        };
+        shader_desc.render_target_formats = rt_formats;
+        shader_desc.num_render_targets    = sizeof(rt_formats)/sizeof(rt_formats[0]);
+
+
+        /////////////////////////////////////////
+        //  Create PSO using shader reflection
+        /////////////////////////////////////////
+
+        deferred_g_buffer_shader = create_shader(shader_desc);
 
     }
 
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+    //  Deferred Rendering Shading Shader (2nd Pass)
+    ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    {
+        DEBUG_LOG("Creating Deferred Shading Shader");
+
+        //////////////////////////////////
+        //  Create our shader / PSO
+        //////////////////////////////////
+
+        Shader_Desc shader_desc;
+
+        //////////////////////////////////
+        //  Set compiled shader code
+        //////////////////////////////////
+
+        shader_desc.vertex_shader = L"Deferred_Shading_Vertex_Shader.hlsl";
+        shader_desc.pixel_shader  = L"Deferred_Shading_Pixel_Shader.hlsl";
+
+        //////////////////////////////////
+        //  Specify our shader Parameters
+        //////////////////////////////////
+
+        // Sampler Parameter
+        Shader_Desc::Parameter::Static_Sampler_Desc sampler_1_ssd;
+        sampler_1_ssd.filter           = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler_1_ssd.comparison_func  = D3D12_COMPARISON_FUNC_NEVER;
+        sampler_1_ssd.min_lod          = 0;
+        sampler_1_ssd.max_lod          = D3D12_FLOAT32_MAX;
+
+        Shader_Desc::Parameter sampler_1;
+        sampler_1.name                = "sampler_1";
+        sampler_1.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_STATIC_SAMPLER;
+        sampler_1.static_sampler_desc = sampler_1_ssd;
+
+        shader_desc.parameter_list.push_back(sampler_1);
+
+        // Bindless Texture Table - Where all our texture descriptors should go. Index is used by our shader to retrieve texture
+        Shader_Desc::Parameter texture_2d_table;
+        texture_2d_table.name                = "texture_2d_table";
+        texture_2d_table.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
+
+        shader_desc.parameter_list.push_back(texture_2d_table);
+
+        // Albedo Index
+        Shader_Desc::Parameter albedo_index;
+        albedo_index.name                   = "albedo_index";
+        albedo_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        albedo_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(albedo_index);
+
+        // Position Index
+        Shader_Desc::Parameter position_index;
+        position_index.name                   = "position_index";
+        position_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        position_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(position_index);
+
+        // Normal Index
+        Shader_Desc::Parameter normal_index;
+        normal_index.name                   = "normal_index";
+        normal_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        normal_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(normal_index);
+
+        // Roughness-Metallic Index
+        Shader_Desc::Parameter roughness_metallic_index;
+        roughness_metallic_index.name                   = "roughness_metallic_index";
+        roughness_metallic_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        roughness_metallic_index.number_of_32bit_values = 1;
+        shader_desc.parameter_list.push_back(roughness_metallic_index);
+
+        // Deferred Shading Output Dimensions
+        Shader_Desc::Parameter output_dimensions;
+        output_dimensions.name                   = "output_dimensions";
+        output_dimensions.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+        output_dimensions.number_of_32bit_values = 2;
+        shader_desc.parameter_list.push_back(output_dimensions);
+
+        // Per Frame Data
+        Shader_Desc::Parameter per_frame_data;
+        per_frame_data.name                   = "per_frame_data";
+        per_frame_data.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER;
+        per_frame_data.number_of_32bit_values = sizeof(Per_Frame_Data) / 4;
+
+        shader_desc.parameter_list.push_back(per_frame_data);
+
+        /////////////////////
+        //  Input Layout
+        /////////////////////
+
+        shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+
+        /////////////////////
+        //  Render Targets
+        /////////////////////
+
+        DXGI_FORMAT rt_formats[] = {
+
+            DXGI_FORMAT_R8G8B8A8_UNORM
+
+        };
+        shader_desc.render_target_formats = rt_formats;
+        shader_desc.num_render_targets    = sizeof(rt_formats)/sizeof(rt_formats[0]);
+        shader_desc.depth_buffer_enabled  = false;
+
+
+        /////////////////////////////////////////
+        //  Create PSO using shader reflection
+        /////////////////////////////////////////
+
+        deferred_shading_shader = create_shader(shader_desc);
+
+    }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
     //  Shadow Map Shader
     ////////////////////////////////////////////////////////////////////////////////////////////////////
 
     {
+        DEBUG_LOG("Creating Shadow Mapping Shader");
 
         //////////////////////////////////
         //  Create our shader / PSO
@@ -676,6 +963,57 @@ int D_Renderer::init(){
 
     upload_command_list->load_buffer(constant_buffer, (u8*)&constant_buffer_data, sizeof(constant_buffer_data), 32);
 
+    ////////////////////////////////////////////////
+    // Vertex Buffer for full screen quad
+    ///////////////////////////////////////////////
+
+    Vertex_Position fsq_verticies[6] = {
+        {
+            {1.00, -1.00, 0.0},
+        },
+        {
+            
+            {-1.00, -1.00, 0.0},
+        },
+        {
+            {-1.00, 1.00, 0.0},
+        },
+        // TOP
+        {
+            {-1.00, 1.00, 0.0},
+        },
+        {
+            {1.00, 1.00, 0.0},
+        },
+        {
+            {1.00, -1.00, 0.0},
+        }
+    };
+
+    // Vertex buffer
+    Buffer_Desc vertex_buffer_desc = {};
+    vertex_buffer_desc.number_of_elements = 6;
+    vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position);
+    vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
+
+    full_screen_quad_vertex_buffer = resource_manager.create_buffer(L"Full Screen Quad Vertex Buffer", vertex_buffer_desc);
+
+    upload_command_list->load_buffer(full_screen_quad_vertex_buffer, (u8*)fsq_verticies, 6 * sizeof(Vertex_Position), sizeof(Vertex_Position));
+
+    u16 fsq_index_buffer[] = {
+        0, 1, 2,
+        3, 4, 5
+    };
+
+    // Index Buffer
+    Buffer_Desc index_buffer_desc = {};
+    index_buffer_desc.number_of_elements = 6;
+    index_buffer_desc.size_of_each_element = sizeof(u16);
+    index_buffer_desc.usage = Buffer::USAGE::USAGE_INDEX_BUFFER;
+
+    full_screen_quad_index_buffer = resource_manager.create_buffer(L"Full Screen Quad Index Buffer", index_buffer_desc);
+
+    upload_command_list->load_buffer(full_screen_quad_index_buffer, (u8*)fsq_index_buffer, 6 * sizeof(u16), sizeof(u16));
 
     ///////////////////////
     //  Camera
@@ -720,6 +1058,8 @@ int D_Renderer::init(){
     tick_list = (double*)calloc(MAX_TICK_SAMPLES, sizeof(double));
 
     application_is_initialized = true;
+
+    DEBUG_LOG("Renderer Initialized!");
 
     return 0;
 
@@ -767,6 +1107,7 @@ void D_Renderer::render(){
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
     ImGui::SliderFloat3("Light Position", (this->per_frame_data.light_pos), -10., 10);
     ImGui::DragFloat3("Light Color", (this->per_frame_data.light_color));
+    ImGui::Checkbox("Deffered Rendering?", &deferred_rendering);
     ImGui::End();
     ImGui::Render();
 
@@ -813,45 +1154,136 @@ void D_Renderer::render(){
     DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500.0f);
     DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
 
-    //////////////////////
-    /// The scene
-    //////////////////////
-
-    // Fill the command list:
-    command_list->set_shader(pbr_shader);
-
-    // Transition the RT
-    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-    command_list->set_viewport(display.viewport);
-    command_list->set_scissor_rect(display.scissor_rect);
-    command_list->set_render_targets(1, rt[current_backbuffer_index], ds);
-
-    // Clear the render target and depth stencil
-    FLOAT clear_color[] = {0.2f, 0.2, 0.7f, 1.0f};
-
-    command_list->clear_render_target(rt[current_backbuffer_index], clear_color);
-    command_list->clear_depth_stencil(ds, 1.0f);
-
-    // Can't use shader parameters that are optimized out
-    //command_list->bind_buffer(constant_buffer, &resource_manager, "color_buffer");
-
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     // vickylovesyou!!
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    // Bind Shadow Map
-    per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, "Shadow_Map");
-    per_frame_data.light_space_matrix = light_view_projection_matrix;
+    // Transition the RT
+    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    // Constant Buffer requires 256 byte alignment
-    Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
-    command_list->bind_handle(handle, "per_frame_data");
+    // Clear the render target and depth stencil
+    FLOAT clear_color[] = {0.3f, 0.6, 1.0f, 1.0f};
+    command_list->clear_render_target(rt[current_backbuffer_index], clear_color);
+    command_list->clear_depth_stencil(ds, 1.0f);
 
-    command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, "view_projection_matrix");
-    command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR), "camera_position_buffer");
-    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
-    
+    if(deferred_rendering == false) {
+
+        //////////////////////////////////////
+        // Forward Shading!
+        //////////////////////////////////////
+        command_list->set_render_targets(1, &rt[current_backbuffer_index], ds);
+
+        command_list->set_shader(pbr_shader);
+        command_list->set_viewport(display.viewport);
+        command_list->set_scissor_rect(display.scissor_rect);
+
+        // Bind Shadow Map
+        per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, "Shadow_Map");
+        per_frame_data.light_space_matrix = light_view_projection_matrix;
+        DirectX::XMFLOAT3 camera_position; 
+        DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
+        memcpy(&per_frame_data.camera_pos, &camera.eye_position, sizeof(float) * 3);
+
+        // Constant Buffer requires 256 byte alignment
+        Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+        command_list->bind_handle(handle, "per_frame_data");
+
+        command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, "view_projection_matrix");
+        command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR), "camera_position_buffer");
+        bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+
+    } else {
+
+        //////////////////////////////////////
+        // Defered Shading!
+        //////////////////////////////////////
+
+        // Need to:
+        // Output to new buffers
+
+        // Geometry Pass
+
+        // Transition Albedo Buffer
+        if(g_buffer_albedo->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+            command_list->transition_texture(g_buffer_albedo, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+        // Transition Position Buffer
+        if(g_buffer_position->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+            command_list->transition_texture(g_buffer_position, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+        if(g_buffer_normal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+            command_list->transition_texture(g_buffer_normal, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+        if(g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+            command_list->transition_texture(g_buffer_rough_metal, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        
+        command_list->clear_render_target(g_buffer_albedo, clear_color);
+
+        Texture* render_targets[] = {g_buffer_albedo, g_buffer_position, g_buffer_normal, g_buffer_rough_metal};
+
+        command_list->set_render_targets(4, render_targets, ds);
+        command_list->set_shader        (deferred_g_buffer_shader);
+        command_list->set_viewport      (display.viewport);
+        command_list->set_scissor_rect  (display.scissor_rect);
+
+        command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, "view_projection_matrix");
+        command_list->bind_constant_arguments(&camera.eye_position,    sizeof(DirectX::XMVECTOR),     "camera_position_buffer");
+
+        bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+
+        // Shading Pass
+
+        command_list->set_render_targets(1, &rt[current_backbuffer_index], NULL);
+        command_list->set_viewport      (display.viewport);
+        command_list->set_scissor_rect  (display.scissor_rect);
+        command_list->set_shader        (deferred_shading_shader);
+
+        // Bind Buffers
+        if(g_buffer_albedo->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+            command_list->transition_texture(g_buffer_albedo, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+        if(g_buffer_position->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+            command_list->transition_texture(g_buffer_position, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+        if(g_buffer_normal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+            command_list->transition_texture(g_buffer_normal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+        if(g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+            command_list->transition_texture(g_buffer_rough_metal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+        u32 albedo_index    = command_list->bind_texture (g_buffer_albedo,      &resource_manager, "Albedo Gbuffer");
+        u32 position_index  = command_list->bind_texture (g_buffer_position,    &resource_manager, "Position Gbuffer");
+        u32 normal_index    = command_list->bind_texture (g_buffer_normal,      &resource_manager, "Normal Gbuffer");
+        u32 roughness_index = command_list->bind_texture (g_buffer_rough_metal, &resource_manager, "Roughness and Metallic Gbuffer");
+
+        command_list->bind_constant_arguments(&albedo_index,    1, "albedo_index");
+        command_list->bind_constant_arguments(&position_index,  1, "position_index");
+        command_list->bind_constant_arguments(&normal_index,    1, "normal_index");
+        command_list->bind_constant_arguments(&roughness_index, 1, "roughness_metallic_index");
+
+        // Output texture dimensions
+        u32 output_dimensions[] = {display_width, display_height};
+        command_list->bind_constant_arguments(&output_dimensions, 2, "output_dimensions");
+
+        per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, "Shadow_Map");
+        per_frame_data.light_space_matrix = light_view_projection_matrix;
+        DirectX::XMFLOAT3 camera_position; 
+        DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
+        memcpy(&per_frame_data.camera_pos, &camera.eye_position, sizeof(float) * 3);
+
+        // Constant Buffer requires 256 byte alignment
+        Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+        command_list->bind_handle(handle, "per_frame_data");
+
+        // Now be bind the texture table to the root signature. 
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, "texture_2d_table");
+
+        command_list->bind_vertex_buffer(full_screen_quad_vertex_buffer, 0);
+        command_list->bind_index_buffer (full_screen_quad_index_buffer);
+        command_list->draw(6);
+
+    }
+
     // Render ImGui on top of everything
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
 

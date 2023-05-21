@@ -2610,7 +2610,11 @@ namespace d_dx12 {
 
         if(num_render_targets > 0){
             // If you have multiple render targets, they must be sequential in the descriptor heap
-            d3d12_command_list->OMSetRenderTargets(num_render_targets, &rt->offline_descriptor_handle.cpu_descriptor_handle, FALSE, &ds->offline_descriptor_handle.cpu_descriptor_handle);
+            if(ds != NULL)
+                d3d12_command_list->OMSetRenderTargets(num_render_targets, rt->offline_descriptor_handle.cpu_descriptor_handle, FALSE, &ds->offline_descriptor_handle.cpu_descriptor_handle);
+            else
+                d3d12_command_list->OMSetRenderTargets(num_render_targets, rt->offline_descriptor_handle.cpu_descriptor_handle, FALSE, NULL);
+
         } else {
             d3d12_command_list->OMSetRenderTargets(0, NULL, FALSE, &ds->offline_descriptor_handle.cpu_descriptor_handle);
         }

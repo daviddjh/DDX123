@@ -6,6 +6,7 @@
 
 # Build Extras
 *.asm
+*.bin
 *.ilk
 *.pdb
 *.cso
@@ -18,3 +19,4 @@
 .vscode/
 pix_captures
 nsight
+DDX123_VS

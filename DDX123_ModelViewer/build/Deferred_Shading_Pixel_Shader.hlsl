@@ -1,23 +1,10 @@
-// Learning from: https://learnopengl.com/PBR/Lighting
-
 /*
-// Need:
-
-// Per fragment
-FragColor
-TexCoords
-WorldPos
-Normal
-
-// Per Frame
-CameraPosition
-
-// Per Draw
-Albedo
-Metalic
-Roughness
-
+*   Deferred Rendering Shading Pass
+*   
+*   The purpose of this shader is use data from the GBuffer and render the scene with it.
+*
 */
+
 #define Tex2DSpace space1
 #define MATERIAL_FLAG_NONE                     0x0
 #define MATERIAL_FLAG_NORMAL_TEXTURE           0x1
@@ -26,13 +13,26 @@ Roughness
 static const float PI = 3.14159265359;
 static const float SHADOW_BIAS = 0.002;
 
+// Our texture sampler and texture table
 SamplerState sampler_1          : register(s0);
-Texture2D texture_2d_table[]    : register(t0, Tex2DSpace);
+Texture2D    texture_2d_table[] : register(t0, Tex2DSpace);
 
-struct Camera_Position {
-    float3 camera_position;
+// Constant buffers contianing the texture indicies for the GBuffer
+struct TextureIndex
+{
+    int i;
 };
-ConstantBuffer<Camera_Position> camera_position_buffer: register(b4);
+ConstantBuffer<TextureIndex> albedo_index:             register(b0);
+ConstantBuffer<TextureIndex> position_index:           register(b1);
+ConstantBuffer<TextureIndex> normal_index:             register(b2);
+ConstantBuffer<TextureIndex> roughness_metallic_index: register(b3);
+
+struct OutputDimensions
+{
+    uint width;
+    uint height;
+};
+ConstantBuffer<OutputDimensions> output_dimensions: register(b4);
 
 struct Per_Frame_Data {
     float3 light_position;    
@@ -41,31 +41,13 @@ struct Per_Frame_Data {
     matrix light_space_matrix;
     float3 camera_pos;
 };
-ConstantBuffer<Per_Frame_Data> per_frame_data: register(b8);
-
-struct TextureIndex
-{
-    int i;
-};
-ConstantBuffer<TextureIndex> albedo_index:            register(b5);
-ConstantBuffer<TextureIndex> normal_index:            register(b6);
-ConstantBuffer<TextureIndex> roughness_metallic_index: register(b7);
-
-struct Material_Flags {
-    uint flags;
-};
-
-ConstantBuffer<Material_Flags> material_flags: register(b3);
+ConstantBuffer<Per_Frame_Data> per_frame_data: register(b5);
 
 struct PixelShaderInput
 {
     float4 Position            : SV_Position;
-    float4 Frag_World_Position : TEXCOORD4;
-    float4 Light_Space_Position: TEXCOORD5;
-    float3 t                   : TEXCOORD2;
-    float3 n                   : TEXCOORD3;
-    float2 TextureCoordinate   : TEXCOORD;
 };
+
 
 static float2 poissonDisk[9] = {
     float2(0.526, 0.786),
@@ -177,56 +159,37 @@ float calc_shadow_value(float4 frag_pos_light_space, float2 tex_coords){
 float4 main(PixelShaderInput IN) : SV_Target {
 
     ////////////////////////
-    // Get Texture Values    
+    // Get Gbuffer Values    
     ////////////////////////
+    float2 UV = float2((IN.Position.x / output_dimensions.width), (IN.Position.y / output_dimensions.height));
 
-    // Create Tangent-Bitangent-Normal matrix to convert Tangent Space normal to world space normal
-    // https://stackoverflow.com/questions/16555669/hlsl-normal-mapping-matrix-multiplication
-    float3 b = normalize(cross(IN.n, IN.t) * 1.).xyz;
-    float3x3 TBN = float3x3( normalize(IN.t), normalize(b), normalize(IN.n) );
-    TBN = transpose( TBN );
+    float4 albedo_texture_color = texture_2d_table[albedo_index.i].Sample(
+        sampler_1,
+        UV
+    );
 
-    float2 UV;
-    UV.x = IN.TextureCoordinate.x;
-    UV.y = IN.TextureCoordinate.y;
+    float4 w_position = texture_2d_table[position_index.i].Sample(
+        sampler_1,
+        UV
+    );
+    w_position.w = 1.;
 
-    float4 albedo_texture_color = pow(texture_2d_table[albedo_index.i].Sample(sampler_1, UV), 2.2);
+    float4 w_normal= texture_2d_table[normal_index.i].Sample(
+        sampler_1,
+        UV
+    );
 
-    // This is to discard transparent pixels in textures. See: Chains and foliage in GLTF2.0 Sponza
-    if (albedo_texture_color.a < 0.5) {
-        discard;
-    }
+    float4 roughness_metallic = texture_2d_table[roughness_metallic_index.i].Sample(
+        sampler_1,
+        UV
+    );
+    float roughness = roughness_metallic.g;
+    float metallic  = roughness_metallic.r;
 
-    float3 wNormal;
-    if((material_flags.flags & MATERIAL_FLAG_NORMAL_TEXTURE)){
+    // Calculate shading
 
-        float3 normal_texture_color = texture_2d_table[normal_index.i].Sample(sampler_1, UV).xyz;
-        float3 tNormal = (normal_texture_color * 2.) - 1.;
-        wNormal = mul(TBN, tNormal);
-
-    } else {
-
-        wNormal = normalize(IN.n);
-
-    }
-
-    float roughness;
-    float metallic;
-    if((material_flags.flags & MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE)){
-
-        float3 rm_texture_color = texture_2d_table[roughness_metallic_index.i].Sample(sampler_1, UV).xyz;
-        roughness = rm_texture_color.g;
-        metallic = rm_texture_color.r;
-
-    } else {
-
-        roughness = 0.5;
-        metallic = 0.5;
-
-    }
-
-    float3 N = normalize(wNormal);
-    float3 V = normalize(per_frame_data.camera_pos - IN.Frag_World_Position);
+    float3 N = normalize(w_normal.xyz);
+    float3 V = normalize(per_frame_data.camera_pos - w_position.xyz);
     float3 light_position = per_frame_data.light_position;
     float3 light_direction = per_frame_data.light_position;
     float3 light_color    = per_frame_data.light_color;
@@ -234,7 +197,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     
     // Approximation of base reflectivity for fresnel
     float3 F0 = float3(0.04, 0.04, 0.04); 
-    F0 = lerp(F0, albedo_texture_color, metallic);
+    F0 = lerp(F0, albedo_texture_color.rgb, metallic);
 
     // Only doing this once because we have one light
     for (int i = 0; i < 1; i++){
@@ -242,7 +205,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
         float3 L = normalize(-light_direction);
         float3 H = normalize(V + L);
 
-        float distance = length(light_position - IN.Frag_World_Position);
+        float distance = length(light_position - w_position.xyz);
         float attenuation = 1.0; // (distance * distance);
         float3 radiance = light_color * attenuation;
         
@@ -267,15 +230,16 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
         // Final Cook Torrance Reflectance Equation
         float NdotL = max(dot(N, L), 0.0);
-        Lo += (kD * albedo_texture_color / PI + specular) * radiance * NdotL;
+        Lo += (kD * albedo_texture_color.rgb / PI + specular) * radiance * NdotL;
 
     }
 
-    float3 ambient = float3(0.06, 0.06, 0.06) * albedo_texture_color;
-    float shadow = calc_shadow_value(IN.Light_Space_Position, IN.TextureCoordinate);
+    float3 ambient = float3(0.06, 0.06, 0.06) * albedo_texture_color.rgb;
+    matrix light_space_matrix = per_frame_data.light_space_matrix;
+    float4 frag_pos_light_space = mul(light_space_matrix, w_position);
+    float shadow = calc_shadow_value(frag_pos_light_space, UV);
     float3 color = ambient + (1.0 - shadow) * Lo;
     #if 0
-    float3 color;
     if(shadow == 0.){
         color = ambient + (1.0 - shadow) * Lo;
     } else {
@@ -286,9 +250,14 @@ float4 main(PixelShaderInput IN) : SV_Target {
         color.b *= 0.01;
     }
     #endif
+
+    //float3 color = ambient * Lo;
+    //float3 color = ambient;
 	
     color = color / (color + float3(1.0, 1.0, 1.0));
     color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  
    
     return float4(color, 1.0);
+    
+
 }

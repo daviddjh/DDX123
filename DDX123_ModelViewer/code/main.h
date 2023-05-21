@@ -24,3 +24,7 @@ struct Vertex_Position_Normal_Tangent_Color_Texturecoord {
     DirectX::XMFLOAT3 color;
     DirectX::XMFLOAT2 texture_coordinates;
 };
+
+struct Vertex_Position {
+    DirectX::XMFLOAT3 position;
+};
