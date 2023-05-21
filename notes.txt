@@ -1,0 +1,361 @@
+5/20/2023
+
+Deferred Rendering is now able to do lighting and shadows look like Forward Shading.
+
+Still some slight deviation in "grey hanging dish"
+
+NOW DO ALL THE OTHER STUFF YOU NEED TO DO!! :D
+
+5/16/2023
+
+Got deferred shading looking 95% identical to forward shading ( minus the shadows ). Theres some odd discoloration in the "grey hanging dish".
+
+Shadows don't work because deferred shading pass doesn't have light space position of fragment. Need to finish that and do final comparison.
+
+Seems like I'm getting a memory error in the debugger whenever I let it run for a few min. and flip back and forth between forward vs deferred.
+Need to debug my temp ring buffer.
+
+Still need to clean up project:
+- Delete unncessary folders / files
+- Check in d_dx12 and d_core to github
+
+5/7/2023
+
+Got Gbuffer geometry pass working. Deferred shading pass can output albedo and scale with display_width, display_height.
+
+Trying to output position in deferred shading pass creates a pipline creation error, probably something to do with shader compilation.
+
+Future todo: use string utilities in d_core to improve shader compilation. (Output bin file, use shader names, debug print statements).
+
+5/4/2023
+
+Started on the gbuffers today. Need to create them all at the same time so they're right next to each other
+in the descriptor heap. Due to the way OMSetRenderTargets works.
+
+Will need to create a Shader Resource View for them in `bind_texture` like we do for depth stencils. SRV is
+so shaders can sample from the texture
+
+5/1/2023
+
+Deferred Gbuffer shader now outputs an albedo buffer.
+
+Areas of needed improvement:
+- Look into using multiple vertex buffers? Why does shadow mapping need all those values in input_layout?
+- Finally add my memory and string printing functions
+- Delete all the unused code in create_shader
+- Improve create shader - Create shader debug files for Pix and Nsight (?)
+- Improve shader reflection
+- Fix ugly shadow blurring
+- Delete all old, unused code
+- Delete current code that doesn't need to be there
+
+TODO:
+
+- Create normal, position, and roughness/metallic textures for Gbuffer
+- Output normal, position, and roughness/metallic to respective textures
+- Use Gbuffer to shade scene
+- Add SSAO
+
+4/30/2023
+
+Both d_core and d_dx12 are now included directly into main.cpp.
+- I should eventually decide whether d_core should be in a seperate repo, included in this repo as a sub-repo. Leaning towards yes.
+
+Created code to switch between a forward and deferred rendering path.
+
+TODO:
+
+- Enable deferred rendering
+    - Create deferred rendering shaders
+    - Create g-buffer resources
+- Add SSAO
+
+4/17/2023
+
+Made some updates to d_core. Added better debug logging to DDX123_ModelViewer::main.cpp.
+Need to get the changes in DDX123_Lib::d_dx12.cpp.
+Also should remove requirement for arena from _format_lit_string.
+
+Should I compile d_core to .lib? Should I include it into d_dx12.cpp? Should I include d_dx12.cpp directly into DDX123_ModelViewer::main?
+
+Idea: Make DDX123 root folder, ./code/main.cpp, ./code/d_dx12/d_dx12.cpp ./code/d_core/* ???
+
+4/5/2023
+
+Shadows Mapping + Rough PCF is in! The PCF could definitely be improved, but scene looks decent!
+Feel proud of what I've made :D
+
+Goals in no specific order:
+
+- Add latest pic to my public site!!!
+- SSAO
+- SSR
+    - Defered rendering
+- Decouple display resolution from render resolution with post pass
+- Cleanup of code
+- Document code
+- Performance Analysis + Tune up
+- Custom cpu allocators + containers ( no more std )
+- Fix PCF with Stratified Poisson Sampling - http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-16-shadow-mapping/ 
+
+4/2/2023
+
+Got orthographic shadow map working, could be better. Some blur in the shadows could help.
+Also, shadow mapping doesn't work when perpendicular to the ground. Due to "up" direction in view matrix.
+Just keep a view matrix and transform it, don't make a new one every frame.
+
+4/2/2023
+
+Kindof got shadow mapping working? Doesn't look very good, I think the precition of the shadow map buffer
+is far too low. Seems like I have to adjust the BIAS value and camera position perfectly for it to work.
+
+Why is that?
+
+4/2/2023
+
+Shadow Pass is working, now use in PBR shader!!
+
+4/1/2023
+
+Problem: bind_and_draw_model inserts new descriptors into heap regardless of if they're already there.
+
+Solution: check if descriptor is already in online heap before placing in online heap.
+
+3/29/2023
+
+Jumped right into the Shadow Map pass. Found lots of problems with d_dx12 layer assumptions (automatic
+viewport and scissor_rect selection).
+
+Wrote a Shadow Map Shader. All it does is generate a depth texture in light space.
+
+Do we really need to pass all the vertex attributes to the shadow map shader if it's only reading the
+position??
+
+Need to do a clean up pass where I try to remove code and naming inconsitincies. ("binding_point" vs "parameter_name")
+
+Also need to do a NVidia Profile. Why is debug build 55fps???? Was gettign 300fps+ before???
+
+3/26/2023
+
+Made a dynameic per-frame data upload buffer. Implemented as a ring buffer. Currently using for direction
+and color of directional light. Want to implement shadow map next. Looks like it will cause some changes
+to dx12 idea of "render pass". Need to make multiple render passes integrate easier.
+
+TODO:
+Implement "render_pass" structs.
+Use them to do shadow mapping.
+
+3/5/2023
+
+Got Physically Based Rendering in the sponza scene! I was having a problem because I was using the wrong
+(unnormalized) normal, after fixing that, it worked! Transforming albedo from sRGB to linear made it look
+better too. Planning on going back over the shader to comment on it and understand it more.
+
+Noticing that I have to ender a very large light intensity for specular lights to work. Also have to tone 
+down the attenuation, need to revert in the future. Think its related to my MVP matricies and the meshes 
+being "far" from each other. Ex: still seeing z buffer max out an back of scene disapear at times.
+
+TODO:
+Notes on PBR shader.
+Look into attenuation.
+Directional "sun" light.
+Shadows? (multi pass...)
+
+3/5/2023
+
+Got bindless textures working! Ended up storing texture descriptor indicies in texture struct temporarily.
+Switched to RTX 4080, getting 300+ FPS in debug mode. Fixed building for release and release debug symbol mode. 
+Getting 3000 - 4000 FPS in release mode! Not going to try an optimize any more at this time.
+
+Going to work on PBR and d_core at the same time. Starting on formated strings in d_core, although I found
+a memory bug.
+
+2/28/2023
+
+Began adding bindles textrues tonight. A bit sloppy. Don't really like how we're dividing up the descriptor
+heap by default for GPU visible heaps, because what if that changes in the future. Guess I will fix it then.
+Right now, we need to "bind" (copy descriptors over to texture section of online heap) all of the textures, then
+really bind the texture section of the online heap, then draw the model. Some problems are arising here, such as: 
+what happens when we have multiple models? How do we keep track of texture indicies after copying over all of the
+texture descriptors (need to supply that information per draw call)?
+
+2/12/2023
+
+Got phong shading working! Z axis flip got me tripped up again. Had to flip both normal and tangent.
+Now that the render is able to use mipmapping and phong shading, I will begin working on a base library
+for the application. Goal is to remove std lib stuff.
+
+TODO (start with):
+1. Memory Management - overall and per frame arenas
+2. String Strategy   - create new strings, format strings.. 
+3. Print Paths       - Debug print with formating options
+4. Containers        - Array, Map, any other container I need
+5. Profiling         - Replace chrono using custom solution
+
+In the future I could add more to this list, but I'd like to do all of these before I continue developing
+the renderer.
+
+2/08/2023
+
+Got Normal Mapping working. With the option to not use normal mapping. Currently working on 
+Phong shading. Only have ambient and diffuse. Diffuse is shading the wrong side of the triangles,
+which makes me think that something is wrong with the normal / light direction vector.
+
+For specular shading: need the view position. Thinking this should go in a global constant buffer
+with the light position.
+
+TODO:
+1. Debug diffuse lighting direction.
+2. Add view_pos and light_pos to global constant buffer
+3. Finish Phong shading
+4. Find the problems with performance! Loading and FPS! Not too much, but it seems light there could
+be some easy gains lurking
+
+1/30/2023
+
+Mipmapping is working! Works a little funky with the upload buffer and having to remap it
+after running UpdateSubresources. May want to implement the functionallity of UpdateSubresources
+directly. Also, I should compress the textures the same time I generate the mipchain. Then 
+save them and load them the next time they're needed.
+
+Todo:
+1. Start on lighting!
+2. Compress textures
+3. Save compressed mipchain for the next time the file needs to be loaded
+4. Better upload buffer system
+
+1/25/2023
+
+Added the mouse controls! Now I can move and look around Sponza. The textures are very distracting
+though with all the aliasing. I'm thinking I should figure that out before staring on lighting.
+
+Todo:
+1. Figure out texture mipmapping. Implement on sponza textures. OK to generate at runtime.
+2. Implement Lighting! ( Problably something simple at first, first big goal being PBR with IBL )
+
+1/24/2023
+
+Todo:
+1. Copy over code from DavidDx12_2 for controls (Mouse Capture - Rotate)
+2. Implement Lighting! ( Problably something simple at first, first big goal being PBR with IBL )
+
+Got the camera translating on a single plane with WASD, now we need mouse + rotation controls!
+
+1/23/2023
+
+Todo:
+1. Copy over code from DavidDx12_2 for controls (WASD - Movement, Right Mouse + Drag - Rotate)
+2. Implement Lighting! ( Problably something simple at first, first big goal being PBR with IBL )
+
+Figured out a way to handle the transparent pixels in a texture. I just "discarded" the pixel if it's
+alpha was less than 1. I guess this means it's depth was not written to the depth buffer because the
+primitives behind it started appering. This is not the best solution, but it will work for now!
+
+1/22/2023
+
+Meshes now have a single vertex and a single index buffer. They have an array of draw calls that track
+the vertex and index offsets to use when making the d3d12 draw call.
+
+Got a blending state set up for alpha to work properly, now dont know what to do about the z depth for
+alpha blended pixels. Depending on draw order, primitives at an alpha pixel could get depth compared out,
+so nothing is drawn behind the alpha pixel anymore.
+
+12/23/2022
+
+Sponza is rendering correctly with textures! Had to flip texture coordinate back to default for sponza to 
+be viewed correctly.
+
+Todo:
+1. Consider adding some sort of camera controls to validate rest of the sponza model is loaded properly
+2. Clean up code before adding anything else. Getting a bit out of hand..
+
+12/23/2022
+
+Slowly getting there! Got sponza loaded with textures showing on a few objects infront of the cameras.
+Textures on the fabric looks heavily aliased, need mip mapping.
+Decoupled Materials from primitive_groups. Primative groups now store the index of the material they need.
+
+Todo:
+1. Fix matricies so model moving works
+2. Consider adding some sort of camera controls to validate rest of the sponza model is loaded properly
+3. Clean up code before adding anything else. Getting a bit out of hand..
+
+12/5/2022
+
+- Still working on sponza model load. The verticies, indicies, and textures are taking up a lot of room.
+- Just giving each primitive_group it's own buffers and draw call, will need to optimize in the future.
+- In the future will need to rewrite upload buffer code to support more buffers and clean up after upload.
+- Seems like there is a problem with resource cleanup on the GPU, as the program fails to create a resource
+    when not attached to RemedyBG.
+    - Should add a "cleanup" function to model to cleanup the models resources. See if that works.
+- Also, since I added these model data structures, I should clean up the global vars for vertex buffer, albedo texture, etc..
+
+12/4/2022
+
+- Currently working to improve model load code with the goal of Sponza being able to load properly
+
+11/25/2022
+
+- Loads the DamagedHelmet GLtf model and albedo texture.
+
+TODO:
+1. Clean up model / model load code, move to own file?
+2. Add Model Matricies and other code to move models.
+3. Add default scaling, controls, lighting
+
+NOTES:
+
+Alignment is important!! Texture wasn't diplaying properly because the destination location in the CopyTextureRegion function
+wasn't aligned properly.
+
+11/25/2022
+
+- Made progress on screen resize and the moving screen causing freeze bug. Fixed by moving render out of windows message loop
+- Added gltf file loader. Currently only works with files that have vertex color defined per vertex.
+    - Moved to DrawIndexedInstanced by defalut
+
+TODO:
+1. Add texture to model load.
+2. Clean up model / model load code, move to own file?
+3. Add default scaling, controls, lighting
+
+NOTES:
+
+Due to the combination of backside culling and DirectX + opengl z axis being swapped, at first, the models weren't being shown.
+It was only after I had added code to the model load that flipped the z axis that the models began to show. Originally, the z axis
+of the cube was flipped, thus after the combination of Z buffer depth culling(?), and backside culling, nothing ended up on the render target.
+
+11/15/2022
+
+Started on window resize and move
+
+TODO: Limit Screen resize, scale framebuffer to fullscreen??
+
+11/15/2022
+
+Added Dear ImGui Shutdown
+
+TODO: Handle screen resize
+
+11/14/2022
+
+Got ImGui working!
+Added avg FPS and frame MS.
+Added IO handling for ImGui.
+
+TODO: Shutdown ImGui. Check Refcount dx12 objects.
+
+D_Renderer::render:
+    Average Time Taken: 10.7ms
+    Median Time Taken:  9.2ms
+
+11/1/2022
+
+Goal: Build a Model Viewer app that can load the Sponza Scene, as well as others
+
+Results:
+- Load scene dynamicaly when user enters scene path
+- Responsibly manage resources for each loaded scene
+- ImGui for GUI
+- Camera to move around scene. uses keyboard and mouse controls
+- option to make fullscreen
