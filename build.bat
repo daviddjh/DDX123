@@ -17,9 +17,9 @@ pushd .\build
 set flags= /FeDDX123 /FAs /EHsc
 set code=..\code\main.cpp ..\third_party\imgui\imgui.cpp ..\third_party\imgui\imgui_draw.cpp ..\third_party\imgui\imgui_demo.cpp ..\third_party\imgui\imgui_tables.cpp ..\third_party\imgui\imgui_widgets.cpp ..\third_party\imgui\backends\imgui_impl_dx12.cpp ..\third_party\imgui\backends\imgui_impl_win32.cpp
 set includes=/I"..\third_party\DirectXTex\DirectXTex" /I"..\code\d_core" /I"..\code\d_dx12" /I"..\third_party\DirectXTK12\Inc" /I"..\third_party\tinygltf" /I"..\third_party\imgui" /I"..\third_party\imgui\backends"
-set link_libs= Winmm.lib d3d12.lib dxgi.lib dxguid.lib dxcompiler.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib odbc32.lib odbccp32.lib
+set link_libs= Winmm.lib d3d12.lib dxgi.lib dxguid.lib dxcompiler.lib ole32.lib oleaut32.lib
 
-:: Compile App
+:: Compile our app, or DirectXTex
 if "%1" == "-d" (
 
     :: Compile this
@@ -41,10 +41,26 @@ if "%1" == "-d" (
 
     popd
 
+) else if "%1" == "--DirectXTex2022" (
+
+    msbuild ..\third_party\DirectXTex\DirectXTex_Desktop_2022.sln /p:Configuration="Release" /p:Platform="x64"
+    msbuild ..\third_party\DirectXTex\DirectXTex_Desktop_2022.sln /p:Configuration="Debug" /p:Platform="x64"
+    msbuild ..\third_party\DirectXTex\DirectXTex_Desktop_2022.sln /p:Configuration="Profile" /p:Platform="x64"
+    
+    popd
+
+) else if "%1" == "--DirectXTex2019" (
+
+    msbuild ..\third_party\DirectXTex\DirectXTex_Desktop_2019.sln /p:Configuration="Release" /p:Platform="x64"
+    msbuild ..\third_party\DirectXTex\DirectXTex_Desktop_2019.sln /p:Configuration="Debug" /p:Platform="x64"
+    msbuild ..\third_party\DirectXTex\DirectXTex_Desktop_2019.sln /p:Configuration="Profile" /p:Platform="x64"
+
+    popd
+
 ) else (
 
     :: Compile this
-    cl /MD %flags% %code% %includes% %link_libs% ..\third_party\DirectXTex\DirectXTex\Bin\Desktop_2019_Win10\x64\Release\DirectXTex.lib
+    cl /Zi /DDEBUG /D_DEBUG /MDd %flags% %code% %includes% %link_libs% ..\third_party\DirectXTex\DirectXTex\Bin\Desktop_2019_Win10\x64\Debug\DirectXTex.lib 
 
     popd
 )

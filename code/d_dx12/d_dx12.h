@@ -186,6 +186,7 @@ namespace d_dx12 {
         u16                                       pixel_size;
         DXGI_FORMAT                               format;
         u16                                       is_bound_index;
+        float                                     clear_color[4] = {0.0, 0.0, 0.0, 0.0};
         wchar_t*                                  name = NULL;
 
         void d_dx12_release();
@@ -200,6 +201,7 @@ namespace d_dx12 {
         u16            height;
         u16            pixel_size;
         DXGI_FORMAT    format;
+        float          clear_color[4] = {0.0, 0.0, 0.0, 0.0};
         wchar_t*       name = NULL;
 
     };
@@ -266,6 +268,7 @@ namespace d_dx12 {
         void transition_texture(Texture* texture, D3D12_RESOURCE_STATES new_state);
         void transition_buffer(Buffer* buffer, D3D12_RESOURCE_STATES new_state);
         void clear_render_target(Texture* rt, const float* clear_color);
+        void clear_render_target(Texture* rt);
         void clear_depth_stencil(Texture* ds, const float depth);
         void load_buffer(Buffer* buffer, u8* data, u64 size, u64 alignment);
         void load_texture_from_file(Texture* texture, const wchar_t* filename);

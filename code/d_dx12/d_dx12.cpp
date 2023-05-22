@@ -1299,6 +1299,17 @@ namespace d_dx12 {
         d3d12_command_list->ClearRenderTargetView(rt->offline_descriptor_handle.cpu_descriptor_handle, clear_color, 0, nullptr);
     }
 
+    // Clears the render target with color that that render target was created with
+    void Command_List::clear_render_target(Texture* rt){
+
+        if(rt->usage != Texture::USAGE::USAGE_RENDER_TARGET){
+            OutputDebugString("Error (clear_render_target): Have to pass in a render target texture here");
+            DEBUG_BREAK;
+        }
+
+        d3d12_command_list->ClearRenderTargetView(rt->offline_descriptor_handle.cpu_descriptor_handle, rt->clear_color, 0, nullptr);
+    }
+
 
     // Clears the depth stencil with the specified depth
     void Command_List::clear_depth_stencil(Texture* ds, const float depth){
@@ -1649,12 +1660,12 @@ namespace d_dx12 {
                 // Else, this is just a normal texture resource
                 } else {
 
-                    D3D12_CLEAR_VALUE optimizedClearValue = {};
-                    optimizedClearValue.Format = desc.format;
-                    optimizedClearValue.Color[0] = 0.0f;
-                    optimizedClearValue.Color[1] = 0.0f;
-                    optimizedClearValue.Color[2] = 1.0f;
-                    optimizedClearValue.Color[3] = 0.0f;
+                    D3D12_CLEAR_VALUE clear_value = {};
+                    clear_value.Format   = desc.format;
+                    texture->clear_color[0] = clear_value.Color[0] = desc.clear_color[0];
+                    texture->clear_color[1] = clear_value.Color[1] = desc.clear_color[1];
+                    texture->clear_color[2] = clear_value.Color[2] = desc.clear_color[2];
+                    texture->clear_color[3] = clear_value.Color[3] = desc.clear_color[3];
 
                     D3D12_HEAP_PROPERTIES render_target_heap_properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 
@@ -1666,7 +1677,7 @@ namespace d_dx12 {
                         D3D12_HEAP_FLAG_NONE,
                         &render_target_resource_description,
                         D3D12_RESOURCE_STATE_RENDER_TARGET,
-                        &optimizedClearValue,
+                        &clear_value,
                         IID_PPV_ARGS(&texture->d3d12_resource)
                     ));
 

@@ -8,6 +8,11 @@ Cleaned up build script. Learned a new strat to change shell CD to script file l
 Now scripts can be ran from anywhere, and the changes / execution will run from DDX123 folder.
 Because of this, I could make the build script relative. All scripts have been changed to this relative way of running.
 
+Can create a render target with a specific clear color. This will be used when calling clear_render_target(Texture*).
+Gets rid of DirectX12 warning and supposedly improves performance.
+
+Moved shader build / pipeline build to seperate file: shaders.cpp. Reduces complexity in main.cpp.
+
 5/20/2023
 
 Deferred Rendering is now able to do lighting and shadows look like Forward Shading.

@@ -167,6 +167,9 @@ float4 main(PixelShaderInput IN) : SV_Target {
         sampler_1,
         UV
     );
+    if (albedo_texture_color.a < 0.1){
+        discard;
+    }
 
     float4 w_position = texture_2d_table[position_index.i].Sample(
         sampler_1,
