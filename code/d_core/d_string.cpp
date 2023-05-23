@@ -36,10 +36,13 @@ namespace d_std {
 
     d_string _format_lit_string(Memory_Arena *arena, char* lit_string, u_ptr va_args){
 
+        // it iterates through the original string
         char* it = lit_string;
 
         u32 capacity = 50;
         d_string return_string;
+
+        // Current place in new string is kept track of with size
         return_string.string = arena->allocate_array<char>(capacity);
         return_string.size = 0;
 
@@ -58,6 +61,8 @@ namespace d_std {
 
             if ( *it == '%' ) {
                 if ( *(it+1) != '\0' ){
+                    
+                    // Switch based on argument type
                     switch(*(it+1)){
                         case('u'):
                         {
@@ -66,7 +71,7 @@ namespace d_std {
 
                             char* placement_ptr = return_string.string + return_string.size - 1;
 
-                            // Guarantee one spot. What is "number" is 0?
+                            // Guarantee one spot. What if "number" is 0?
                             u64 temp = number; 
                             placement_ptr++;
                             return_string.size++;
@@ -93,6 +98,65 @@ namespace d_std {
                             placement_ptr--;
                             for(temp; temp>0; temp /= 10, placement_ptr--){
                                 *placement_ptr = (temp % 10) + '0';
+                            }
+
+                            it++;
+                        }
+                        break;
+                        case('s'):
+                        {
+                            char* c_str = *(char**)va_args;
+                            va_args  += sizeof(u64);
+
+                            char* placement_ptr = return_string.string + return_string.size;
+
+                            char* input_string_iterator = (char*)c_str;
+
+                            while(*input_string_iterator != '\0'){
+
+                                // Set char in output string 
+                                *placement_ptr = *input_string_iterator;
+
+                                // Advance Iterators
+                                input_string_iterator++;
+                                placement_ptr++;
+                                return_string.size++;
+
+                                // Possibly allocate more memory
+                                if(return_string.size == capacity){
+                                    arena->allocate_array<char>(return_string.size);
+                                    capacity += return_string.size;
+                                }
+                            }
+
+                            it++;
+                        }
+                        break;
+
+                        case('$'):
+                        {
+                            // Structs are added to the stack as the address of the stuct, and we have the address of that address
+                            d_string d_str = **(d_string**)va_args;
+                            va_args  += sizeof(u64);
+
+                            char* placement_ptr = return_string.string + return_string.size;
+
+                            //char* input_string_iterator = (char*)d_str.string;
+
+                            for(int i = 0; i < d_str.size; i++){
+
+                                // Set char in output string 
+                                *placement_ptr = d_str.string[i];
+
+                                // Advance Iterators
+                                placement_ptr++;
+                                return_string.size++;
+
+                                // Possibly allocate more memory
+                                if(return_string.size == capacity){
+                                    arena->allocate_array<char>(return_string.size);
+                                    capacity += return_string.size;
+                                }
                             }
 
                             it++;

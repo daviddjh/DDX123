@@ -1,3 +1,9 @@
+5/22/2023
+
+Added string print to d_std::os_debug_printf
+- %s = c string
+- %$ = d_std string
+
 5/21/2023
 
 Updated directory to remove DDX123_Lib and DDX123_Base. Added d_core and d_dx12 under ./code.

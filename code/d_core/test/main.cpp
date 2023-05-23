@@ -120,6 +120,16 @@ unsigned long __stdcall main(){
 
     d_std::os_debug_printf(arena, "My Other Numbers: %u, %u\n", 55, 100);
 
+    d_std::os_debug_printf(arena, "My string: %s\n", "I'm Yours");
+
+    char best_playlist_ever[30] = "Backyard BBQ";
+
+    d_std::os_debug_printf(arena, "2023 Summer I'm singing: %s\n", best_playlist_ever);
+
+    d_std::d_string chicken_fried = d_std::string_from_lit_string(arena, "cold beer on a friday night");
+
+    d_std::os_debug_printf(arena, "Chicken Fried: %$\n", chicken_fried);
+
     arena->reset();
 
     d_std::d_array<int> my_int_array; my_int_array.make_array(arena, 50);

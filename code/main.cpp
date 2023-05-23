@@ -665,7 +665,7 @@ void D_Renderer::render(){
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
     ImGui::SliderFloat3("Light Position", (this->per_frame_data.light_pos), -10., 10);
     ImGui::DragFloat3("Light Color", (this->per_frame_data.light_color));
-    ImGui::Checkbox("Deffered Rendering?", &deferred_rendering);
+    ImGui::Checkbox("Deferred Shading?", &deferred_rendering);
     ImGui::End();
     ImGui::Render();
 
