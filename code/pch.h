@@ -29,8 +29,10 @@
 #endif
 
 #ifdef _DEBUG
-#define DEBUG_LOG(x) os_debug_print(__FILE__ ":" stringerize(__LINE__) " - Log: " x "\n")
-#define DEBUG_ERROR(x) os_debug_print(__FILE__ ":" stringerize(__LINE__) " - ERROR: " x "\n"); DEBUG_BREAK
+#define DEBUG_LOG(x)              os_debug_print(__FILE__ ":" stringerize(__LINE__) " - Log: " x "\n")
+#define DEBUG_ERROR(x)            os_debug_print(__FILE__ ":" stringerize(__LINE__) " - ERROR: " x "\n"); DEBUG_BREAK
+#define DEBUG_LOG_F(arena, ...)   os_debug_printf(arena, __FILE__ ":" stringerize(__LINE__) " - Log: " __VA_ARGS__)
+#define DEBUG_ERROR_F(arena, ...) os_debug_printf(arena, __FILE__ ":" stringerize(__LINE__) " - ERROR: " __VA_ARGS__); DEBUG_BREAK
 #else 
 #define DEBUG_LOG(x)
 #define DEBUG_ERROR(x)

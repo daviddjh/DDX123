@@ -64,6 +64,8 @@ namespace d_std {
                     
                     // Switch based on argument type
                     switch(*(it+1)){
+
+                        // Unsigned int
                         case('u'):
                         {
                             u64 number = *(u64*)va_args;
@@ -103,6 +105,8 @@ namespace d_std {
                             it++;
                         }
                         break;
+
+                        // C string
                         case('s'):
                         {
                             char* c_str = *(char**)va_args;
@@ -133,6 +137,7 @@ namespace d_std {
                         }
                         break;
 
+                        // d_std::d_string
                         case('$'):
                         {
                             // Structs are added to the stack as the address of the stuct, and we have the address of that address
@@ -157,6 +162,116 @@ namespace d_std {
                                     arena->allocate_array<char>(return_string.size);
                                     capacity += return_string.size;
                                 }
+                            }
+
+                            it++;
+                        }
+                        break;
+
+                        // d_std::d_string
+                        case('f'):
+                        {
+                            // Structs are added to the stack as the address of the stuct, and we have the address of that address
+                            double double_input = *(f64*)va_args;
+                            va_args  += sizeof(u64);
+
+                            if(return_string.size == capacity){
+                                arena->allocate_array<char>(return_string.size);
+                                capacity += return_string.size;
+                            }
+
+                            char* placement_ptr     = return_string.string + return_string.size;
+
+                            // Check and possibly add sign bit
+                            if(double_input < 0){
+
+                                // Add negative char in output string
+                                *placement_ptr = '-';
+
+                                // Advance Iterators
+                                placement_ptr++;
+                                return_string.size++;
+
+                                // Possibly allocate more memory
+                                if(return_string.size == capacity){
+                                    arena->allocate_array<char>(return_string.size);
+                                    capacity += return_string.size;
+                                }
+
+                                double_input *= -1;
+
+                            }
+
+                            u64 integer_part = (u64)double_input;
+
+                            // Guarantee one spot. What if "number" is 0?
+                            u64 temp = integer_part; 
+                            return_string.size++;
+                            // Possibly allocate more memory
+                            if(return_string.size == capacity){
+                                arena->allocate_array<char>(return_string.size);
+                                capacity += return_string.size;
+                            }
+                            temp /= 10;
+
+                            // Find the reset of the space this number will take up in the string
+                            for(temp; temp>0; temp /= 10){
+                                placement_ptr++;
+                                return_string.size++;
+                                if(return_string.size == capacity){
+                                    arena->allocate_array<char>(return_string.size);
+                                    capacity += return_string.size;
+                                }
+                            }
+
+                            // Insert the numbers from smallest (right) to largest (left)
+                            temp = integer_part; 
+                            *placement_ptr = (temp % 10) + '0';
+                            temp /= 10;
+                            placement_ptr--;
+                            for(temp; temp>0; temp /= 10, placement_ptr--){
+                                *placement_ptr = (temp % 10) + '0';
+                            }
+
+                            placement_ptr     = return_string.string + return_string.size;
+
+                            // Insert decimal place
+                            *placement_ptr = '.';
+
+                            // Advance Iterators
+                            placement_ptr++;
+                            return_string.size++;
+
+                            // Possibly allocate more memory
+                            if(return_string.size == capacity){
+                                arena->allocate_array<char>(return_string.size);
+                                capacity += return_string.size;
+                            }
+
+                            u64 decimal_part = (((double_input + 0.00001 )- (float)integer_part) * 1000.);
+
+                            // Guarantee one spot. What if "number" is 0?
+                            temp = decimal_part; 
+                            return_string.size++;
+                            temp /= 10;
+
+                            // Find the reset of the space this number will take up in the string
+                            for(temp; temp>0; temp /= 10){
+                                placement_ptr++;
+                                return_string.size++;
+                                if(return_string.size == capacity){
+                                    arena->allocate_array<char>(return_string.size);
+                                    capacity += return_string.size;
+                                }
+                            }
+
+                            // Insert the numbers from smallest (right) to largest (left)
+                            temp = decimal_part; 
+                            *placement_ptr = (temp % 10) + '0';
+                            temp /= 10;
+                            placement_ptr--;
+                            for(temp; temp>0; temp /= 10, placement_ptr--){
+                                *placement_ptr = (temp % 10) + '0';
                             }
 
                             it++;

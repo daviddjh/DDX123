@@ -1,9 +1,15 @@
 // cl.exe /Zi .\main.cpp ..\d_memory.cpp ..\win32\d_os_win32.cpp
 
+#include "stdio.h"
 #include "../d_core.cpp"
 
+void my_func(float my_float){
+    printf("my_float: %f", my_float);
+    return;
+}
+
 unsigned long __stdcall main(){
-    
+
     // Helpers
     u64 a;
     a = AlignPow2Up(7, 8);
@@ -119,6 +125,10 @@ unsigned long __stdcall main(){
     d_std::os_debug_print(d_std::format_lit_string(arena, "My Numbers: %u, %u\n", 2, 1152));
 
     d_std::os_debug_printf(arena, "My Other Numbers: %u, %u\n", 55, 100);
+    
+    d_std::os_debug_printf(arena, "My float: %f\n", -100.200);
+
+    d_std::os_debug_printf(arena, "My second and third floats: %f, %f\n", -15.1, 1003.2);
 
     d_std::os_debug_printf(arena, "My string: %s\n", "I'm Yours");
 

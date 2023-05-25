@@ -1,3 +1,9 @@
+5/24/2023
+
+Added float print to d_std::os_debug_printf
+Always uses three decimal places
+- %f = float or double
+
 5/22/2023
 
 Added string print to d_std::os_debug_printf

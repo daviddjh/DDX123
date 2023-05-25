@@ -630,14 +630,9 @@ void D_Renderer::render(){
     std::chrono::high_resolution_clock::time_point tp2 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> frame_time = std::chrono::duration_cast<std::chrono::duration<double>>(tp2 - tp1);
     tp1 = tp2;
-    // Unsafe!
-    char* buffer = (char*)calloc(500, sizeof(char));
     double frame_ms = frame_time.count() * 1000.;
     double avg_frame_ms = avg_ms_per_tick(frame_ms);
     double fps = 1000. / avg_frame_ms;
-    //sprintf(buffer, "Frame time: %f milliseconds\nFPS: %f\n", frame_ms, fps);
-    //OutputDebugString(buffer);
-    free(buffer);
 
     Command_List* command_list = direct_command_lists[current_backbuffer_index];
     

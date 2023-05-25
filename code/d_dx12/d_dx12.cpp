@@ -1661,6 +1661,7 @@ namespace d_dx12 {
                 } else {
 
                     D3D12_CLEAR_VALUE clear_value = {};
+                    printf("hello:");
                     clear_value.Format   = desc.format;
                     texture->clear_color[0] = clear_value.Color[0] = desc.clear_color[0];
                     texture->clear_color[1] = clear_value.Color[1] = desc.clear_color[1];
