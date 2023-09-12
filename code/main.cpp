@@ -753,7 +753,9 @@ void D_Renderer::render(){
         // Need to:
         // Output to new buffers
 
+        ///////////////////////
         // Geometry Pass
+        ///////////////////////
 
         // Transition Albedo Buffer
         if(g_buffer_albedo->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
@@ -783,7 +785,9 @@ void D_Renderer::render(){
 
         bind_and_draw_model(command_list, &renderer.models.ptr[0]);
 
+        ///////////////////////
         // Shading Pass
+        ///////////////////////
 
         command_list->set_render_targets(1, &rt[current_backbuffer_index], NULL);
         command_list->set_viewport      (display.viewport);
@@ -1135,6 +1139,9 @@ WinMain(HINSTANCE hInstance,
             }
         }
 
+        // Kill the window
+        ShowWindow(renderer.hWnd, SW_HIDE);
+        // Shutdown the Renderer
         renderer.shutdown();
 
     }

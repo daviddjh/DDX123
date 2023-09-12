@@ -1661,7 +1661,6 @@ namespace d_dx12 {
                 } else {
 
                     D3D12_CLEAR_VALUE clear_value = {};
-                    printf("hello:");
                     clear_value.Format   = desc.format;
                     texture->clear_color[0] = clear_value.Color[0] = desc.clear_color[0];
                     texture->clear_color[1] = clear_value.Color[1] = desc.clear_color[1];
@@ -2574,7 +2573,6 @@ namespace d_dx12 {
     void Command_List::set_render_targets(u8 num_render_targets, Texture** rt, Texture* ds){
 
         if(num_render_targets > 0){
-            // If you have multiple render targets, they must be sequential in the descriptor heap
             if(ds != NULL){
                 CD3DX12_CPU_DESCRIPTOR_HANDLE render_target_handles[D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT];
                 for(int i = 0; i < num_render_targets; i++){

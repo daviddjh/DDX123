@@ -1,12 +1,6 @@
 // cl.exe /Zi .\main.cpp ..\d_memory.cpp ..\win32\d_os_win32.cpp
 
-#include "stdio.h"
 #include "../d_core.cpp"
-
-void my_func(float my_float){
-    printf("my_float: %f", my_float);
-    return;
-}
 
 unsigned long __stdcall main(){
 
@@ -166,6 +160,8 @@ unsigned long __stdcall main(){
     my_int_array.release();
     arena_2->release();
     arena->release();
+
+    DEBUG_BREAK;
 
     return 0;
 

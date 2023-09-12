@@ -1,3 +1,27 @@
+8/30/2023
+
+Next todo:
+- Create seperate "user space" and "d_dx12" memory arenas.
+- Replace all "new", "malloc", and "calloc" calls with arenas.
+
+Idea: d_std gets it's own arena(s) so it's less constrained on memory allocations. See: os_debug_print
+
+8/28/2023
+
+Haven't touched this in a few months.
+Need to remind myself of goals.
+
+Off top of head: 
+- Hand rolled allocator used everywhere
+- d_array
+- Tidy up d_dx12 api
+- Post Processing (dof, bloom, display size detached from render size)
+- Implement Screen Space Ambient Occlusion
+- Implement Screen Space Reflections
+- Drive towards NVidia ReSTIR
+- Maybe gui improvements (add models / lights, scene management)?
+- Maybe custom serializing for fast scene load / unload
+
 5/24/2023
 
 Added float print to d_std::os_debug_printf
