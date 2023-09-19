@@ -7,6 +7,7 @@
 #include "d_types.h"
 #include "d_os.h"
 #include "d_memory.h"
+#include "d_performance.h"
 #include "d_math.h"
 #include "d_span.h"
 #include "d_array.h"

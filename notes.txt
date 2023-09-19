@@ -1,3 +1,16 @@
+9/17/2023
+
+GET RID OF STD LIB!
+
+1080p:
+13900k cpu - 650 - 750 microseconds
+4080   gpu - 509 microseconds
+
+4k:
+13900k cpu - 4.45ms - much longer because we wait for the GPU? Need a GPU Busy and a CPU Busy?
+4080   gpu - 2.43ms
+
+
 8/30/2023
 
 Next todo:

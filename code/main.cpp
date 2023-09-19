@@ -389,6 +389,7 @@ double avg_ms_per_tick(double tick){
 *   Initilize the applization before the window is shown
 */
 int D_Renderer::init(){
+    PROFILED_FUNCTION();
 
     ////////////////////////////////
     //   Initialize d_dx12 library
@@ -624,6 +625,7 @@ int D_Renderer::init(){
 }
 
 void D_Renderer::render(){
+    PROFILED_FUNCTION();
 
     // TODO: Rewrite all of this !!!
     static std::chrono::high_resolution_clock::time_point tp1;

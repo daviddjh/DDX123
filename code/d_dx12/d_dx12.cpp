@@ -20,6 +20,7 @@ namespace d_dx12 {
     Display                                display;
     Upload_Buffer                          upload_buffer;
     Dynamic_Buffer                         dynamic_buffer;
+    d_std::Memory_Arena*                   d_dx12_arena;
 	
     u8   current_backbuffer_index = 0;
     bool is_tearing_supported = false;
@@ -29,10 +30,16 @@ namespace d_dx12 {
     *   Initialize the library by creating the d3d12 device and debug stuff
     */
     void d_dx12_init(HWND hWnd, u16 display_width, u16 display_height){
+        
+        /////////////////
+        // Init Memory
+        ////////////////
+
+        d_dx12_arena = d_std::make_arena();
             
-        /*
-        *   INIT / DEBUG
-        */
+        //////////////////////////
+        // Init DirectX 12 Device
+        //////////////////////////
 
         UINT dxgi_factory_flags = 0;
 

@@ -17,7 +17,7 @@ pushd .\build
 set flags= /FeDDX123 /FAs /EHsc
 set code=..\code\main.cpp ..\third_party\imgui\imgui.cpp ..\third_party\imgui\imgui_draw.cpp ..\third_party\imgui\imgui_demo.cpp ..\third_party\imgui\imgui_tables.cpp ..\third_party\imgui\imgui_widgets.cpp ..\third_party\imgui\backends\imgui_impl_dx12.cpp ..\third_party\imgui\backends\imgui_impl_win32.cpp
 set includes=/I"..\third_party\DirectXTex\DirectXTex" /I"..\code\d_core" /I"..\code\d_dx12" /I"..\third_party\DirectXTK12\Inc" /I"..\third_party\tinygltf" /I"..\third_party\imgui" /I"..\third_party\imgui\backends"
-set link_libs= Winmm.lib d3d12.lib dxgi.lib dxguid.lib dxcompiler.lib ole32.lib oleaut32.lib
+set link_libs= Winmm.lib d3d12.lib dxgi.lib dxguid.lib dxcompiler.lib ole32.lib oleaut32.lib Advapi32.lib ..\third_party\Superluminal\lib\x64\PerformanceAPI_MD.lib
 
 :: Compile our app, or DirectXTex
 if "%1" == "-d" (
@@ -27,10 +27,10 @@ if "%1" == "-d" (
 
     popd
 
-) else if "%1" == "-rds" (
+) else if "%1" == "-ods" (
 
     :: Compile this
-    cl /MD /Zi %flags% %code% %includes% %link_libs% ..\third_party\DirectXTex\DirectXTex\Bin\Desktop_2019_Win10\x64\Profile\DirectXTex.lib
+    cl /MD /Zi /O2 %flags% %code% %includes% %link_libs% ..\third_party\DirectXTex\DirectXTex\Bin\Desktop_2019_Win10\x64\Profile\DirectXTex.lib
 
     popd
 
