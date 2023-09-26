@@ -19,6 +19,9 @@ enum Binding_Point_Index : u32 {
     ROUGHNESS_METALLIC_INDEX = 13,
     OUTPUT_DIMENSIONS = 14,
     TEXTURE_2D_TABLE = 15,
+    MODEL_MATRIX = 16,
+    MATERIAL_FLAGS = 17,
+    SAMPLER_1 = 17,
     BINDING_POINT_INDEX_COUNT,
 };
 
@@ -43,6 +46,9 @@ const Binding_Point_String_Map binding_point_map[] = {
     {"roughness_metallic_index", ROUGHNESS_METALLIC_INDEX},
     {"output_dimensions", OUTPUT_DIMENSIONS},
     {"texture_2d_table", TEXTURE_2D_TABLE},
+    {"model_matrix", MODEL_MATRIX},
+    {"material_flags", MATERIAL_FLAGS},
+    {"sampler_1", SAMPLER_1},
 };
 
 constexpr u32 binding_point_string_lookup(const char* string){
@@ -52,6 +58,6 @@ constexpr u32 binding_point_string_lookup(const char* string){
         }
     }
 
-    DEBUG_LOG("Cant find the binding point string! Make sure you've included the binding point into 'binding_point_map'.");
+    DEBUG_ERROR("Cant find the binding point string! Make sure you've included the binding point into 'binding_point_map'.");
     return (u32)0 - (u32)1; // If we cant find the string, return the max u32 number
 }

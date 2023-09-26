@@ -1060,7 +1060,7 @@ WinMain(HINSTANCE hInstance,
     timeBeginPeriod(1);
 
     // Set up memory arenas
-    per_frame_arena = d_std::make_arena_reserve(_1KB); 
+    per_frame_arena = d_std::make_arena(); 
 
     // Renderer Scope
     {

@@ -3,7 +3,7 @@
 
 namespace d_std {
 
-    Memory_Arena* make_arena_reserve(u64 reserve_size) {
+    Memory_Arena* make_arena(u64 reserve_size) {
         Memory_Arena* arena = nullptr;
 
         if(reserve_size > sizeof(Memory_Arena)){
@@ -20,7 +20,7 @@ namespace d_std {
     }
 
     Memory_Arena* make_arena() {
-        Memory_Arena* arena = make_arena_reserve(DEFAULT_ARENA_RESERVE_SIZE);
+        Memory_Arena* arena = make_arena(DEFAULT_ARENA_RESERVE_SIZE);
         return arena;
     }
 

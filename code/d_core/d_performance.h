@@ -3,6 +3,7 @@
 
 #include "d_context.h"
 
+#ifdef PCOUNTER
 #ifdef OS_WINDOWS
 
 #define PERFORMANCEAPI_ENABLED 1
@@ -11,11 +12,14 @@
 #define PROFILED_SCOPE(ID) PERFORMANCEAPI_INSTRUMENT(ID)
 #define PROFILED_FUNCTION() PERFORMANCEAPI_INSTRUMENT(__FUNCTION__)
 
-#else // ifdef OS_WINDOWS
+#endif // ifdef OS_WINDOWS
+#endif // ifdef PCOUNTER
+
+#ifndef PROFILED_SCOPE(ID)
 
 #define PROFILED_SCOPE(...)
 #define PROFILED_FUNCTION()
 
-#endif
+#endif // ifndef PROFILED_SCOPE
 
 #endif // ifndef _D_PERF

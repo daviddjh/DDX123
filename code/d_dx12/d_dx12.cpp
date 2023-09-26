@@ -895,6 +895,8 @@ namespace d_dx12 {
         for(int j = 0; j < desc.parameter_list.size(); j++){
 
             Shader::Binding_Point binding_point = shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))];
+            #if 0 // TODO: This should check if the parameter you tried to define. Maybe this shouldn't be an error? Maybe the error should be if you try to use
+                  // a binding in a shader that isn't supported?? Or if you use a supported binding in a shader that doesn't have a definition in the userland code
             if(memcmp(&binding_point)) {//  .count(desc.parameter_list[j].name) == 0 ){
 
                 char* buffer = (char*)calloc(500, sizeof(char));
@@ -903,8 +905,9 @@ namespace d_dx12 {
                 free(buffer);
                 continue;
             }
+            #endif
             
-            Shader::Binding_Point * shader_binding_point = &(shader->binding_points[desc.parameter_list[j].name]);
+            Shader::Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
             shader_binding_point->usage_type = desc.parameter_list[j].usage_type;
 
             switch(desc.parameter_list[j].usage_type){
@@ -931,7 +934,7 @@ namespace d_dx12 {
                 case(Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER):
 
                 {
-                    Shader::Binding_Point * shader_binding_point = &(shader->binding_points[desc.parameter_list[j].name]);
+                    Shader::Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
                     D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
 
                     descriptor_range->BaseShaderRegister                = shader_binding_point->d3d12_binding_desc.BindPoint,
@@ -959,7 +962,7 @@ namespace d_dx12 {
                             break;
                     }
 
-                    root_parameters[num_root_paramters].InitAsDescriptorTable(1, descriptor_range, shader->binding_points[desc.parameter_list[j].name].shader_visibility);
+                    root_parameters[num_root_paramters].InitAsDescriptorTable(1, descriptor_range, shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))].shader_visibility);
                     shader_binding_point->root_signature_index = num_root_paramters;
                     num_root_paramters++;
                 }
@@ -2335,14 +2338,15 @@ namespace d_dx12 {
 
     }
 
-    void Command_List::bind_handle(Descriptor_Handle handle, d_string binding_point){
+    void Command_List::bind_handle(Descriptor_Handle handle, d_string binding_point_string){
 
-        d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, handle.gpu_descriptor_handle);
+        u32 binding_point_index = binding_point_string_lookup(binding_point_string.c_str(per_frame_arena));
+        d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
         return;
 
     }
 
-    void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, d_string binding_point){
+    void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, d_string binding_point_string){
 
         if(buffer->usage != Buffer::USAGE::USAGE_CONSTANT_BUFFER){
             if(resource_manager == NULL){
@@ -2362,7 +2366,8 @@ namespace d_dx12 {
                 // Need to copy offline descriptor to online descriptor
                 d3d12_device->CopyDescriptorsSimple(1, buffer->online_descriptor_handle.cpu_descriptor_handle, buffer->offline_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-                d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
+                u32 binding_point_index = binding_point_string_lookup(binding_point_string.c_str(per_frame_arena));
+                d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
 
                 // Don't need to save the index into the descriptor heap because these aren't bindless buffers
                 resource_manager->is_bound_online[buffer->is_bound_index] = 1;
@@ -2510,23 +2515,24 @@ namespace d_dx12 {
     }
 
     // Bind an array of textures starting at the beginning of the online_cbv_srv_uav_descriptor_heap
-    void Command_List::bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, d_string binding_point){
+    void Command_List::bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, d_string binding_point_string){
         
         if(resource_manager == NULL){
             OutputDebugString("Error (Command_List::bind_texture): no valid resource_manager");
             DEBUG_BREAK;
         }
 
-        // If the shader contains this binding point
-        if(current_bound_shader->binding_points.count(binding_point)){
+        // TODO: If the shader contains this binding point
+        //if(current_bound_shader->binding_points.count(binding_point)){
 
             // Get the first handle in the online heap, this is the first handle of the texture table
             Descriptor_Handle handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(0);
 
             // Set descriptor in Root Signature
-            d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, handle.gpu_descriptor_handle);
+            u32 binding_point_index = binding_point_string_lookup(binding_point_string.c_str(per_frame_arena));
+            d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
 
-        }
+        //}
 
         return;
     }
@@ -2550,26 +2556,28 @@ namespace d_dx12 {
         if(this->type == D3D12_COMMAND_LIST_TYPE_DIRECT){
 
             // If the shader contains this binding point
-            if(current_bound_shader->binding_points.count(parameter_name)){
+            //if(current_bound_shader->binding_points.count(parameter_name)){
 
-                Shader::Binding_Point* binding_point = &current_bound_shader->binding_points[parameter_name];
+                u32 binding_point_index = binding_point_string_lookup(parameter_name.c_str(per_frame_arena));
+                Shader::Binding_Point* binding_point = &current_bound_shader->binding_points[binding_point_index];
                 u32 root_signature_index = binding_point->root_signature_index;
 
                 d3d12_command_list->SetGraphicsRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);
 
-            }
+            //}
 
         } else if(this->type == D3D12_COMMAND_LIST_TYPE_COMPUTE){
 
             // If the shader contains this binding point
-            if(current_bound_shader->binding_points.count(parameter_name)){
+            //if(current_bound_shader->binding_points.count(parameter_name)){
 
-                Shader::Binding_Point* binding_point = &current_bound_shader->binding_points[parameter_name];
+                u32 binding_point_index = binding_point_string_lookup(parameter_name.c_str(per_frame_arena));
+                Shader::Binding_Point* binding_point = &current_bound_shader->binding_points[binding_point_index];
                 u32 root_signature_index = binding_point->root_signature_index;
 
                 d3d12_command_list->SetComputeRoot32BitConstants(root_signature_index, num_32bit_values_to_set, data, 0);
             
-            }
+            //}
         } else {
 
             OutputDebugString("Error (set_inline_constants): Cannot set inline constants for this command list type");

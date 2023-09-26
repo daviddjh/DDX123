@@ -78,8 +78,9 @@ namespace d_std {
     }
 
     template<typename Value, u32 size>
-    void Static_String_Hash::count(d_std::d_string key){
-        for 
+    void Static_String_Hash_Table<Value, size>::count(d_std::d_string key){
+        ASSERT("Not Finished");
+        return;
     }
 
 }
