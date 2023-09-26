@@ -23,4 +23,14 @@
 #define stringerize(x) _stringerize(x)
 #define _stringerize(x) #x
 
+#ifndef FORCE_INLINE
+    #if COMPILER_MSVC
+        #define FORCE_INLINE __forceinline
+    #endif // COMPILER_MSVC
+
+    #ifndef FORCE_INLINE
+        #define FORCE_INLINE
+    #endif // FORCE_INLINE
+#endif // FORCE_INLINE
+
 #endif // _D_HELPERS

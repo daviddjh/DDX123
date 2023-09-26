@@ -472,8 +472,11 @@ namespace d_dx12 {
 
                     D3D12_SHADER_INPUT_BIND_DESC shader_input_bind_desc;
                     pReflection->GetResourceBindingDesc(i, &(shader_input_bind_desc));
-                    shader->binding_points[shader_input_bind_desc.Name].d3d12_binding_desc = shader_input_bind_desc;
-                    shader->binding_points[shader_input_bind_desc.Name].shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
+
+                    u32 binding_point_index = binding_point_string_lookup(shader_input_bind_desc.Name);                    
+
+                    shader->binding_points[binding_point_index].d3d12_binding_desc = shader_input_bind_desc;
+                    shader->binding_points[binding_point_index].shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
 
                 }
                 
@@ -684,9 +687,11 @@ namespace d_dx12 {
 
                     D3D12_SHADER_INPUT_BIND_DESC shader_input_bind_desc;
                     pReflection->GetResourceBindingDesc(i, &(shader_input_bind_desc));
-                    shader->binding_points[shader_input_bind_desc.Name].d3d12_binding_desc = shader_input_bind_desc;
 
-                    shader->binding_points[shader_input_bind_desc.Name].shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
+                    u32 binding_point_index = binding_point_string_lookup(shader_input_bind_desc.Name);                    
+
+                    shader->binding_points[binding_point_index].d3d12_binding_desc = shader_input_bind_desc;
+                    shader->binding_points[binding_point_index].shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
 
                 }
                 
@@ -889,10 +894,11 @@ namespace d_dx12 {
             
         for(int j = 0; j < desc.parameter_list.size(); j++){
 
-            if(shader->binding_points.count(desc.parameter_list[j].name) == 0 ){
+            Shader::Binding_Point binding_point = shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))];
+            if(memcmp(&binding_point)) {//  .count(desc.parameter_list[j].name) == 0 ){
 
                 char* buffer = (char*)calloc(500, sizeof(char));
-                sprintf(buffer, "WARNING: (create_shader): The shader code you specified doesn't contain a parameter: \'%s\'\n", desc.parameter_list[j].name.c_str());
+                sprintf(buffer, "WARNING: (create_shader): The shader code you specified doesn't contain a parameter: \'%s\'\n", desc.parameter_list[j].name.c_str(d_dx12_arena));
                 OutputDebugString(buffer);
                 free(buffer);
                 continue;
@@ -1037,7 +1043,7 @@ namespace d_dx12 {
         for(int i = 0; i < desc.input_layout.size(); i++){
 
             D3D12_INPUT_ELEMENT_DESC input_element_desc;
-            input_element_desc.SemanticName         = desc.input_layout[i].name.c_str();
+            input_element_desc.SemanticName         = desc.input_layout[i].name.c_str(d_dx12_arena);
             input_element_desc.SemanticIndex        = 0; // Good Default??
             input_element_desc.Format               = desc.input_layout[i].format;
             input_element_desc.InputSlot            = desc.input_layout[i].input_slot;
@@ -1925,7 +1931,7 @@ namespace d_dx12 {
         ThrowIfFailed(d3d12_device->CreateCommittedResource(
             &heap_properties,
             heap_flags,
-            &((D3D12_RESOURCE_DESC)resource_desc),
+            &resource_desc,
             D3D12_RESOURCE_STATE_GENERIC_READ,
             nullptr,
             IID_PPV_ARGS(d3d12_resource.GetAddressOf())
@@ -2329,14 +2335,14 @@ namespace d_dx12 {
 
     }
 
-    void Command_List::bind_handle(Descriptor_Handle handle, std::string binding_point){
+    void Command_List::bind_handle(Descriptor_Handle handle, d_string binding_point){
 
         d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point].root_signature_index, handle.gpu_descriptor_handle);
         return;
 
     }
 
-    void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, std::string binding_point){
+    void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, d_string binding_point){
 
         if(buffer->usage != Buffer::USAGE::USAGE_CONSTANT_BUFFER){
             if(resource_manager == NULL){
@@ -2371,7 +2377,7 @@ namespace d_dx12 {
         return;
     }
 
-    u8 Command_List::bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point){
+    u8 Command_List::bind_texture(Texture* texture, Resource_Manager* resource_manager, d_string binding_point){
 
         u16 index_to_return = -1;
         
@@ -2504,7 +2510,7 @@ namespace d_dx12 {
     }
 
     // Bind an array of textures starting at the beginning of the online_cbv_srv_uav_descriptor_heap
-    void Command_List::bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, std::string binding_point){
+    void Command_List::bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, d_string binding_point){
         
         if(resource_manager == NULL){
             OutputDebugString("Error (Command_List::bind_texture): no valid resource_manager");
@@ -2539,7 +2545,7 @@ namespace d_dx12 {
 
     }
 
-    void Command_List::bind_constant_arguments(void* data, u16 num_32bit_values_to_set, std::string parameter_name){
+    void Command_List::bind_constant_arguments(void* data, u16 num_32bit_values_to_set, d_string parameter_name){
         // TODO...
         if(this->type == D3D12_COMMAND_LIST_TYPE_DIRECT){
 

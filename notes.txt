@@ -1,3 +1,40 @@
+9/21/2023
+
+Created a mapping from binding points to indexes in an array. (d_dx12/shaders.h)
+The mapping should allow the programmer to use the "words" in the shader, and for the shader compiler
+to easily lookup the index of a binding point given it's string.
+
+Also, this should alow user space to still use c strings when defining a binding point. This should be able to be converted to index at compile time.
+
+Only downside is it adds one extra step everytime you add a new binding point to a shader. The binding point, along with it's index, needs to also be added
+to d_dx12/shaders.h before it can be used.
+
+Brings up an interesting question of "who should be diffining the space of binding points? the shader writter or the api?". In this case, if its the API, then
+it makes things faster and easier for API writter, but places constrain and extra step on the shader writter. 
+
+If we had something like JAI, we could parse the shader(s) first, then create the "constant" lookup table. This would avoid the extra step for shader writters.
+
+This could be done now in something like python. Seems like it would add more complexity for little value.
+
+Every day I inch a tad bit forward towards building this in python. This would be a reason to go over the edge if I find pre-parsing and generating a .h would
+be of more value than I expect it will be.
+
+TODO: Finish updating d_dx12.cpp with updated "string_lookup"
+
+:-)
+
+9/20/2023
+
+Recalculated CPU and GPU frametime.
+Used PresentMonCli and Superluminal.
+
+CPU is entire render function except for d_dx12::present call
+GPU is ms work done by gpu measured by PresentMonCli
+
+1080p - Standard Forward Render
+13900k cpu - AVG: 146us MEDIAN: 134us
+4080   gpu - AVG: 601us MEDIAN: 599us
+
 9/17/2023
 
 GET RID OF STD LIB!

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../pch.h"
+#include "shaders.h"
 #include "third_party/d3dx12.h"
 
 #define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
@@ -29,7 +30,7 @@ namespace d_dx12 {
         // TODO: Should I have different types for Constant Parameters and Descriptor Tables?? Problably..
         struct Parameter {
 
-            std::string name;
+            d_std::d_string name;
 
             enum Usage_Type {
                 TYPE_CONSTANT_BUFFER,   // CBV
@@ -71,7 +72,7 @@ namespace d_dx12 {
             // Vertex Buffer Input Element Descriptions
             struct Input_Element_Desc {
 
-                std::string name;
+                d_std::d_string name;
                 DXGI_FORMAT format;
                 UINT        input_slot;    // Vertex buffer slot
                 UINT        offset = D3D12_APPEND_ALIGNED_ELEMENT;
@@ -102,7 +103,7 @@ namespace d_dx12 {
             u8                                 root_signature_index;
         };
 
-        std::map<std::string, Binding_Point> binding_points;
+        Binding_Point binding_points[BINDING_POINT_INDEX_COUNT];
 
         void d_dx12_release();
 
@@ -277,11 +278,11 @@ namespace d_dx12 {
         void close();
         void bind_vertex_buffer(Buffer* buffer, u32 slot);
         void bind_index_buffer(Buffer* buffer);
-        void bind_handle(Descriptor_Handle handle, std::string binding_point);
-        void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, std::string binding_point);
-        u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, std::string binding_point);
-        void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, std::string parameter_name);
-        void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, std::string binding_point);
+        void bind_handle(Descriptor_Handle handle, d_std::d_string binding_point);
+        void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, d_std::d_string binding_point);
+        u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, d_std::d_string binding_point);
+        void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, d_std::d_string parameter_name);
+        void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, d_std::d_string binding_point);
         Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
         void set_shader(Shader* shader);
         void set_render_targets(u8 num_render_targets, Texture** rt, Texture* ds);
@@ -361,6 +362,7 @@ namespace d_dx12 {
     extern Microsoft::WRL::ComPtr<ID3D12Device2>  d3d12_device;
     extern Display                                display;
     extern u8                                     current_backbuffer_index;
+    extern d_std::Memory_Arena*                   d_dx12_arena;
 
     void d_dx12_init(HWND hWnd, u16 display_width, u16 display_height);
     void d_dx12_shutdown();

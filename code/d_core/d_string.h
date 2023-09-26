@@ -10,6 +10,8 @@ namespace d_std {
     struct d_string {
         char* string;
         u32   size;
+
+        const char* c_str(Memory_Arena* arena);
     };
 
     d_string string_from_lit_string(Memory_Arena *arena, char* lit_string);

@@ -1,6 +1,8 @@
 #pragma once
 #include "pch.h"
 
+extern d_std::Memory_Arena *per_frame_arena;
+
 struct Vertex_Position_Normal_Tangent_Color_Texturecoord {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT3 normal;

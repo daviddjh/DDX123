@@ -42,7 +42,7 @@ Shader* create_forward_render_pbr_shader()
     sampler_1_ssd.max_lod          = D3D12_FLOAT32_MAX;
 
     Shader_Desc::Parameter sampler_1;
-    sampler_1.name                = "sampler_1";
+    sampler_1.name                = DSTR(per_frame_arena, "sampler_1");
     sampler_1.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_STATIC_SAMPLER;
     sampler_1.static_sampler_desc = sampler_1_ssd;
 
@@ -50,7 +50,7 @@ Shader* create_forward_render_pbr_shader()
 
     // Bindless Texture Table - Where all our texture descriptors should go. Index is used by our shader to retrieve texture
     Shader_Desc::Parameter texture_2d_table;
-    texture_2d_table.name                = "texture_2d_table";
+    texture_2d_table.name                = DSTR(per_frame_arena, "texture_2d_table");
     texture_2d_table.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
 
     shader_desc.parameter_list.push_back(texture_2d_table);
@@ -58,7 +58,7 @@ Shader* create_forward_render_pbr_shader()
 
     // Material Flags
     Shader_Desc::Parameter material_flags;
-    material_flags.name                   = "material_flags";
+    material_flags.name                   = DSTR(per_frame_arena, "material_flags");
     material_flags.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     material_flags.number_of_32bit_values = 1;
 
@@ -66,35 +66,35 @@ Shader* create_forward_render_pbr_shader()
 
     // Albedo Index
     Shader_Desc::Parameter albedo_index;
-    albedo_index.name                   = "albedo_index";
+    albedo_index.name                   = DSTR(per_frame_arena, "albedo_index");
     albedo_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     albedo_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(albedo_index);
 
     // Normal Index
     Shader_Desc::Parameter normal_index;
-    normal_index.name                   = "normal_index";
+    normal_index.name                   = DSTR(per_frame_arena, "normal_index");
     normal_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     normal_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(normal_index);
 
     // Roughness-Metallic Index
     Shader_Desc::Parameter roughness_metallic_index;
-    roughness_metallic_index.name                   = "roughness_metallic_index";
+    roughness_metallic_index.name                   = DSTR(per_frame_arena, "roughness_metallic_index");
     roughness_metallic_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     roughness_metallic_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(roughness_metallic_index);
 
     // Model Matrix
     Shader_Desc::Parameter model_matrix;
-    model_matrix.name                   = "model_matrix";
+    model_matrix.name                   = DSTR(per_frame_arena, "model_matrix");
     model_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     model_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
     shader_desc.parameter_list.push_back(model_matrix);
 
     // View Matrix
     Shader_Desc::Parameter view_projection_matrix;
-    view_projection_matrix.name                   = "view_projection_matrix";
+    view_projection_matrix.name                   = DSTR(per_frame_arena, "view_projection_matrix");
     view_projection_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     view_projection_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
 
@@ -102,7 +102,7 @@ Shader* create_forward_render_pbr_shader()
 
     // Camera Pos
     Shader_Desc::Parameter camera_pos;
-    camera_pos.name                   = "camera_position_buffer";
+    camera_pos.name                   = DSTR(per_frame_arena, "camera_position_buffer");
     camera_pos.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     camera_pos.number_of_32bit_values = sizeof(DirectX::XMVECTOR);
 
@@ -110,7 +110,7 @@ Shader* create_forward_render_pbr_shader()
 
     // Light Pos
     Shader_Desc::Parameter per_frame_data;
-    per_frame_data.name                   = "per_frame_data";
+    per_frame_data.name                   = DSTR(per_frame_arena, "per_frame_data");
     per_frame_data.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER;
     per_frame_data.number_of_32bit_values = sizeof(Per_Frame_Data) / 4;
 
@@ -120,11 +120,11 @@ Shader* create_forward_render_pbr_shader()
     //  Input Layout
     /////////////////
 
-    shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"NORMAL"     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"TANGENT"    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "NORMAL")     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TANGENT")    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "COLOR")      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TEXCOORD")   , DXGI_FORMAT_R32G32_FLOAT, 0});
 
     /////////////////////////////////////////
     //  Create PSO using shader reflection
@@ -167,7 +167,7 @@ Shader* create_deferred_render_gbuffer_shader()
     sampler_1_ssd.max_lod          = D3D12_FLOAT32_MAX;
 
     Shader_Desc::Parameter sampler_1;
-    sampler_1.name                = "sampler_1";
+    sampler_1.name                = DSTR(per_frame_arena, "sampler_1");
     sampler_1.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_STATIC_SAMPLER;
     sampler_1.static_sampler_desc = sampler_1_ssd;
 
@@ -175,14 +175,14 @@ Shader* create_deferred_render_gbuffer_shader()
 
     // Bindless Texture Table - Where all our texture descriptors should go. Index is used by our shader to retrieve texture
     Shader_Desc::Parameter texture_2d_table;
-    texture_2d_table.name                = "texture_2d_table";
+    texture_2d_table.name                = DSTR(per_frame_arena, ("texture_2d_table"));
     texture_2d_table.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
 
     shader_desc.parameter_list.push_back(texture_2d_table);
 
     // Material Flags
     Shader_Desc::Parameter material_flags;
-    material_flags.name                   = "material_flags";
+    material_flags.name                   = DSTR(per_frame_arena, "material_flags");
     material_flags.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     material_flags.number_of_32bit_values = 1;
 
@@ -190,35 +190,35 @@ Shader* create_deferred_render_gbuffer_shader()
 
     // Albedo Index
     Shader_Desc::Parameter albedo_index;
-    albedo_index.name                   = "albedo_index";
+    albedo_index.name                   = DSTR(per_frame_arena, "albedo_index");
     albedo_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     albedo_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(albedo_index);
 
     // Normal Index
     Shader_Desc::Parameter normal_index;
-    normal_index.name                   = "normal_index";
+    normal_index.name                   = DSTR(per_frame_arena, "normal_index");
     normal_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     normal_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(normal_index);
 
     // Roughness-Metallic Index
     Shader_Desc::Parameter roughness_metallic_index;
-    roughness_metallic_index.name                   = "roughness_metallic_index";
+    roughness_metallic_index.name                   = DSTR(per_frame_arena, "roughness_metallic_index");
     roughness_metallic_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     roughness_metallic_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(roughness_metallic_index);
 
     // Model Matrix
     Shader_Desc::Parameter model_matrix;
-    model_matrix.name                   = "model_matrix";
+    model_matrix.name                   = DSTR(per_frame_arena, "model_matrix");
     model_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     model_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
     shader_desc.parameter_list.push_back(model_matrix);
 
     // View Matrix
     Shader_Desc::Parameter view_projection_matrix;
-    view_projection_matrix.name                   = "view_projection_matrix";
+    view_projection_matrix.name                   = DSTR(per_frame_arena, "view_projection_matrix");
     view_projection_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     view_projection_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
 
@@ -226,7 +226,7 @@ Shader* create_deferred_render_gbuffer_shader()
 
     // Camera Pos
     Shader_Desc::Parameter camera_pos;
-    camera_pos.name                   = "camera_position_buffer";
+    camera_pos.name                   = DSTR(per_frame_arena, "camera_position_buffer");
     camera_pos.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     camera_pos.number_of_32bit_values = sizeof(DirectX::XMVECTOR);
 
@@ -236,11 +236,11 @@ Shader* create_deferred_render_gbuffer_shader()
     //  Input Layout
     /////////////////////
 
-    shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"NORMAL"     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"TANGENT"    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "NORMAL")     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TANGENT")    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "COLOR")      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TEXCOORD")   , DXGI_FORMAT_R32G32_FLOAT, 0});
 
     /////////////////////
     //  Render Targets
@@ -299,7 +299,7 @@ Shader* create_deferred_render_shading_shader()
     sampler_1_ssd.max_lod          = D3D12_FLOAT32_MAX;
 
     Shader_Desc::Parameter sampler_1;
-    sampler_1.name                = "sampler_1";
+    sampler_1.name                = DSTR(per_frame_arena, "sampler_1");
     sampler_1.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_STATIC_SAMPLER;
     sampler_1.static_sampler_desc = sampler_1_ssd;
 
@@ -307,49 +307,49 @@ Shader* create_deferred_render_shading_shader()
 
     // Bindless Texture Table - Where all our texture descriptors should go. Index is used by our shader to retrieve texture
     Shader_Desc::Parameter texture_2d_table;
-    texture_2d_table.name                = "texture_2d_table";
+    texture_2d_table.name                = DSTR(per_frame_arena, "texture_2d_table");
     texture_2d_table.usage_type          = Shader_Desc::Parameter::Usage_Type::TYPE_TEXTURE_READ;
 
     shader_desc.parameter_list.push_back(texture_2d_table);
 
     // Albedo Index
     Shader_Desc::Parameter albedo_index;
-    albedo_index.name                   = "albedo_index";
+    albedo_index.name                   = DSTR(per_frame_arena, "albedo_index");
     albedo_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     albedo_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(albedo_index);
 
     // Position Index
     Shader_Desc::Parameter position_index;
-    position_index.name                   = "position_index";
+    position_index.name                   = DSTR(per_frame_arena, "position_index");
     position_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     position_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(position_index);
 
     // Normal Index
     Shader_Desc::Parameter normal_index;
-    normal_index.name                   = "normal_index";
+    normal_index.name                   = DSTR(per_frame_arena, "normal_index");
     normal_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     normal_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(normal_index);
 
     // Roughness-Metallic Index
     Shader_Desc::Parameter roughness_metallic_index;
-    roughness_metallic_index.name                   = "roughness_metallic_index";
+    roughness_metallic_index.name                   = DSTR(per_frame_arena, "roughness_metallic_index");
     roughness_metallic_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     roughness_metallic_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(roughness_metallic_index);
 
     // Deferred Shading Output Dimensions
     Shader_Desc::Parameter output_dimensions;
-    output_dimensions.name                   = "output_dimensions";
+    output_dimensions.name                   = DSTR(per_frame_arena, "output_dimensions");
     output_dimensions.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     output_dimensions.number_of_32bit_values = 2;
     shader_desc.parameter_list.push_back(output_dimensions);
 
     // Per Frame Data
     Shader_Desc::Parameter per_frame_data;
-    per_frame_data.name                   = "per_frame_data";
+    per_frame_data.name                   = DSTR(per_frame_arena, "per_frame_data");
     per_frame_data.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER;
     per_frame_data.number_of_32bit_values = sizeof(Per_Frame_Data) / 4;
 
@@ -359,7 +359,7 @@ Shader* create_deferred_render_shading_shader()
     //  Input Layout
     /////////////////////
 
-    shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
 
     /////////////////////
     //  Render Targets
@@ -407,14 +407,14 @@ Shader* create_shadow_mapping_shader()
 
     // Model Matrix
     Shader_Desc::Parameter model_matrix;
-    model_matrix.name                   = "model_matrix";
+    model_matrix.name                   = DSTR(per_frame_arena, "model_matrix");
     model_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     model_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
     shader_desc.parameter_list.push_back(model_matrix);
 
     // Light Space Matrix
     Shader_Desc::Parameter light_space_matrix;
-    light_space_matrix.name                   = "light_matrix";
+    light_space_matrix.name                   = DSTR(per_frame_arena, "light_matrix");
     light_space_matrix.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
     light_space_matrix.number_of_32bit_values = sizeof(DirectX::XMMATRIX) / 4;
     shader_desc.parameter_list.push_back(light_space_matrix);
@@ -424,11 +424,11 @@ Shader* create_shadow_mapping_shader()
     //  Input Layout
     /////////////////
 
-    shader_desc.input_layout.push_back({"POSITION"   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"NORMAL"     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"TANGENT"    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"COLOR"      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({"TEXCOORD"   , DXGI_FORMAT_R32G32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "NORMAL"  )   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TANGENT" )   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "COLOR"   )   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TEXCOORD")   , DXGI_FORMAT_R32G32_FLOAT, 0});
 
 
     /////////////////////////////////////////

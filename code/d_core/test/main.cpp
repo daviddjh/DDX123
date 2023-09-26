@@ -154,6 +154,17 @@ unsigned long __stdcall main(){
         d_std::os_debug_printf(arena, "Setting index %u of my int array. Value is now: %u\n", i, my_int_array[i]);
     }
 
+    u32 hash;
+
+    hash = murmur3_32((const u8*)"Hello", 5);
+    d_std::os_debug_printf(arena, "Hash of Hello: %u\n", hash);
+
+    hash = murmur3_32((const u8*)"GoodBye", 7);
+    d_std::os_debug_printf(arena, "Hash of Goodbye: %u\n", hash);
+
+    hash = murmur3_32((const u8*)"Hello", 5);
+    d_std::os_debug_printf(arena, "Hash of Hello: %u\n", hash);
+
     // Index past end of array
     my_int_array[101] = 4;
 

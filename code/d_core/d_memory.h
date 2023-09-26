@@ -3,6 +3,7 @@
 
 #include "d_types.h"
 #include "d_os.h"
+#include "string.h" // For memcpy
 
 #ifdef DEBUG
 #include "crtdbg.h"

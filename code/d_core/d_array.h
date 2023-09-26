@@ -110,7 +110,7 @@ namespace d_std {
 
         *(this->array + index) = item;
 
-        return
+        return;
     }
 
     // Set item in array

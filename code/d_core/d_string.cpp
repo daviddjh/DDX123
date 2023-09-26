@@ -1,13 +1,26 @@
 #include "d_string.h"
 #include "d_memory.h"
 
+#define DSTR(arena, cstr) d_std::string_from_lit_string(arena, cstr)
+
 namespace d_std {
 
-    d_string string_from_lit_string(Memory_Arena *arena, char* lit_string){
+    const char* d_string::c_str(Memory_Arena *arena){
+        char* c_str = arena->allocate_array<char>(size + 1);
+
+        for(int i = 0; i < size; i++){
+            c_str[i] = string[i];
+        }
+        c_str[size] = '\0';
+
+        return c_str;
+    }
+
+    d_string string_from_lit_string(Memory_Arena *arena, const char* lit_string){
 
         d_string string;
         u32 size = 0;
-        char* p = lit_string;
+        char* p = const_cast<char*>(lit_string);
         while (*p != '\0'){
             size++;
             p++;
@@ -18,6 +31,7 @@ namespace d_std {
         for(int i = 0; i < string.size; i++){
             string.string[i] = lit_string[i];
         }
+        string.string[string.size] = '\0';
 
         return string;
     }

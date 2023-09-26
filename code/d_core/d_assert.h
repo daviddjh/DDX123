@@ -29,7 +29,7 @@
 #endif // DEBUG_BREAK
 
 #if defined DEBUG
-#define ASSERT(s) do(if(!s){DEBUG_BREAK})while(0)
+#define ASSERT(s) do(if(!(s)){DEBUG_BREAK})while(0)
 #else
 #define ASSERT(s)
 #endif // USING_ASSERT
