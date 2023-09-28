@@ -14,11 +14,10 @@ pushd .\build
 :: If program is running in the debugger, then stop it so the compiler can write to the .exe
 :: remedybg.exe stop-debugging
 
-set flags= /FeDDX123 /FAs /EHsc
+set flags= /FeDDX123 /FAs /EHsc /DPCOUNTER
 set code=..\code\main.cpp ..\third_party\imgui\imgui.cpp ..\third_party\imgui\imgui_draw.cpp ..\third_party\imgui\imgui_demo.cpp ..\third_party\imgui\imgui_tables.cpp ..\third_party\imgui\imgui_widgets.cpp ..\third_party\imgui\backends\imgui_impl_dx12.cpp ..\third_party\imgui\backends\imgui_impl_win32.cpp
-set includes=/I"..\third_party\DirectXTex\DirectXTex" /I"..\code\d_core" /I"..\code\d_dx12" /I"..\third_party\DirectXTK12\Inc" /I"..\third_party\tinygltf" /I"..\third_party\imgui" /I"..\third_party\imgui\backends" /I"..\third_party\dxc"
-set link_libs= Winmm.lib d3d12.lib dxgi.lib dxguid.lib ole32.lib oleaut32.lib Advapi32.lib ..\third_party\dxc\dxcompiler.lib 
-:: ..\third_party\Superluminal\lib\x64\PerformanceAPI_MD.lib
+set includes=/I"..\third_party\DirectXTex\DirectXTex" /I"..\code\d_core" /I"..\code\d_dx12" /I"..\third_party\DirectXTK12\Inc" /I"..\third_party\tinygltf" /I"..\third_party\imgui" /I"..\third_party\imgui\backends" /I"..\third_party\dxc\inc"
+set link_libs= Winmm.lib d3d12.lib dxgi.lib dxguid.lib ole32.lib oleaut32.lib Advapi32.lib ..\third_party\dxc\lib\x64\dxcompiler.lib ..\third_party\Superluminal\lib\x64\PerformanceAPI_MD.lib
 
 :: Compile our app, or DirectXTex
 if "%1" == "-d" (

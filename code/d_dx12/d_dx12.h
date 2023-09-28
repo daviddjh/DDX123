@@ -37,7 +37,8 @@ namespace d_dx12 {
                 TYPE_TEXTURE_READ,      // SRV
                 TYPE_TEXTURE_WRITE,     // UAV
                 TYPE_INLINE_CONSTANT,   // Root Sig Constant
-                TYPE_STATIC_SAMPLER
+                TYPE_STATIC_SAMPLER,
+                TYPE_INVALID,           //  Used in the binding poinnts array to define unused binding points
             };
 
             Usage_Type usage_type;
@@ -97,7 +98,7 @@ namespace d_dx12 {
 
         // Binding points
         struct Binding_Point {
-            Shader_Desc::Parameter::Usage_Type usage_type;
+            Shader_Desc::Parameter::Usage_Type usage_type = Shader_Desc::Parameter::Usage_Type::TYPE_INVALID;
             D3D12_SHADER_INPUT_BIND_DESC       d3d12_binding_desc;
             D3D12_SHADER_VISIBILITY            shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
             u8                                 root_signature_index;

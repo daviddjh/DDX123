@@ -273,8 +273,11 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
         }
     }
 
-    // Now be bind the texture table to the root signature. 
-    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, DSTR(per_frame_arena, "texture_2d_table"));
+    // Now be bind the texture table to the root signature. ONLY if the shader wants textures
+    // If the "texture_2d_table" binding point isn't in the list of availible binding points, we assume the shader doesn't need textures binded
+    if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("texture_2d_table")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, DSTR(per_frame_arena, "texture_2d_table"));
+    }
 
     for(u64 i = 0; i < model->meshes.nitems; i++){
         D_Mesh* mesh = model->meshes.ptr + i;
@@ -289,22 +292,30 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             D_Draw_Call draw_call = mesh->draw_calls.ptr[j];
 
             D_Material material = model->materials.ptr[draw_call.material_index];
-            command_list->bind_constant_arguments(&material.material_flags, 1, DSTR(per_frame_arena, "material_flags"));
+            if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("material_flags")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+                command_list->bind_constant_arguments(&material.material_flags, 1, DSTR(per_frame_arena, "material_flags"));
+            }
 
             // Pass the index of the albedo texture in the texture table to the shader
-            command_list->bind_constant_arguments(&material.albedo_texture.texture_binding_table_index, 1, DSTR(per_frame_arena, "albedo_index"));
+            if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("albedo_index")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+                command_list->bind_constant_arguments(&material.albedo_texture.texture_binding_table_index, 1, DSTR(per_frame_arena, "albedo_index"));
+            }
 
             if(material.material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
 
                 // Pass the index of the normal texture in the texture table to the shader
-                command_list->bind_constant_arguments(&material.normal_texture.texture_binding_table_index, 1, DSTR(per_frame_arena, "normal_index"));
+                if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("normal_index")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+                    command_list->bind_constant_arguments(&material.normal_texture.texture_binding_table_index, 1, DSTR(per_frame_arena, "normal_index"));
+                }
 
             }
 
             if(material.material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE){
 
                 // Pass the index of the normal texture in the texture table to the shader
-                command_list->bind_constant_arguments(&material.roughness_metallic_texture.texture_binding_table_index, 1, DSTR(per_frame_arena, "roughness_metallic_index"));
+                if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("roughness_metallic_index")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+                    command_list->bind_constant_arguments(&material.roughness_metallic_texture.texture_binding_table_index, 1, DSTR(per_frame_arena, "roughness_metallic_index"));
+                }
 
             }
 

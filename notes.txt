@@ -1,3 +1,13 @@
+9/26/2023
+
+Replaced binding point map with just an array as mentioned in previous notes.
+Brought CPU_FRAME time down to:
+13900k cpu - AVG: 129us (-17us) MEDIAN: 119us (-15ms)
+
+Still gains to be had. Can eliminate string lookup by doing it at compile time with the constexpr.
+Should shave off about another 40us.
+Good Job David!!!
+
 9/21/2023
 
 Created a mapping from binding points to indexes in an array. (d_dx12/shaders.h)
