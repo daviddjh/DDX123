@@ -279,11 +279,11 @@ namespace d_dx12 {
         void close();
         void bind_vertex_buffer(Buffer* buffer, u32 slot);
         void bind_index_buffer(Buffer* buffer);
-        void bind_handle(Descriptor_Handle handle, d_std::d_string binding_point);
-        void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, d_std::d_string binding_point);
-        u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, d_std::d_string binding_point);
-        void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, d_std::d_string parameter_name);
-        void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, d_std::d_string binding_point);
+        void bind_handle(Descriptor_Handle handle, u32 binding_point);
+        void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32  binding_point);
+        u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, u32  binding_point);
+        void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, u32  parameter_name);
+        void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, u32 binding_point);
         Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
         void set_shader(Shader* shader);
         void set_render_targets(u8 num_render_targets, Texture** rt, Texture* ds);

@@ -15,7 +15,7 @@
 *.ini
 # These just showed up, don't know why?
 *.exp 
-*.lib
+DDX123.lib
 
 # Third Party
 third_party/Superluminal/*

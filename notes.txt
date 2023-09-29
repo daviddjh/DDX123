@@ -1,5 +1,27 @@
 9/26/2023
 
+Started getting a weird issue when the DX12 window is the main focus. It locks to 60fps???
+Can't tell for the life of me why. No VSync. No frame limiters... Maybe the recent update to windows??
+IDK.. its weird.. but to capture the frame times, I have to now "click off" of the window for the speed to go back up.
+
+Finished updating the binding string lookup. It now uses const char* and evaluates the index at compile time.
+
+One odd thing is that the userspace has to use the lookup everytime they want to bind something other than a texture (for now).
+
+If I had a completely bindless system, would this be much of a problem? Shader would have fewer bind point names, and API would define those.
+
+The user space can pass a "Debug Name" to name things like resources.
+
+Anyways, shaved off 69µs of time in the CPU frame. No more std::map. :)
+
+Onto SSAO!!
+
+:D
+
+13900k cpu - AVG: 77us MEDIAN: 67us
+
+9/26/2023
+
 Replaced binding point map with just an array as mentioned in previous notes.
 Brought CPU_FRAME time down to:
 13900k cpu - AVG: 129us (-17us) MEDIAN: 119us (-15ms)
@@ -19,10 +41,10 @@ Also, this should alow user space to still use c strings when defining a binding
 Only downside is it adds one extra step everytime you add a new binding point to a shader. The binding point, along with it's index, needs to also be added
 to d_dx12/shaders.h before it can be used.
 
-Brings up an interesting question of "who should be diffining the space of binding points? the shader writter or the api?". In this case, if its the API, then
-it makes things faster and easier for API writter, but places constrain and extra step on the shader writter. 
+Brings up an interesting question of "who should be defining the space of binding points? the shader writer or the api?". In this case, if its the API, then
+it makes things faster and easier for API writer, but places constrain and extra step on the shader writer. 
 
-If we had something like JAI, we could parse the shader(s) first, then create the "constant" lookup table. This would avoid the extra step for shader writters.
+If we had something like JAI, we could parse the shader(s) first, then create the "constant" lookup table. This would avoid the extra step for shader writers.
 
 This could be done now in something like python. Seems like it would add more complexity for little value.
 

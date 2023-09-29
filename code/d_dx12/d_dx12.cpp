@@ -2338,15 +2338,14 @@ namespace d_dx12 {
 
     }
 
-    void Command_List::bind_handle(Descriptor_Handle handle, d_string binding_point_string){
+    void Command_List::bind_handle(Descriptor_Handle handle, u32 binding_point_index){
 
-        u32 binding_point_index = binding_point_string_lookup(binding_point_string.c_str(per_frame_arena));
         d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
         return;
 
     }
 
-    void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, d_string binding_point_string){
+    void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32 binding_point_index){
 
         if(buffer->usage != Buffer::USAGE::USAGE_CONSTANT_BUFFER){
             if(resource_manager == NULL){
@@ -2366,7 +2365,6 @@ namespace d_dx12 {
                 // Need to copy offline descriptor to online descriptor
                 d3d12_device->CopyDescriptorsSimple(1, buffer->online_descriptor_handle.cpu_descriptor_handle, buffer->offline_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-                u32 binding_point_index = binding_point_string_lookup(binding_point_string.c_str(per_frame_arena));
                 d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
 
                 // Don't need to save the index into the descriptor heap because these aren't bindless buffers
@@ -2382,7 +2380,7 @@ namespace d_dx12 {
         return;
     }
 
-    u8 Command_List::bind_texture(Texture* texture, Resource_Manager* resource_manager, d_string binding_point){
+    u8 Command_List::bind_texture(Texture* texture, Resource_Manager* resource_manager, u32 binding_point_index){
 
         u16 index_to_return = -1;
         
@@ -2515,7 +2513,7 @@ namespace d_dx12 {
     }
 
     // Bind an array of textures starting at the beginning of the online_cbv_srv_uav_descriptor_heap
-    void Command_List::bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, d_string binding_point_string){
+    void Command_List::bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, u32 binding_point_index){
         
         if(resource_manager == NULL){
             OutputDebugString("Error (Command_List::bind_texture): no valid resource_manager");
@@ -2529,7 +2527,6 @@ namespace d_dx12 {
             Descriptor_Handle handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(0);
 
             // Set descriptor in Root Signature
-            u32 binding_point_index = binding_point_string_lookup(binding_point_string.c_str(per_frame_arena));
             d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
 
         //}
@@ -2551,14 +2548,13 @@ namespace d_dx12 {
 
     }
 
-    void Command_List::bind_constant_arguments(void* data, u16 num_32bit_values_to_set, d_string parameter_name){
+    void Command_List::bind_constant_arguments(void* data, u16 num_32bit_values_to_set, u32 binding_point_index){
         // TODO...
         if(this->type == D3D12_COMMAND_LIST_TYPE_DIRECT){
 
             // If the shader contains this binding point
             //if(current_bound_shader->binding_points.count(parameter_name)){
 
-                u32 binding_point_index = binding_point_string_lookup(parameter_name.c_str(per_frame_arena));
                 Shader::Binding_Point* binding_point = &current_bound_shader->binding_points[binding_point_index];
                 u32 root_signature_index = binding_point->root_signature_index;
 
@@ -2571,7 +2567,6 @@ namespace d_dx12 {
             // If the shader contains this binding point
             //if(current_bound_shader->binding_points.count(parameter_name)){
 
-                u32 binding_point_index = binding_point_string_lookup(parameter_name.c_str(per_frame_arena));
                 Shader::Binding_Point* binding_point = &current_bound_shader->binding_points[binding_point_index];
                 u32 root_signature_index = binding_point->root_signature_index;
 

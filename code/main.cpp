@@ -228,7 +228,7 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
     model_matrix = DirectX::XMMatrixMultiply(scale_matrix, DirectX::XMMatrixIdentity());
     DirectX::XMMATRIX translation_matrix = DirectX::XMMatrixTranslation(model->coords.x, model->coords.y, model->coords.z);
     model_matrix = DirectX::XMMatrixMultiply(translation_matrix, model_matrix);
-    command_list->bind_constant_arguments(&model_matrix, sizeof(DirectX::XMMATRIX) / 4, DSTR(per_frame_arena, "model_matrix"));
+    command_list->bind_constant_arguments(&model_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("model_matrix"));
 
     // Begin by initializing each textures binding table index to an invalid value
     for(u64 i = 0; i < model->materials.nitems; i++){
@@ -248,7 +248,7 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             
             // Check if table index is < 0 (-1). Only bind albedo texture if it needs to be bound to avoid unncessary descriptor copies
             if(model->materials.ptr[draw_call.material_index].albedo_texture.texture_binding_table_index < 0){
-                model->materials.ptr[draw_call.material_index].albedo_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].albedo_texture.texture, &resource_manager, DSTR(per_frame_arena, "albedo_texture"));
+                model->materials.ptr[draw_call.material_index].albedo_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].albedo_texture.texture, &resource_manager, 0);
             }
 
             // If this material uses a normal map
@@ -256,7 +256,7 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
 
                 // Check if table index is < 0 (-1). Only bind albedo texture if it needs to be bound to avoid unncessary descriptor copies
                 if(model->materials.ptr[draw_call.material_index].normal_texture.texture_binding_table_index < 0){
-                    model->materials.ptr[draw_call.material_index].normal_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].normal_texture.texture, &resource_manager, DSTR(per_frame_arena, "normal_texture"));
+                    model->materials.ptr[draw_call.material_index].normal_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].normal_texture.texture, &resource_manager, 0);
                 }
 
             }
@@ -266,7 +266,7 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
 
                 // Check if table index is < 0 (-1). Only bind albedo texture if it needs to be bound to avoid unncessary descriptor copies
                 if(model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture_binding_table_index < 0){
-                    model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture, &resource_manager, DSTR(per_frame_arena, "roughness_metallic_texture"));
+                    model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture, &resource_manager, 0);
                 }
 
             }
@@ -275,8 +275,9 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
 
     // Now be bind the texture table to the root signature. ONLY if the shader wants textures
     // If the "texture_2d_table" binding point isn't in the list of availible binding points, we assume the shader doesn't need textures binded
-    if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("texture_2d_table")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
-        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, DSTR(per_frame_arena, "texture_2d_table"));
+    constexpr u32 tex_2d_table_index = binding_point_string_lookup("texture_2d_table");
+    if(command_list->current_bound_shader->binding_points[tex_2d_table_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, tex_2d_table_index);
     }
 
     for(u64 i = 0; i < model->meshes.nitems; i++){
@@ -292,20 +293,23 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             D_Draw_Call draw_call = mesh->draw_calls.ptr[j];
 
             D_Material material = model->materials.ptr[draw_call.material_index];
-            if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("material_flags")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
-                command_list->bind_constant_arguments(&material.material_flags, 1, DSTR(per_frame_arena, "material_flags"));
+            constexpr u32 material_flags_index = binding_point_string_lookup("material_flags");
+            if(command_list->current_bound_shader->binding_points[material_flags_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+                command_list->bind_constant_arguments(&material.material_flags, 1, material_flags_index);
             }
 
             // Pass the index of the albedo texture in the texture table to the shader
-            if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("albedo_index")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
-                command_list->bind_constant_arguments(&material.albedo_texture.texture_binding_table_index, 1, DSTR(per_frame_arena, "albedo_index"));
+            constexpr u32 albedo_index_index = binding_point_string_lookup("albedo_index");
+            if(command_list->current_bound_shader->binding_points[albedo_index_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+                command_list->bind_constant_arguments(&material.albedo_texture.texture_binding_table_index, 1, albedo_index_index);
             }
 
             if(material.material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
 
                 // Pass the index of the normal texture in the texture table to the shader
-                if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("normal_index")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
-                    command_list->bind_constant_arguments(&material.normal_texture.texture_binding_table_index, 1, DSTR(per_frame_arena, "normal_index"));
+                constexpr u32 normal_index_index = binding_point_string_lookup("normal_index");
+                if(command_list->current_bound_shader->binding_points[normal_index_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+                    command_list->bind_constant_arguments(&material.normal_texture.texture_binding_table_index, 1, normal_index_index);
                 }
 
             }
@@ -313,8 +317,9 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             if(material.material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE){
 
                 // Pass the index of the normal texture in the texture table to the shader
-                if(command_list->current_bound_shader->binding_points[binding_point_string_lookup("roughness_metallic_index")].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
-                    command_list->bind_constant_arguments(&material.roughness_metallic_texture.texture_binding_table_index, 1, DSTR(per_frame_arena, "roughness_metallic_index"));
+                constexpr u32 roughness_metallic_index_index = binding_point_string_lookup("roughness_metallic_index");
+                if(command_list->current_bound_shader->binding_points[roughness_metallic_index_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+                    command_list->bind_constant_arguments(&material.roughness_metallic_texture.texture_binding_table_index, 1, roughness_metallic_index_index);
                 }
 
             }
@@ -701,7 +706,7 @@ void D_Renderer::render(){
 
     command_list->clear_depth_stencil(shadow_ds, 1.0f);
 
-    command_list->bind_constant_arguments(&light_view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, DSTR(per_frame_arena, "light_matrix"));
+    command_list->bind_constant_arguments(&light_view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("light_matrix"));
 
     bind_and_draw_model(command_list, &renderer.models.ptr[0]);
     
@@ -744,7 +749,7 @@ void D_Renderer::render(){
         command_list->set_scissor_rect(display.scissor_rect);
 
         // Bind Shadow Map
-        per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, DSTR(per_frame_arena, "Shadow_Map"));
+        per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
         per_frame_data.light_space_matrix = light_view_projection_matrix;
         DirectX::XMFLOAT3 camera_position; 
         DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
@@ -752,10 +757,10 @@ void D_Renderer::render(){
 
         // Constant Buffer requires 256 byte alignment
         Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
-        command_list->bind_handle(handle, DSTR(per_frame_arena, "per_frame_data"));
+        command_list->bind_handle(handle, binding_point_string_lookup("per_frame_data"));
 
-        command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, DSTR(per_frame_arena, "view_projection_matrix"));
-        command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR), DSTR(per_frame_arena, "camera_position_buffer"));
+        command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
+        command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR),        binding_point_string_lookup("camera_position_buffer"));
         bind_and_draw_model(command_list, &renderer.models.ptr[0]);
 
     } else {
@@ -794,8 +799,8 @@ void D_Renderer::render(){
         command_list->set_viewport      (display.viewport);
         command_list->set_scissor_rect  (display.scissor_rect);
 
-        command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, DSTR(per_frame_arena, "view_projection_matrix"));
-        command_list->bind_constant_arguments(&camera.eye_position,    sizeof(DirectX::XMVECTOR),     DSTR(per_frame_arena, "camera_position_buffer"));
+        command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
+        command_list->bind_constant_arguments(&camera.eye_position,    sizeof(DirectX::XMVECTOR),     binding_point_string_lookup("camera_position_buffer"));
 
         bind_and_draw_model(command_list, &renderer.models.ptr[0]);
 
@@ -821,21 +826,21 @@ void D_Renderer::render(){
         if(g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
             command_list->transition_texture(g_buffer_rough_metal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-        u32 albedo_index    = command_list->bind_texture (g_buffer_albedo,      &resource_manager, DSTR(per_frame_arena, "Albedo Gbuffer"));
-        u32 position_index  = command_list->bind_texture (g_buffer_position,    &resource_manager, DSTR(per_frame_arena, "Position Gbuffer"));
-        u32 normal_index    = command_list->bind_texture (g_buffer_normal,      &resource_manager, DSTR(per_frame_arena, "Normal Gbuffer"));
-        u32 roughness_index = command_list->bind_texture (g_buffer_rough_metal, &resource_manager, DSTR(per_frame_arena, "Roughness and Metallic Gbuffer"));
+        u32 albedo_index    = command_list->bind_texture (g_buffer_albedo,      &resource_manager, binding_point_string_lookup("Albedo Gbuffer"));
+        u32 position_index  = command_list->bind_texture (g_buffer_position,    &resource_manager, binding_point_string_lookup("Position Gbuffer"));
+        u32 normal_index    = command_list->bind_texture (g_buffer_normal,      &resource_manager, binding_point_string_lookup("Normal Gbuffer"));
+        u32 roughness_index = command_list->bind_texture (g_buffer_rough_metal, &resource_manager, binding_point_string_lookup("Roughness and Metallic Gbuffer"));
 
-        command_list->bind_constant_arguments(&albedo_index,    1, DSTR(per_frame_arena, "albedo_index"));
-        command_list->bind_constant_arguments(&position_index,  1, DSTR(per_frame_arena, "position_index"));
-        command_list->bind_constant_arguments(&normal_index,    1, DSTR(per_frame_arena, "normal_index"));
-        command_list->bind_constant_arguments(&roughness_index, 1, DSTR(per_frame_arena, "roughness_metallic_index"));
+        command_list->bind_constant_arguments(&albedo_index,    1, binding_point_string_lookup("albedo_index"));
+        command_list->bind_constant_arguments(&position_index,  1, binding_point_string_lookup("position_index"));
+        command_list->bind_constant_arguments(&normal_index,    1, binding_point_string_lookup("normal_index"));
+        command_list->bind_constant_arguments(&roughness_index, 1, binding_point_string_lookup("roughness_metallic_index"));
 
         // Output texture dimensions
         u32 output_dimensions[] = {display_width, display_height};
-        command_list->bind_constant_arguments(&output_dimensions, 2, DSTR(per_frame_arena, "output_dimensions"));
+        command_list->bind_constant_arguments(&output_dimensions, 2, binding_point_string_lookup("output_dimensions"));
 
-        per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, DSTR(per_frame_arena, "Shadow_Map"));
+        per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
         per_frame_data.light_space_matrix = light_view_projection_matrix;
         DirectX::XMFLOAT3 camera_position; 
         DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
@@ -843,10 +848,10 @@ void D_Renderer::render(){
 
         // Constant Buffer requires 256 byte alignment
         Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
-        command_list->bind_handle(handle, DSTR(per_frame_arena, "per_frame_data"));
+        command_list->bind_handle(handle, binding_point_string_lookup("per_frame_data"));
 
         // Now be bind the texture table to the root signature. 
-        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, DSTR(per_frame_arena, "texture_2d_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
 
         command_list->bind_vertex_buffer(full_screen_quad_vertex_buffer, 0);
         command_list->bind_index_buffer (full_screen_quad_index_buffer);

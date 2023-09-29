@@ -9,7 +9,19 @@ To Build:
 - Build DDX123: `build.bat`
   - `build.bat -o`   - Optimized with cl flag: /O2
   - `build.bat -d`   - Debug build (Default)
-  - `build.bat -rds` - Release build with debug symbols
+  - `build.bat -ods` - Release build with debug symbols
+
+## Lowered CPU frame time from 146µs to 77µs - 9/28/23
+
+This started by wanting to remove stdlib `map` calls durring runtime.
+I ended up moving most of it to compile time. I also removed std::string from my binding system. Also added comiler options for speed. Shaved off 69µs on average.
+
+
+![CPU Frame time](pics/CPU_FRAME_TIME.png) 
+
+## Deferred Rendering in [Sponza](https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Sponza) Scene - 9/28/23 
+
+![Deferred Rendering in Sponza Scene](pics/Deferred_rendering.png)
 
 ## Shadow Maps in [Sponza](https://github.com/KhronosGroup/glTF-Sample-Models/tree/master/2.0/Sponza) Scene - 4/5/23 
 
