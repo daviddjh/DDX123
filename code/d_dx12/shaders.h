@@ -21,6 +21,7 @@ const enum Binding_Point_Index : u32 {
     MODEL_MATRIX,
     MATERIAL_FLAGS,
     SAMPLER_1, 
+    DEPTH_BUFFER_INDEX,
     BINDING_POINT_INDEX_COUNT,
 };
 
@@ -48,6 +49,7 @@ constexpr const Binding_Point_String_Map binding_point_map[] = {
     {"model_matrix", MODEL_MATRIX},
     {"material_flags", MATERIAL_FLAGS},
     {"sampler_1", SAMPLER_1},
+    {"depth_buffer_index", DEPTH_BUFFER_INDEX},
 };
 
 // Got from: https://stackoverflow.com/questions/27490858/how-can-you-compare-two-character-strings-statically-at-compile-time

@@ -26,6 +26,7 @@ ConstantBuffer<TextureIndex> albedo_index:             register(b0);
 ConstantBuffer<TextureIndex> position_index:           register(b1);
 ConstantBuffer<TextureIndex> normal_index:             register(b2);
 ConstantBuffer<TextureIndex> roughness_metallic_index: register(b3);
+ConstantBuffer<TextureIndex> depth_buffer_index:       register(b6);
 
 struct OutputDimensions
 {
@@ -189,6 +190,11 @@ float4 main(PixelShaderInput IN) : SV_Target {
     float roughness = roughness_metallic.g;
     float metallic  = roughness_metallic.r;
 
+    float depth = texture_2d_table[depth_buffer_index.i].Sample(
+        sampler_1,
+        UV
+    );
+
     // Calculate shading
 
     float3 N = normalize(w_normal.xyz);
@@ -237,11 +243,46 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     }
 
-    float3 ambient = float3(0.06, 0.06, 0.06) * albedo_texture_color.rgb;
+    // Calculate SSAO
+    
+    
+    float ambient_constant = 0.06;
+
+    float current_pixel_depth = texture_2d_table[depth_buffer_index.i].Sample(
+        sampler_1,
+        UV
+    );
+
+    float ao_factor = 0;
+
+    // Loop over x values
+    for(float j = -3; j <= 3; j++){
+
+        // Loop over y values
+        for(float k = -3; k <= 3; k++){
+
+            if(k == 0 && j == 0) continue;
+
+            float2 ao_uv = float2(((IN.Position.x + j) / output_dimensions.width), ((IN.Position.y + k) / output_dimensions.height));
+            float neighbour_depth = texture_2d_table[depth_buffer_index.i].Sample(
+                sampler_1,
+                ao_uv
+            );
+
+            if(neighbour_depth > current_pixel_depth && ((neighbour_depth - current_pixel_depth) < 0.00006)){
+                ao_factor += 1;
+            }
+        }
+    }
+    ambient_constant = (ao_factor / 8.0) * ambient_constant;
+    float3 ambient = float3(ambient_constant, ambient_constant, ambient_constant);
+
+    ambient = ambient * albedo_texture_color.rgb;
     matrix light_space_matrix = per_frame_data.light_space_matrix;
     float4 frag_pos_light_space = mul(light_space_matrix, w_position);
     float shadow = calc_shadow_value(frag_pos_light_space, float2(w_position.x * w_normal.z, albedo_texture_color.g * w_normal.x));
     float3 color = ambient + (1.0 - shadow) * Lo;
+
     #if 0
     if(shadow == 0.){
         color = ambient + (1.0 - shadow) * Lo;

@@ -13,7 +13,7 @@ To Build:
 
 ## Lowered CPU frame time from 146µs to 77µs - 9/28/23
 
-This started by wanting to remove stdlib `map` calls durring runtime.
+This started by wanting to remove stdlib `map` calls during runtime.
 I ended up moving most of it to compile time. I also removed std::string from my binding system. Also added comiler options for speed. Shaved off 69µs on average.
 
 

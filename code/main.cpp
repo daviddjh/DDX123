@@ -62,6 +62,9 @@ struct D_Renderer {
 
     int  init();
     void render();
+    void render_shadow_map(Command_List* command_list);
+    void forward_render_pass(Command_List* command_list);
+    void deferred_render_pass(Command_List* command_list);
     void shutdown();
     void toggle_fullscreen();
     void upload_model_to_gpu(Command_List* command_list, D_Model& test_model);
@@ -640,8 +643,189 @@ int D_Renderer::init(){
 
 }
 
+void D_Renderer::render_shadow_map(Command_List* command_list){
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Shadow Map
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    DirectX::XMVECTOR light_position = DirectX::XMVectorSet((-per_frame_data.light_pos[0] * 50), (-per_frame_data.light_pos[1] * 50), (-per_frame_data.light_pos[2] * 50), 1.0);
+    DirectX::XMVECTOR light_direction = DirectX::XMVectorSet((per_frame_data.light_pos[0]), (per_frame_data.light_pos[1]), (per_frame_data.light_pos[2]), 0.0);
+    light_direction = DirectX::XMVector4Normalize(light_direction);
+    DirectX::XMMATRIX light_view_matrix = DirectX::XMMatrixLookToRH(light_position, light_direction, camera.up_direction);
+    DirectX::XMMATRIX light_projection_matrix = DirectX::XMMatrixOrthographicOffCenterRH(-250, 250, -250, 250, -5000, 5000);
+    DirectX::XMMATRIX light_view_projection_matrix = DirectX::XMMatrixMultiply(light_view_matrix, light_projection_matrix);
+    
+    // Dynamic Data
+    per_frame_data.light_space_matrix = light_view_projection_matrix;
+
+    // Fill the command list:
+    command_list->set_shader(shadow_map_shader);
+
+    if(shadow_ds->state != D3D12_RESOURCE_STATE_DEPTH_WRITE){
+        command_list->transition_texture(shadow_ds, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    }
+    // Set up render targets. Here, we are just using a depth buffer
+    command_list->set_viewport(display.viewport);
+    command_list->set_scissor_rect(display.scissor_rect);
+    command_list->set_render_targets(0, NULL, shadow_ds);
+
+    command_list->clear_depth_stencil(shadow_ds, 1.0f);
+
+    command_list->bind_constant_arguments(&light_view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("light_matrix"));
+
+    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+    
+    // Transition shadow ds to Pixel Resource State
+    command_list->transition_texture(shadow_ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+}
+
+
+void D_Renderer::forward_render_pass(Command_List* command_list){
+
+    ////////////////////////////
+    /// Update Camera Matricies
+    ////////////////////////////
+
+    DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
+    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500000000.0f);
+    DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
+
+    //////////////////////////////////////
+    // Forward Shading!
+    //////////////////////////////////////
+    command_list->set_render_targets(1, &rt[current_backbuffer_index], ds);
+
+    command_list->set_shader(pbr_shader);
+    command_list->set_viewport(display.viewport);
+    command_list->set_scissor_rect(display.scissor_rect);
+
+    // Bind Shadow Map
+    per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
+    DirectX::XMFLOAT3 camera_position; 
+    DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
+    memcpy(&per_frame_data.camera_pos, &camera.eye_position, sizeof(float) * 3);
+
+    // Constant Buffer requires 256 byte alignment
+    Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+    command_list->bind_handle(handle, binding_point_string_lookup("per_frame_data"));
+
+    command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
+    command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR),        binding_point_string_lookup("camera_position_buffer"));
+    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+}
+
+void D_Renderer::deferred_render_pass(Command_List* command_list){
+
+    ////////////////////////////
+    /// Update Camera Matricies
+    ////////////////////////////
+
+    DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
+    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500000000.0f);
+    DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
+
+    //////////////////////////////////////
+    // Defered Shading!
+    //////////////////////////////////////
+
+    // Need to:
+    // Output to new buffers
+
+    ///////////////////////
+    // Geometry Pass
+    ///////////////////////
+
+    // Transition Albedo Buffer
+    if(g_buffer_albedo->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(g_buffer_albedo, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    // Transition Position Buffer
+    if(g_buffer_position->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(g_buffer_position, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    if(g_buffer_normal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(g_buffer_normal, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    if(g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(g_buffer_rough_metal, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+    command_list->clear_render_target(g_buffer_albedo);
+
+    Texture* render_targets[] = {g_buffer_albedo, g_buffer_position, g_buffer_normal, g_buffer_rough_metal};
+
+    command_list->set_render_targets(4, render_targets, ds);
+    command_list->set_shader        (deferred_g_buffer_shader);
+    command_list->set_viewport      (display.viewport);
+    command_list->set_scissor_rect  (display.scissor_rect);
+
+    command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
+    command_list->bind_constant_arguments(&camera.eye_position,    sizeof(DirectX::XMVECTOR),     binding_point_string_lookup("camera_position_buffer"));
+
+    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+
+    ///////////////////////
+    // Shading Pass
+    ///////////////////////
+
+    command_list->set_render_targets(1, &rt[current_backbuffer_index], NULL);
+    command_list->set_viewport      (display.viewport);
+    command_list->set_scissor_rect  (display.scissor_rect);
+    command_list->set_shader        (deferred_shading_shader);
+
+    // Bind Buffers
+    if(g_buffer_albedo->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(g_buffer_albedo, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    if(g_buffer_position->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(g_buffer_position, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    if(g_buffer_normal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(g_buffer_normal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    if(g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(g_buffer_rough_metal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    if(ds->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+    u32 albedo_index       = command_list->bind_texture (g_buffer_albedo,      &resource_manager, binding_point_string_lookup("Albedo Gbuffer"));
+    u32 position_index     = command_list->bind_texture (g_buffer_position,    &resource_manager, binding_point_string_lookup("Position Gbuffer"));
+    u32 normal_index       = command_list->bind_texture (g_buffer_normal,      &resource_manager, binding_point_string_lookup("Normal Gbuffer"));
+    u32 roughness_index    = command_list->bind_texture (g_buffer_rough_metal, &resource_manager, binding_point_string_lookup("Roughness and Metallic Gbuffer"));
+    u32 depth_buffer_index = command_list->bind_texture (ds,                   &resource_manager, 0);
+
+    command_list->bind_constant_arguments(&albedo_index,       1, binding_point_string_lookup("albedo_index"));
+    command_list->bind_constant_arguments(&position_index,     1, binding_point_string_lookup("position_index"));
+    command_list->bind_constant_arguments(&normal_index,       1, binding_point_string_lookup("normal_index"));
+    command_list->bind_constant_arguments(&roughness_index,    1, binding_point_string_lookup("roughness_metallic_index"));
+    command_list->bind_constant_arguments(&depth_buffer_index, 1, binding_point_string_lookup("depth_buffer_index"));
+
+    // Output texture dimensions
+    u32 output_dimensions[] = {display_width, display_height};
+    command_list->bind_constant_arguments(&output_dimensions, 2, binding_point_string_lookup("output_dimensions"));
+
+    per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
+    DirectX::XMFLOAT3 camera_position; 
+    DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
+    memcpy(&per_frame_data.camera_pos, &camera.eye_position, sizeof(float) * 3);
+
+    // Constant Buffer requires 256 byte alignment
+    Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+    command_list->bind_handle(handle, binding_point_string_lookup("per_frame_data"));
+
+    // Now be bind the texture table to the root signature. 
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+
+    command_list->bind_vertex_buffer(full_screen_quad_vertex_buffer, 0);
+    command_list->bind_index_buffer (full_screen_quad_index_buffer);
+    command_list->draw(6);
+}
+
+
 void D_Renderer::render(){
     {
+
     PROFILED_SCOPE("CPU_FRAME");
 
     // TODO: Rewrite all of this !!!
@@ -686,52 +870,22 @@ void D_Renderer::render(){
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Shadow Map
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    DirectX::XMVECTOR light_position = DirectX::XMVectorSet((-per_frame_data.light_pos[0] * 50), (-per_frame_data.light_pos[1] * 50), (-per_frame_data.light_pos[2] * 50), 1.0);
-    DirectX::XMVECTOR light_direction = DirectX::XMVectorSet((per_frame_data.light_pos[0]), (per_frame_data.light_pos[1]), (per_frame_data.light_pos[2]), 0.0);
-    light_direction = DirectX::XMVector4Normalize(light_direction);
-    DirectX::XMMATRIX light_view_matrix = DirectX::XMMatrixLookToRH(light_position, light_direction, camera.up_direction);
-    DirectX::XMMATRIX light_projection_matrix = DirectX::XMMatrixOrthographicOffCenterRH(-250, 250, -250, 250, -250, 250);
-    DirectX::XMMATRIX light_view_projection_matrix = DirectX::XMMatrixMultiply(light_view_matrix, light_projection_matrix);
-
-    // Fill the command list:
-    command_list->set_shader(shadow_map_shader);
-
-    if(shadow_ds->state != D3D12_RESOURCE_STATE_DEPTH_WRITE){
-        command_list->transition_texture(shadow_ds, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-    }
-    // Set up render targets. Here, we are just using a depth buffer
-    command_list->set_viewport(display.viewport);
-    command_list->set_scissor_rect(display.scissor_rect);
-    command_list->set_render_targets(0, NULL, shadow_ds);
-
-    command_list->clear_depth_stencil(shadow_ds, 1.0f);
-
-    command_list->bind_constant_arguments(&light_view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("light_matrix"));
-
-    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
-    
-    // Transition shadow ds to Pixel Resource State
-    command_list->transition_texture(shadow_ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    render_shadow_map(command_list);
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Physically based shading
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    ////////////////////////////
-    /// Update Camera Matricies
-    ////////////////////////////
-
-    DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
-    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500.0f);
-    DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
-
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     // vickylovesyou!!
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-    // Transition the RT
+    // Transition the RT and DS
     command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_RENDER_TARGET);
 
+    if(ds->state != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+        command_list->transition_texture(ds, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        
     // Clear the render target and depth stencil
     FLOAT rt_clear_color[] = {0.3f, 0.6, 1.0f, 1.0f};
     command_list->clear_render_target(rt[current_backbuffer_index], rt_clear_color);
@@ -739,123 +893,11 @@ void D_Renderer::render(){
 
     if(deferred_rendering == false) {
 
-        //////////////////////////////////////
-        // Forward Shading!
-        //////////////////////////////////////
-        command_list->set_render_targets(1, &rt[current_backbuffer_index], ds);
-
-        command_list->set_shader(pbr_shader);
-        command_list->set_viewport(display.viewport);
-        command_list->set_scissor_rect(display.scissor_rect);
-
-        // Bind Shadow Map
-        per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
-        per_frame_data.light_space_matrix = light_view_projection_matrix;
-        DirectX::XMFLOAT3 camera_position; 
-        DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
-        memcpy(&per_frame_data.camera_pos, &camera.eye_position, sizeof(float) * 3);
-
-        // Constant Buffer requires 256 byte alignment
-        Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
-        command_list->bind_handle(handle, binding_point_string_lookup("per_frame_data"));
-
-        command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
-        command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR),        binding_point_string_lookup("camera_position_buffer"));
-        bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+        forward_render_pass(command_list);
 
     } else {
 
-        //////////////////////////////////////
-        // Defered Shading!
-        //////////////////////////////////////
-
-        // Need to:
-        // Output to new buffers
-
-        ///////////////////////
-        // Geometry Pass
-        ///////////////////////
-
-        // Transition Albedo Buffer
-        if(g_buffer_albedo->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
-            command_list->transition_texture(g_buffer_albedo, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-        // Transition Position Buffer
-        if(g_buffer_position->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
-            command_list->transition_texture(g_buffer_position, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-        if(g_buffer_normal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
-            command_list->transition_texture(g_buffer_normal, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-        if(g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
-            command_list->transition_texture(g_buffer_rough_metal, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        
-        command_list->clear_render_target(g_buffer_albedo);
-
-        Texture* render_targets[] = {g_buffer_albedo, g_buffer_position, g_buffer_normal, g_buffer_rough_metal};
-
-        command_list->set_render_targets(4, render_targets, ds);
-        command_list->set_shader        (deferred_g_buffer_shader);
-        command_list->set_viewport      (display.viewport);
-        command_list->set_scissor_rect  (display.scissor_rect);
-
-        command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
-        command_list->bind_constant_arguments(&camera.eye_position,    sizeof(DirectX::XMVECTOR),     binding_point_string_lookup("camera_position_buffer"));
-
-        bind_and_draw_model(command_list, &renderer.models.ptr[0]);
-
-        ///////////////////////
-        // Shading Pass
-        ///////////////////////
-
-        command_list->set_render_targets(1, &rt[current_backbuffer_index], NULL);
-        command_list->set_viewport      (display.viewport);
-        command_list->set_scissor_rect  (display.scissor_rect);
-        command_list->set_shader        (deferred_shading_shader);
-
-        // Bind Buffers
-        if(g_buffer_albedo->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-            command_list->transition_texture(g_buffer_albedo, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-        if(g_buffer_position->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-            command_list->transition_texture(g_buffer_position, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-        if(g_buffer_normal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-            command_list->transition_texture(g_buffer_normal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-        if(g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-            command_list->transition_texture(g_buffer_rough_metal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-
-        u32 albedo_index    = command_list->bind_texture (g_buffer_albedo,      &resource_manager, binding_point_string_lookup("Albedo Gbuffer"));
-        u32 position_index  = command_list->bind_texture (g_buffer_position,    &resource_manager, binding_point_string_lookup("Position Gbuffer"));
-        u32 normal_index    = command_list->bind_texture (g_buffer_normal,      &resource_manager, binding_point_string_lookup("Normal Gbuffer"));
-        u32 roughness_index = command_list->bind_texture (g_buffer_rough_metal, &resource_manager, binding_point_string_lookup("Roughness and Metallic Gbuffer"));
-
-        command_list->bind_constant_arguments(&albedo_index,    1, binding_point_string_lookup("albedo_index"));
-        command_list->bind_constant_arguments(&position_index,  1, binding_point_string_lookup("position_index"));
-        command_list->bind_constant_arguments(&normal_index,    1, binding_point_string_lookup("normal_index"));
-        command_list->bind_constant_arguments(&roughness_index, 1, binding_point_string_lookup("roughness_metallic_index"));
-
-        // Output texture dimensions
-        u32 output_dimensions[] = {display_width, display_height};
-        command_list->bind_constant_arguments(&output_dimensions, 2, binding_point_string_lookup("output_dimensions"));
-
-        per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
-        per_frame_data.light_space_matrix = light_view_projection_matrix;
-        DirectX::XMFLOAT3 camera_position; 
-        DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
-        memcpy(&per_frame_data.camera_pos, &camera.eye_position, sizeof(float) * 3);
-
-        // Constant Buffer requires 256 byte alignment
-        Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
-        command_list->bind_handle(handle, binding_point_string_lookup("per_frame_data"));
-
-        // Now be bind the texture table to the root signature. 
-        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
-
-        command_list->bind_vertex_buffer(full_screen_quad_vertex_buffer, 0);
-        command_list->bind_index_buffer (full_screen_quad_index_buffer);
-        command_list->draw(6);
+        deferred_render_pass(command_list);
 
     }
 
@@ -869,7 +911,7 @@ void D_Renderer::render(){
     command_list->close();
     execute_command_list(command_list);
 
-    }
+    } // CPU_FRAME profile scope
     present(using_v_sync);
     
 }

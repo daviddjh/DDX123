@@ -340,6 +340,13 @@ Shader* create_deferred_render_shading_shader()
     roughness_metallic_index.number_of_32bit_values = 1;
     shader_desc.parameter_list.push_back(roughness_metallic_index);
 
+    // Depth buffer Index
+    Shader_Desc::Parameter depth_buffer_index;
+    depth_buffer_index.name                   = DSTR(per_frame_arena, "depth_buffer_index");
+    depth_buffer_index.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT;
+    depth_buffer_index.number_of_32bit_values = 1;
+    shader_desc.parameter_list.push_back(depth_buffer_index);
+
     // Deferred Shading Output Dimensions
     Shader_Desc::Parameter output_dimensions;
     output_dimensions.name                   = DSTR(per_frame_arena, "output_dimensions");
