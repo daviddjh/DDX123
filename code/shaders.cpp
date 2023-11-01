@@ -362,6 +362,13 @@ Shader* create_deferred_render_shading_shader()
 
     shader_desc.parameter_list.push_back(per_frame_data);
 
+    // SSAO Sample Kernel
+    Shader_Desc::Parameter ssao_sample_kernel;
+    per_frame_data.name                   = DSTR(per_frame_arena, "ssao_sample_kernel");
+    per_frame_data.usage_type             = Shader_Desc::Parameter::Usage_Type::TYPE_CONSTANT_BUFFER;
+    per_frame_data.number_of_32bit_values = sizeof(float) * 3 * 64;
+    shader_desc.parameter_list.push_back(ssao_sample_kernel);
+
     /////////////////////
     //  Input Layout
     /////////////////////

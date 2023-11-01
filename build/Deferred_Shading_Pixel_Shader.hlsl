@@ -28,6 +28,12 @@ ConstantBuffer<TextureIndex> normal_index:             register(b2);
 ConstantBuffer<TextureIndex> roughness_metallic_index: register(b3);
 ConstantBuffer<TextureIndex> depth_buffer_index:       register(b6);
 
+struct SSAO_Sample_Kernel
+{
+    float3 ssao_sample[64];
+};
+ConstantBuffer<SSAO_Sample_Kernel> ssao_sample_kernel: register(b7);
+
 struct OutputDimensions
 {
     uint width;

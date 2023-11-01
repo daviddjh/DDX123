@@ -7,6 +7,7 @@
 #include "imgui_impl_dx12.h"
 
 #include <chrono>
+#include <random>
 #include "timeapi.h"
 
 #include "d_core.cpp"
@@ -51,7 +52,7 @@ struct D_Renderer {
     Texture*          sampled_texture;
     Buffer*           full_screen_quad_vertex_buffer;
     Buffer*           full_screen_quad_index_buffer;
-    Buffer*           constant_buffer;
+    Buffer*           ssao_sample_kernel;
     Descriptor_Handle imgui_font_handle;
     bool              fullscreen_mode = false;
     RECT              window_rect;
@@ -354,7 +355,7 @@ void D_Renderer::shutdown(){
     }
 
     ds->d_dx12_release();
-    constant_buffer->d_dx12_release();
+    ssao_sample_kernel->d_dx12_release();
 
     // Release model resources
     D_Model* model = &models.ptr[0];
@@ -525,20 +526,42 @@ int D_Renderer::init(){
     upload_model_to_gpu(upload_command_list, test_model);
 
 
-    ///////////////////////
-    //  Constant Buffer
-    ///////////////////////
+    //////////////////////////
+    //  SSAO Constant Buffer
+    //////////////////////////
 
     Buffer_Desc cbuffer_desc = {};
-    cbuffer_desc.number_of_elements = 1;
+    cbuffer_desc.number_of_elements = 64;
     cbuffer_desc.size_of_each_element = sizeof(DirectX::XMFLOAT3);
     cbuffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
 
-    constant_buffer = resource_manager.create_buffer(L"Test Constant Buffer", cbuffer_desc);
+    ssao_sample_kernel = resource_manager.create_buffer(L"Test Constant Buffer", cbuffer_desc);
 
-    DirectX::XMFLOAT3 constant_buffer_data = {1.0, 0.0, 1.0};
+    std::uniform_real_distribution<float> random_floats(0., 1.);
+    std::default_random_engine generator;
+    DirectX::XMFLOAT3 constant_buffer_data [64];
+    for(int i =  0; i < 64; i++){
+        // Get random numbers
+        constant_buffer_data[i].x = (random_floats(generator) * 2) - 1;
+        constant_buffer_data[i].y = (random_floats(generator) * 2) - 1;
+        constant_buffer_data[i].z = random_floats(generator);
 
-    upload_command_list->load_buffer(constant_buffer, (u8*)&constant_buffer_data, sizeof(constant_buffer_data), 32);
+        // Normalize the random numbers
+        float magnitude = sqrtf(constant_buffer_data[i].x * constant_buffer_data[i].x + constant_buffer_data[i].y * constant_buffer_data[i].y + constant_buffer_data[i].z * constant_buffer_data[i].z);
+        constant_buffer_data[i].x = constant_buffer_data[i].x / magnitude;
+        constant_buffer_data[i].y = constant_buffer_data[i].y / magnitude;
+        constant_buffer_data[i].z = constant_buffer_data[i].z / magnitude;
+
+        // Scale the numbers. We want most of them near the center
+        float scale = (float)i/64.0;
+        scale = 0.1 + scale * (1.0 - 0.1);
+        constant_buffer_data[i].x *= scale;
+        constant_buffer_data[i].y *= scale;
+        constant_buffer_data[i].z *= scale;
+
+    }
+
+    upload_command_list->load_buffer(ssao_sample_kernel, (u8*)&constant_buffer_data, sizeof(constant_buffer_data), 32);
 
     ////////////////////////////////////////////////
     // Vertex Buffer for full screen quad
@@ -805,6 +828,10 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     u32 output_dimensions[] = {display_width, display_height};
     command_list->bind_constant_arguments(&output_dimensions, 2, binding_point_string_lookup("output_dimensions"));
 
+    // Bind SSAO Kernel
+    Descriptor_Handle ssao_kernel_handle = command_list->bind_descriptor_handles_to_online_descriptor_heap(ssao_sample_kernel->offline_descriptor_handle, 1);
+    command_list->bind_handle(ssao_kernel_handle, binding_point_string_lookup("ssao_sample_kernel"));
+
     per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
     DirectX::XMFLOAT3 camera_position; 
     DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
@@ -891,6 +918,7 @@ void D_Renderer::render(){
     command_list->clear_render_target(rt[current_backbuffer_index], rt_clear_color);
     command_list->clear_depth_stencil(ds, 1.0f);
 
+    // Either forward rendering or deferred rendering
     if(deferred_rendering == false) {
 
         forward_render_pass(command_list);

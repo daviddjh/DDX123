@@ -1841,9 +1841,10 @@ namespace d_dx12 {
                 // Not sure where to find this, just showed up in an error...
                 // Guess we need to align CB size to 256
                 // Old NVidia requirement?
-                u16 alignment = 256;
-                u32 remainder = total_size % alignment;
-                u32 aligned_total_size = total_size + (alignment - remainder);
+                // u16 alignment = 256;
+                // u32 remainder = total_size % alignment;
+                // u32 aligned_total_size = total_size + (alignment - remainder);
+                u32 aligned_total_size = AlignPow2Up(total_size, 256);
 
                 // Create the resource in the buffer
                 D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);

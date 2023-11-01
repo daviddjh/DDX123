@@ -1,3 +1,7 @@
+10/24/23
+
+Creating a plan for SSAO. Writing it down in OBSIDIAN file.
+
 9/26/2023
 
 Started getting a weird issue when the DX12 window is the main focus. It locks to 60fps???
