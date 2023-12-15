@@ -1,28 +1,7 @@
-struct Per_Frame_Data {
-    float3 light_position;    
-    float3 light_color;
-    int    shadow_texture_index;
-    matrix light_space_matrix;
-};
 
-struct ViewProjection
-{
-    matrix VP;
-};
+#include "common.hlsli"
 
-struct Model
-{
-    matrix M;
-};
-
-struct Light_Space_Matrix_Buffer
-{
-    matrix m;
-};
-
-ConstantBuffer<ViewProjection> view_projection_matrix:  register(b1);
-ConstantBuffer<Model> model_matrix:                     register(b2);
-ConstantBuffer<Per_Frame_Data> per_frame_data:          register(b8);
+ConstantBuffer<_Matrix>    model_matrix : register(b0, VertexSpace);
 
 struct VertexPosColor
 {
@@ -74,15 +53,15 @@ VertexShaderOutput main(Vertex_Position_Normal_Tangent_Color_Texturecoord IN)
     VertexShaderOutput OUT;
 
     // Convert Tangent, Normal vectors to world space:
-    float3 n = normalize((mul(model_matrix.M, float4(IN.Normal.xyz, 0.0))).xyz);
-    float3 t = normalize((mul(model_matrix.M, float4(IN.Tangent.xyz, 0.0))).xyz);
+    float3 n = normalize((mul(model_matrix._matrix, float4(IN.Normal.xyz, 0.0))).xyz);
+    float3 t = normalize((mul(model_matrix._matrix, float4(IN.Tangent.xyz, 0.0))).xyz);
     
     // I think this is right..
-    matrix mvp_matrix     = mul(view_projection_matrix.VP, model_matrix.M);
+    matrix mvp_matrix     = mul(per_frame_data.view_projection_matrix, model_matrix._matrix);
 
     // I think this is right..
     OUT.Position             = mul(mvp_matrix, float4(IN.Position, 1.0));
-    OUT.Frag_Position        = mul(model_matrix.M, float4(IN.Position, 1.0));
+    OUT.Frag_Position        = mul(model_matrix._matrix, float4(IN.Position, 1.0));
     matrix light_space_matrix = per_frame_data.light_space_matrix;
     OUT.Light_Space_Position = mul(per_frame_data.light_space_matrix, OUT.Frag_Position);
     OUT.TextureCoordinate = IN.texCoord;

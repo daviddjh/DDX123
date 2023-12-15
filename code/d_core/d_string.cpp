@@ -16,7 +16,7 @@ namespace d_std {
         return c_str;
     }
 
-    d_string string_from_lit_string(Memory_Arena *arena, const char* lit_string){
+    d_string string_from_lit_string(Memory_Arena *arena, char* lit_string){
 
         d_string string;
         u32 size = 0;
@@ -36,7 +36,7 @@ namespace d_std {
         return string;
     }
 
-    d_string format_lit_string(Memory_Arena *arena, char* lit_string, ...){
+    d_string __cdecl format_lit_string(Memory_Arena *arena, char* lit_string, ...){
 
         // va_list
         u_ptr va_args;
@@ -48,7 +48,7 @@ namespace d_std {
 
     }
 
-    d_string _format_lit_string(Memory_Arena *arena, char* lit_string, u_ptr va_args){
+    d_string __cdecl _format_lit_string(Memory_Arena *arena, char* lit_string, u_ptr va_args){
 
         // it iterates through the original string
         char* it = lit_string;

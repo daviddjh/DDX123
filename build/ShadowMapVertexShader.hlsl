@@ -1,15 +1,8 @@
-struct Light_Matrix_Buffer
-{
-    matrix light_matrix;
-};
 
-struct Model_Matrix_Buffer
-{
-    matrix model_matrix;
-};
+#include "common.hlsli"
 
-ConstantBuffer<Light_Matrix_Buffer> light_matrix: register(b1);
-ConstantBuffer<Model_Matrix_Buffer> model_matrix: register(b2);
+ConstantBuffer<_Matrix> light_matrix : register(b0, VertexSpace);
+ConstantBuffer<_Matrix> model_matrix : register(b1, VertexSpace);
 
 struct Vertex_Position_Normal_Tangent_Color_Texturecoord
 {
@@ -30,8 +23,8 @@ VertexShaderOutput main(Vertex_Position_Normal_Tangent_Color_Texturecoord IN)
     VertexShaderOutput OUT;
 
     // I think this is right..
-    OUT.position          = mul(model_matrix.model_matrix, float4(IN.Position, 1.0));
-    OUT.position          = mul(light_matrix.light_matrix, OUT.position);
+    OUT.position          = mul(model_matrix._matrix, float4(IN.Position, 1.0));
+    OUT.position          = mul(light_matrix._matrix, OUT.position);
 
     return OUT;
 }

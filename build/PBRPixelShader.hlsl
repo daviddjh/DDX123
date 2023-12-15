@@ -18,44 +18,13 @@ Metalic
 Roughness
 
 */
-#define Tex2DSpace space1
-#define MATERIAL_FLAG_NONE                     0x0
-#define MATERIAL_FLAG_NORMAL_TEXTURE           0x1
-#define MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE 0x2
 
-static const float PI = 3.14159265359;
+#include "common.hlsli"
+
 static const float SHADOW_BIAS = 0.002;
 
-SamplerState sampler_1          : register(s0);
-Texture2D texture_2d_table[]    : register(t0, Tex2DSpace);
-
-struct Camera_Position {
-    float3 camera_position;
-};
-ConstantBuffer<Camera_Position> camera_position_buffer: register(b4);
-
-struct Per_Frame_Data {
-    float3 light_position;    
-    float3 light_color;
-    int    shadow_texture_index;
-    matrix light_space_matrix;
-    float3 camera_pos;
-};
-ConstantBuffer<Per_Frame_Data> per_frame_data: register(b8);
-
-struct TextureIndex
-{
-    int i;
-};
-ConstantBuffer<TextureIndex> albedo_index:            register(b5);
-ConstantBuffer<TextureIndex> normal_index:            register(b6);
-ConstantBuffer<TextureIndex> roughness_metallic_index: register(b7);
-
-struct Material_Flags {
-    uint flags;
-};
-
-ConstantBuffer<Material_Flags> material_flags: register(b3);
+ConstantBuffer<Material_Data>        material_data        : register(b0, PixelSpace);
+ConstantBuffer<Shadow_Texture_Index> shadow_texture_index : register(b1, PixelSpace);
 
 struct PixelShaderInput
 {
@@ -165,7 +134,7 @@ float calc_shadow_value(float4 frag_pos_light_space, float2 tex_coords){
             random_number = rand_xorshift(random_number);
             uv += (poissonDisk[random_number % 9] - 0.5) / 800.0;
 
-            float closest_depth = texture_2d_table[per_frame_data.shadow_texture_index].Sample(sampler_1, uv).r;
+            float closest_depth = texture_2d_table[shadow_texture_index.shadow_texture_index].Sample(sampler_1, uv).r;
             shadow += (current_depth - SHADOW_BIAS > closest_depth ? 1.0 : 0.0);
         }
     }
@@ -190,7 +159,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     UV.x = IN.TextureCoordinate.x;
     UV.y = IN.TextureCoordinate.y;
 
-    float4 albedo_texture_color = pow(texture_2d_table[albedo_index.i].Sample(sampler_1, UV), 2.2);
+    float4 albedo_texture_color = pow(texture_2d_table[material_data.albedo_index].Sample(sampler_1, UV), 2.2);
 
     // This is to discard transparent pixels in textures. See: Chains and foliage in GLTF2.0 Sponza
     if (albedo_texture_color.a < 0.5) {
@@ -198,9 +167,9 @@ float4 main(PixelShaderInput IN) : SV_Target {
     }
 
     float3 wNormal;
-    if((material_flags.flags & MATERIAL_FLAG_NORMAL_TEXTURE)){
+    if((material_data.flags & MATERIAL_FLAG_NORMAL_TEXTURE)){
 
-        float3 normal_texture_color = texture_2d_table[normal_index.i].Sample(sampler_1, UV).xyz;
+        float3 normal_texture_color = texture_2d_table[material_data.normal_index].Sample(sampler_1, UV).xyz;
         float3 tNormal = (normal_texture_color * 2.) - 1.;
         wNormal = mul(TBN, tNormal);
 
@@ -212,9 +181,9 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     float roughness;
     float metallic;
-    if((material_flags.flags & MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE)){
+    if((material_data.flags & MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE)){
 
-        float3 rm_texture_color = texture_2d_table[roughness_metallic_index.i].Sample(sampler_1, UV).xyz;
+        float3 rm_texture_color = texture_2d_table[material_data.roughness_metallic_index].Sample(sampler_1, UV).xyz;
         roughness = rm_texture_color.g;
         metallic = rm_texture_color.r;
 
@@ -227,9 +196,9 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     float3 N = normalize(wNormal);
     float3 V = normalize(per_frame_data.camera_pos - IN.Frag_World_Position);
-    float3 light_position = per_frame_data.light_position;
+    float3 light_position  = per_frame_data.light_position;
     float3 light_direction = per_frame_data.light_position;
-    float3 light_color    = per_frame_data.light_color;
+    float3 light_color     = per_frame_data.light_color;
     float3 Lo = float3(0., 0., 0.);
     
     // Approximation of base reflectivity for fresnel

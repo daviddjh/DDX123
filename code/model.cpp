@@ -292,7 +292,6 @@ void load_materials(D_Model& d_model, tg::Model& tg_model){
                 // Store a description of the texture
                 material.albedo_texture.texture_desc.format     = image_format;
                 material.albedo_texture.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
-                material.albedo_texture.texture_desc.pixel_size = image.component * image.bits / 8;
 
                 // Allocate enough room for the raw image data
                 material.albedo_texture.cpu_texture_data.alloc(image.image.size());
@@ -352,7 +351,6 @@ void load_materials(D_Model& d_model, tg::Model& tg_model){
                 // Store a description of the texture
                 material.normal_texture.texture_desc.format     = image_format;
                 material.normal_texture.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
-                material.normal_texture.texture_desc.pixel_size = image.component * image.bits / 8;
 
                 // Allocate enough room for the raw image data
                 material.normal_texture.cpu_texture_data.alloc(image.image.size());
@@ -413,7 +411,6 @@ void load_materials(D_Model& d_model, tg::Model& tg_model){
                     // Store a description of the texture
                     material.roughness_metallic_texture.texture_desc.format     = image_format;
                     material.roughness_metallic_texture.texture_desc.usage      = Texture::USAGE::USAGE_SAMPLED;
-                    material.roughness_metallic_texture.texture_desc.pixel_size = image.component * image.bits / 8;
 
                     // Allocate enough room for the raw image data
                     material.roughness_metallic_texture.cpu_texture_data.alloc(image.image.size());

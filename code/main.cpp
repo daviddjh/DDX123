@@ -14,6 +14,7 @@
 #include "d_dx12.cpp"
 #include "model.cpp"
 #include "shaders.cpp"
+#include "constant_buffers.h"
 
 using namespace d_dx12;
 using namespace d_std;
@@ -29,7 +30,8 @@ struct D_Camera {
     DirectX::XMVECTOR eye_direction;
     DirectX::XMVECTOR up_direction;
     float speed = 1.8;
-    float fov   = 100.;
+    //float fov   = 100.;
+    float fov   = 40.;
 };
 
 // Global Vars, In order of creation
@@ -53,12 +55,15 @@ struct D_Renderer {
     Buffer*           full_screen_quad_vertex_buffer;
     Buffer*           full_screen_quad_index_buffer;
     Buffer*           ssao_sample_kernel;
+    Texture*          ssao_rotation_texture;
     Descriptor_Handle imgui_font_handle;
     bool              fullscreen_mode = false;
     RECT              window_rect;
     Span<D_Model>     models;
     D_Camera          camera;
+
     Per_Frame_Data    per_frame_data;
+
     bool              deferred_rendering = false;
 
     int  init();
@@ -200,7 +205,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
         material.albedo_texture.texture = resource_manager.create_texture(L"Albedo_Texture", material.albedo_texture.texture_desc);
 
         if(material.albedo_texture.cpu_texture_data.ptr){
-            command_list->load_decoded_texture_from_memory(material.albedo_texture.texture, material.albedo_texture.cpu_texture_data, true);
+            command_list->load_decoded_texture_from_memory(material.albedo_texture.texture, (u_ptr)material.albedo_texture.cpu_texture_data.ptr, true);
         }
 
         // Normal Map
@@ -209,7 +214,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
             material.normal_texture.texture = resource_manager.create_texture(L"Normal_Texture", material.normal_texture.texture_desc);
 
             if(material.normal_texture.cpu_texture_data.ptr){
-                command_list->load_decoded_texture_from_memory(material.normal_texture.texture, material.normal_texture.cpu_texture_data, true);
+                command_list->load_decoded_texture_from_memory(material.normal_texture.texture, (u_ptr)material.normal_texture.cpu_texture_data.ptr, true);
             }
         }
 
@@ -219,7 +224,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
             material.roughness_metallic_texture.texture = resource_manager.create_texture(L"RoughnessMetallic_Texture", material.roughness_metallic_texture.texture_desc);
 
             if(material.roughness_metallic_texture.cpu_texture_data.ptr){
-                command_list->load_decoded_texture_from_memory(material.roughness_metallic_texture.texture, material.roughness_metallic_texture.cpu_texture_data, true);
+                command_list->load_decoded_texture_from_memory(material.roughness_metallic_texture.texture, (u_ptr)material.roughness_metallic_texture.cpu_texture_data.ptr, true);
             }
         }
     }
@@ -232,7 +237,9 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
     model_matrix = DirectX::XMMatrixMultiply(scale_matrix, DirectX::XMMatrixIdentity());
     DirectX::XMMATRIX translation_matrix = DirectX::XMMatrixTranslation(model->coords.x, model->coords.y, model->coords.z);
     model_matrix = DirectX::XMMatrixMultiply(translation_matrix, model_matrix);
-    command_list->bind_constant_arguments(&model_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("model_matrix"));
+    //command_list->bind_constant_arguments(&model_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("model_matrix"));
+    Descriptor_Handle model_matrix_handle = resource_manager.load_dyanamic_frame_data((void*)&model_matrix, sizeof(DirectX::XMMATRIX), 256);
+    command_list->bind_handle(model_matrix_handle, binding_point_string_lookup("model_matrix"));
 
     // Begin by initializing each textures binding table index to an invalid value
     for(u64 i = 0; i < model->materials.nitems; i++){
@@ -280,7 +287,7 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
     // Now be bind the texture table to the root signature. ONLY if the shader wants textures
     // If the "texture_2d_table" binding point isn't in the list of availible binding points, we assume the shader doesn't need textures binded
     constexpr u32 tex_2d_table_index = binding_point_string_lookup("texture_2d_table");
-    if(command_list->current_bound_shader->binding_points[tex_2d_table_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
+    if(command_list->current_bound_shader->binding_points[tex_2d_table_index].input_type != Shader::Input_Type::TYPE_INVALID){
         command_list->bind_online_descriptor_heap_texture_table(&resource_manager, tex_2d_table_index);
     }
 
@@ -297,35 +304,30 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             D_Draw_Call draw_call = mesh->draw_calls.ptr[j];
 
             D_Material material = model->materials.ptr[draw_call.material_index];
-            constexpr u32 material_flags_index = binding_point_string_lookup("material_flags");
-            if(command_list->current_bound_shader->binding_points[material_flags_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
-                command_list->bind_constant_arguments(&material.material_flags, 1, material_flags_index);
-            }
 
-            // Pass the index of the albedo texture in the texture table to the shader
-            constexpr u32 albedo_index_index = binding_point_string_lookup("albedo_index");
-            if(command_list->current_bound_shader->binding_points[albedo_index_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
-                command_list->bind_constant_arguments(&material.albedo_texture.texture_binding_table_index, 1, albedo_index_index);
-            }
 
-            if(material.material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
+            constexpr u32 material_data_index = binding_point_string_lookup("material_data");
+            if(command_list->current_bound_shader->binding_points[material_data_index].input_type != Shader::Input_Type::TYPE_INVALID){
 
-                // Pass the index of the normal texture in the texture table to the shader
-                constexpr u32 normal_index_index = binding_point_string_lookup("normal_index");
-                if(command_list->current_bound_shader->binding_points[normal_index_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
-                    command_list->bind_constant_arguments(&material.normal_texture.texture_binding_table_index, 1, normal_index_index);
-                }
+                // Set values for material data cbuffer
 
-            }
+                Material_Data material_data_for_shader = {};
 
-            if(material.material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE){
+                material_data_for_shader.albedo_index             = material.albedo_texture.texture_binding_table_index;
+                material_data_for_shader.flags                    = material.material_flags;
 
-                // Pass the index of the normal texture in the texture table to the shader
-                constexpr u32 roughness_metallic_index_index = binding_point_string_lookup("roughness_metallic_index");
-                if(command_list->current_bound_shader->binding_points[roughness_metallic_index_index].usage_type != Shader_Desc::Parameter::Usage_Type::TYPE_INVALID){
-                    command_list->bind_constant_arguments(&material.roughness_metallic_texture.texture_binding_table_index, 1, roughness_metallic_index_index);
-                }
+                if(material.material_flags & MATERIAL_FLAG_NORMAL_TEXTURE)
+                    material_data_for_shader.normal_index             = material.normal_texture.texture_binding_table_index;
 
+                if(material.material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE)
+                    material_data_for_shader.roughness_metallic_index = material.roughness_metallic_texture.texture_binding_table_index;
+
+
+                // Upload and bind buffer
+
+                Descriptor_Handle material_data_handle = resource_manager.load_dyanamic_frame_data((void*)&material_data_for_shader, sizeof(Material_Data), 256);
+                command_list->bind_handle(material_data_handle, binding_point_string_lookup("material_data"));
+                
             }
 
             command_list->draw_indexed(draw_call.index_count, draw_call.index_offset, draw_call.vertex_offset);
@@ -530,38 +532,67 @@ int D_Renderer::init(){
     //  SSAO Constant Buffer
     //////////////////////////
 
-    Buffer_Desc cbuffer_desc = {};
-    cbuffer_desc.number_of_elements = 64;
-    cbuffer_desc.size_of_each_element = sizeof(DirectX::XMFLOAT3);
-    cbuffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+    Buffer_Desc ssao_sample_kernel_desc = {};
+    ssao_sample_kernel_desc.number_of_elements = 64;
+    ssao_sample_kernel_desc.size_of_each_element = sizeof(DirectX::XMFLOAT4);
+    ssao_sample_kernel_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
 
-    ssao_sample_kernel = resource_manager.create_buffer(L"Test Constant Buffer", cbuffer_desc);
+    ssao_sample_kernel = resource_manager.create_buffer(L"Test Constant Buffer", ssao_sample_kernel_desc);
 
     std::uniform_real_distribution<float> random_floats(0., 1.);
     std::default_random_engine generator;
-    DirectX::XMFLOAT3 constant_buffer_data [64];
+
+    SSAO_Sample ssao_sample = {};
+    DirectX::XMFLOAT4(&ssao_sample_kernel_data)[64] = ssao_sample.ssao_sample;
+
     for(int i =  0; i < 64; i++){
         // Get random numbers
-        constant_buffer_data[i].x = (random_floats(generator) * 2) - 1;
-        constant_buffer_data[i].y = (random_floats(generator) * 2) - 1;
-        constant_buffer_data[i].z = random_floats(generator);
+        ssao_sample_kernel_data[i].x = (random_floats(generator) * 2) - 1;
+        ssao_sample_kernel_data[i].y = (random_floats(generator) * 2) - 1;
+        ssao_sample_kernel_data[i].z = random_floats(generator);
 
         // Normalize the random numbers
-        float magnitude = sqrtf(constant_buffer_data[i].x * constant_buffer_data[i].x + constant_buffer_data[i].y * constant_buffer_data[i].y + constant_buffer_data[i].z * constant_buffer_data[i].z);
-        constant_buffer_data[i].x = constant_buffer_data[i].x / magnitude;
-        constant_buffer_data[i].y = constant_buffer_data[i].y / magnitude;
-        constant_buffer_data[i].z = constant_buffer_data[i].z / magnitude;
+        float magnitude = sqrtf(ssao_sample_kernel_data[i].x * ssao_sample_kernel_data[i].x + ssao_sample_kernel_data[i].y * ssao_sample_kernel_data[i].y + ssao_sample_kernel_data[i].z * ssao_sample_kernel_data[i].z);
+        ssao_sample_kernel_data[i].x = ssao_sample_kernel_data[i].x / magnitude;
+        ssao_sample_kernel_data[i].y = ssao_sample_kernel_data[i].y / magnitude;
+        ssao_sample_kernel_data[i].z = ssao_sample_kernel_data[i].z / magnitude;
 
         // Scale the numbers. We want most of them near the center
         float scale = (float)i/64.0;
-        scale = 0.1 + scale * (1.0 - 0.1);
-        constant_buffer_data[i].x *= scale;
-        constant_buffer_data[i].y *= scale;
-        constant_buffer_data[i].z *= scale;
+        scale = 0.1 + scale * (1.0 - 0.1); // lerp
+        ssao_sample_kernel_data[i].x *= scale;
+        ssao_sample_kernel_data[i].y *= scale;
+        ssao_sample_kernel_data[i].z *= scale;
+
+        d_std::os_debug_printf(per_frame_arena, "ssao_sample kernel index: %u, x: %f, y: %f, z: %f\n", i, ssao_sample_kernel_data[i].x, ssao_sample_kernel_data[i].y, ssao_sample_kernel_data[i].z);
 
     }
 
-    upload_command_list->load_buffer(ssao_sample_kernel, (u8*)&constant_buffer_data, sizeof(constant_buffer_data), 32);
+    upload_command_list->load_buffer(ssao_sample_kernel, (u8*)&ssao_sample, sizeof(SSAO_Sample), 32);
+
+    ////////////////////////////
+    //  SSAO Rotation Texture
+    ////////////////////////////
+    Texture_Desc ssao_rotation_texture_desc = { };
+    ssao_rotation_texture_desc.format = DXGI_FORMAT_R32G32B32_FLOAT;  // 3 32bit floats (x, y, z)
+    ssao_rotation_texture_desc.height = 4;
+    ssao_rotation_texture_desc.width  = 4;
+    ssao_rotation_texture_desc.name = L"SSAO Rotation Texture";
+    ssao_rotation_texture_desc.usage = Texture::USAGE::USAGE_SAMPLED;
+
+    ssao_rotation_texture = resource_manager.create_texture(L"SSAO_Rotation Texture", ssao_rotation_texture_desc);
+
+    Span<DirectX::XMFLOAT3> ssao_rotation_texture_data;
+    ssao_rotation_texture_data.alloc(16);
+    DirectX::XMFLOAT3* rotation_data_ptr = ssao_rotation_texture_data.ptr;
+
+    for(int i = 0; i < 16; i++){
+        rotation_data_ptr[i].x = (random_floats(generator) * 2) - 1;
+        rotation_data_ptr[i].y = (random_floats(generator) * 2) - 1;
+        rotation_data_ptr[i].z = 0.0;
+    }
+    
+    upload_command_list->load_decoded_texture_from_memory(ssao_rotation_texture, (u_ptr)ssao_rotation_texture_data.ptr, false);
 
     ////////////////////////////////////////////////
     // Vertex Buffer for full screen quad
@@ -624,6 +655,12 @@ int D_Renderer::init(){
     camera.eye_position  = DirectX::XMVectorSet(0., 5., 0., 0.);
     camera.up_direction  = DirectX::XMVectorSet(0., 1., 0., 0.);
 
+    ///////////////////////
+    //  Light
+    ///////////////////////
+
+    per_frame_data.light_position = {0., -2., -1., 0.};
+    per_frame_data.light_color    = {20., 20., 20., 0.};
 
     ///////////////////////
     //  DearIMGUI
@@ -671,8 +708,8 @@ void D_Renderer::render_shadow_map(Command_List* command_list){
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Shadow Map
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    DirectX::XMVECTOR light_position = DirectX::XMVectorSet((-per_frame_data.light_pos[0] * 50), (-per_frame_data.light_pos[1] * 50), (-per_frame_data.light_pos[2] * 50), 1.0);
-    DirectX::XMVECTOR light_direction = DirectX::XMVectorSet((per_frame_data.light_pos[0]), (per_frame_data.light_pos[1]), (per_frame_data.light_pos[2]), 0.0);
+    DirectX::XMVECTOR light_position = DirectX::XMVectorSet((-per_frame_data.light_position.x * 50), (-per_frame_data.light_position.y * 50), (-per_frame_data.light_position.z * 50), 1.0);
+    DirectX::XMVECTOR light_direction = DirectX::XMVectorSet((per_frame_data.light_position.x), (per_frame_data.light_position.y), (per_frame_data.light_position.z), 0.0);
     light_direction = DirectX::XMVector4Normalize(light_direction);
     DirectX::XMMATRIX light_view_matrix = DirectX::XMMatrixLookToRH(light_position, light_direction, camera.up_direction);
     DirectX::XMMATRIX light_projection_matrix = DirectX::XMMatrixOrthographicOffCenterRH(-250, 250, -250, 250, -5000, 5000);
@@ -694,7 +731,9 @@ void D_Renderer::render_shadow_map(Command_List* command_list){
 
     command_list->clear_depth_stencil(shadow_ds, 1.0f);
 
-    command_list->bind_constant_arguments(&light_view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("light_matrix"));
+    //command_list->bind_constant_arguments(&light_view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("light_matrix"));
+    Descriptor_Handle light_matrix_handle = resource_manager.load_dyanamic_frame_data((void*)&light_view_projection_matrix, sizeof(DirectX::XMMATRIX), 256);
+    command_list->bind_handle(light_matrix_handle, binding_point_string_lookup("light_matrix"));
 
     bind_and_draw_model(command_list, &renderer.models.ptr[0]);
     
@@ -706,14 +745,6 @@ void D_Renderer::render_shadow_map(Command_List* command_list){
 
 void D_Renderer::forward_render_pass(Command_List* command_list){
 
-    ////////////////////////////
-    /// Update Camera Matricies
-    ////////////////////////////
-
-    DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
-    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500000000.0f);
-    DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
-
     //////////////////////////////////////
     // Forward Shading!
     //////////////////////////////////////
@@ -724,36 +755,25 @@ void D_Renderer::forward_render_pass(Command_List* command_list){
     command_list->set_scissor_rect(display.scissor_rect);
 
     // Bind Shadow Map
-    per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
-    DirectX::XMFLOAT3 camera_position; 
-    DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
-    memcpy(&per_frame_data.camera_pos, &camera.eye_position, sizeof(float) * 3);
+    Shadow_Texture_Index shadow_texture_index = {};
+    shadow_texture_index.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
 
-    // Constant Buffer requires 256 byte alignment
-    Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
-    command_list->bind_handle(handle, binding_point_string_lookup("per_frame_data"));
+    // Upload Shadow_Map_Index - Constant Buffer requires 256 byte alignment
+    Descriptor_Handle shadow_map_index_handle = resource_manager.load_dyanamic_frame_data((void*)&shadow_texture_index, sizeof(Shadow_Texture_Index), 256);
+    command_list->bind_handle(shadow_map_index_handle, binding_point_string_lookup("shadow_texture_index"));
 
-    command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
-    command_list->bind_constant_arguments(&camera.eye_position, sizeof(DirectX::XMVECTOR),        binding_point_string_lookup("camera_position_buffer"));
+    // Upload per_frame_data - Constant Buffer requires 256 byte alignment
+    Descriptor_Handle per_frame_data_handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+    command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
+
     bind_and_draw_model(command_list, &renderer.models.ptr[0]);
 }
 
 void D_Renderer::deferred_render_pass(Command_List* command_list){
 
-    ////////////////////////////
-    /// Update Camera Matricies
-    ////////////////////////////
-
-    DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
-    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500000000.0f);
-    DirectX::XMMATRIX view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
-
     //////////////////////////////////////
     // Defered Shading!
     //////////////////////////////////////
-
-    // Need to:
-    // Output to new buffers
 
     ///////////////////////
     // Geometry Pass
@@ -782,8 +802,11 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     command_list->set_viewport      (display.viewport);
     command_list->set_scissor_rect  (display.scissor_rect);
 
-    command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
-    command_list->bind_constant_arguments(&camera.eye_position,    sizeof(DirectX::XMVECTOR),     binding_point_string_lookup("camera_position_buffer"));
+    Descriptor_Handle per_frame_data_handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+    command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
+
+    // command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
+    // command_list->bind_constant_arguments(&camera.eye_position,    sizeof(DirectX::XMVECTOR),     binding_point_string_lookup("camera_position_buffer"));
 
     bind_and_draw_model(command_list, &renderer.models.ptr[0]);
 
@@ -812,34 +835,40 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     if(ds->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
         command_list->transition_texture(ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    u32 albedo_index       = command_list->bind_texture (g_buffer_albedo,      &resource_manager, binding_point_string_lookup("Albedo Gbuffer"));
-    u32 position_index     = command_list->bind_texture (g_buffer_position,    &resource_manager, binding_point_string_lookup("Position Gbuffer"));
-    u32 normal_index       = command_list->bind_texture (g_buffer_normal,      &resource_manager, binding_point_string_lookup("Normal Gbuffer"));
-    u32 roughness_index    = command_list->bind_texture (g_buffer_rough_metal, &resource_manager, binding_point_string_lookup("Roughness and Metallic Gbuffer"));
-    u32 depth_buffer_index = command_list->bind_texture (ds,                   &resource_manager, 0);
+    // Bind GBuffer Textures (and indices)
+    Gbuffer_Indices gbuffer_indices          = {};
+    gbuffer_indices.albedo_index             = command_list->bind_texture (g_buffer_albedo,       &resource_manager, binding_point_string_lookup("Albedo Gbuffer"));
+    gbuffer_indices.position_index           = command_list->bind_texture (g_buffer_position,     &resource_manager, binding_point_string_lookup("Position Gbuffer"));
+    gbuffer_indices.normal_index             = command_list->bind_texture (g_buffer_normal,       &resource_manager, binding_point_string_lookup("Normal Gbuffer"));
+    gbuffer_indices.roughness_metallic_index = command_list->bind_texture (g_buffer_rough_metal,  &resource_manager, binding_point_string_lookup("Roughness and Metallic Gbuffer"));
 
-    command_list->bind_constant_arguments(&albedo_index,       1, binding_point_string_lookup("albedo_index"));
-    command_list->bind_constant_arguments(&position_index,     1, binding_point_string_lookup("position_index"));
-    command_list->bind_constant_arguments(&normal_index,       1, binding_point_string_lookup("normal_index"));
-    command_list->bind_constant_arguments(&roughness_index,    1, binding_point_string_lookup("roughness_metallic_index"));
-    command_list->bind_constant_arguments(&depth_buffer_index, 1, binding_point_string_lookup("depth_buffer_index"));
+    Descriptor_Handle gbuffer_indices_handle = resource_manager.load_dyanamic_frame_data((void*)&gbuffer_indices, sizeof(Gbuffer_Indices), 256);
+    command_list->bind_handle(gbuffer_indices_handle, binding_point_string_lookup("gbuffer_indices"));
+    
+    // Bind SSAO Texture (and index)
+    SSAO_Texture_Index ssao_texture_index          = {};
+    ssao_texture_index.ssao_rotation_texture_index = command_list->bind_texture (ssao_rotation_texture, &resource_manager, 0);
 
-    // Output texture dimensions
-    u32 output_dimensions[] = {display_width, display_height};
-    command_list->bind_constant_arguments(&output_dimensions, 2, binding_point_string_lookup("output_dimensions"));
+    Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(SSAO_Texture_Index), 256);
+    command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
+
+    // Bind output texture dimensions
+    Output_Dimensions output_dimensions = {display_width, display_height};
+    Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+    command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
 
     // Bind SSAO Kernel
-    Descriptor_Handle ssao_kernel_handle = command_list->bind_descriptor_handles_to_online_descriptor_heap(ssao_sample_kernel->offline_descriptor_handle, 1);
-    command_list->bind_handle(ssao_kernel_handle, binding_point_string_lookup("ssao_sample_kernel"));
+    command_list->bind_buffer(ssao_sample_kernel, &resource_manager, binding_point_string_lookup("ssao_sample"));
 
-    per_frame_data.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
-    DirectX::XMFLOAT3 camera_position; 
-    DirectX::XMStoreFloat3(&camera_position, camera.eye_position);
-    memcpy(&per_frame_data.camera_pos, &camera.eye_position, sizeof(float) * 3);
+    // Bind Shadow Map and upload Shadow_Map_Index - Constant Buffer requires 256 byte alignment
+    Shadow_Texture_Index shadow_texture_index = {};
+    shadow_texture_index.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
 
-    // Constant Buffer requires 256 byte alignment
-    Descriptor_Handle handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
-    command_list->bind_handle(handle, binding_point_string_lookup("per_frame_data"));
+    Descriptor_Handle shadow_map_index_handle = resource_manager.load_dyanamic_frame_data((void*)&shadow_texture_index, sizeof(Shadow_Texture_Index), 256);
+    command_list->bind_handle(shadow_map_index_handle, binding_point_string_lookup("shadow_texture_index"));
+
+    // Bind per_frame_data - Constant Buffer requires 256 byte alignment
+    command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
 
     // Now be bind the texture table to the root signature. 
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
@@ -884,15 +913,14 @@ void D_Renderer::render(){
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    // Create IMGUI window
-    ImGui::Begin("Info");
-    ImGui::Text("FPS: %.3lf", fps);
-    ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
-    ImGui::SliderFloat3("Light Position", (this->per_frame_data.light_pos), -10., 10);
-    ImGui::DragFloat3("Light Color", (this->per_frame_data.light_color));
-    ImGui::Checkbox("Deferred Shading?", &deferred_rendering);
-    ImGui::End();
-    ImGui::Render();
+    ////////////////////////////
+    /// Update Camera Matricies
+    ////////////////////////////
+
+    DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
+    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500000000.0f);
+    per_frame_data.view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
+    DirectX::XMStoreFloat4(&per_frame_data.camera_pos, camera.eye_position);
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Shadow Map
@@ -928,6 +956,21 @@ void D_Renderer::render(){
         deferred_render_pass(command_list);
 
     }
+
+    // Create IMGUI window
+    ImGui::Begin("Info");
+    ImGui::Text("FPS: %.3lf", fps);
+    ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
+    ImGui::SliderFloat3("Light Position", &this->per_frame_data.light_position.x, -10., 10);
+    ImGui::DragFloat3("Light Color", &this->per_frame_data.light_color.x);
+    ImGui::Checkbox("Deferred Shading?", &deferred_rendering);
+    // Render a texture
+    //u16 shadow_map_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
+    u32 ssao_rotation_index = command_list->bind_texture (ssao_rotation_texture, &resource_manager, 0);
+    float render_ratio = 1920. / 1080.;
+    ImGui::Image((ImTextureID)resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(ssao_rotation_index).gpu_descriptor_handle.ptr, ImVec2(200.*render_ratio, 200.));
+    ImGui::End();
+    ImGui::Render();
 
     // Render ImGui on top of everything
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());

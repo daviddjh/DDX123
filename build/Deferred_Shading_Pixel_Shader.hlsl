@@ -5,56 +5,25 @@
 *
 */
 
-#define Tex2DSpace space1
-#define MATERIAL_FLAG_NONE                     0x0
-#define MATERIAL_FLAG_NORMAL_TEXTURE           0x1
-#define MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE 0x2
+// common defines, sampler_1, texture_2d_table, per_frame_data
+#include "common.hlsli"
 
-static const float PI = 3.14159265359;
-static const float SHADOW_BIAS = 0.002;
+static const float SHADOW_BIAS = 0.00010;
+static const int   SSAO_KERNEL_SIZE = 64;
+static const float SSAO_RADIUS = 2.5;
+static const float SSAO_BIAS = 0.25;
 
-// Our texture sampler and texture table
-SamplerState sampler_1          : register(s0);
-Texture2D    texture_2d_table[] : register(t0, Tex2DSpace);
-
-// Constant buffers contianing the texture indicies for the GBuffer
-struct TextureIndex
-{
-    int i;
-};
-ConstantBuffer<TextureIndex> albedo_index:             register(b0);
-ConstantBuffer<TextureIndex> position_index:           register(b1);
-ConstantBuffer<TextureIndex> normal_index:             register(b2);
-ConstantBuffer<TextureIndex> roughness_metallic_index: register(b3);
-ConstantBuffer<TextureIndex> depth_buffer_index:       register(b6);
-
-struct SSAO_Sample_Kernel
-{
-    float3 ssao_sample[64];
-};
-ConstantBuffer<SSAO_Sample_Kernel> ssao_sample_kernel: register(b7);
-
-struct OutputDimensions
-{
-    uint width;
-    uint height;
-};
-ConstantBuffer<OutputDimensions> output_dimensions: register(b4);
-
-struct Per_Frame_Data {
-    float3 light_position;    
-    float3 light_color;
-    int    shadow_texture_index;
-    matrix light_space_matrix;
-    float3 camera_pos;
-};
-ConstantBuffer<Per_Frame_Data> per_frame_data: register(b5);
+// Constant buffer contianing the texture indicies for the GBuffer
+ConstantBuffer<Gbuffer_Indices>      gbuffer_indices      : register(b0, PixelSpace);
+ConstantBuffer<SSAO_Sample>          ssao_sample          : register(b1, PixelSpace);
+ConstantBuffer<SSAO_Texture_Index>   ssao_texture_index   : register(b2, PixelSpace);
+ConstantBuffer<Shadow_Texture_Index> shadow_texture_index : register(b3, PixelSpace);
+ConstantBuffer<Output_Dimensions>    output_dimensions    : register(b4, PixelSpace);
 
 struct PixelShaderInput
 {
     float4 Position            : SV_Position;
 };
-
 
 static float2 poissonDisk[9] = {
     float2(0.526, 0.786),
@@ -137,29 +106,37 @@ float calc_shadow_value(float4 frag_pos_light_space, float2 tex_coords){
     float current_depth = proj_coords.z;
     proj_coords = proj_coords * 0.5 + 0.5;
 
-    float x_offset = 1./1920.;
-    float y_offset = 1./1080.;
+    float x_offset = 1./output_dimensions.width;
+    float y_offset = 1./output_dimensions.height;
 
     float shadow = 0.0;
 
-    uint random_number = asuint(tex_coords.x + tex_coords.y);
 
+    // Multi Sample Shadow Blur (Reduces performance due to texture reads, doesn't look very good..)
+    uint random_number = asuint((tex_coords.x + tex_coords.y) % 64);
     // NOTE: UV.. V is inverted when coming from light space coords
-    for(float y=-1.;y<=1.;y++){
-        for(float x=-1.;x<=1.;x++){
+    const float size = 3;
+    for(float y=-size;y<=size;y++){
+        for(float x=-size;x<=size;x++){
             float2 uv = float2(proj_coords.x + (x*x_offset), 1 - proj_coords.y + (y*y_offset));
 
             //int poisson_index = (tex_coords.x * (x + 5) + tex_coords.y * (y + 4)) % 9;
 
             random_number = rand_xorshift(random_number);
-            uv += (poissonDisk[random_number % 9] - 0.5) / 800.0;
+            uv += (ssao_sample.ssao_sample[random_number % 64].rg - 0.5) / 1000.0;
+            // uv += (poissonDisk[random_number % 9] - 0.5) / 800.0;
 
-            float closest_depth = texture_2d_table[per_frame_data.shadow_texture_index].Sample(sampler_1, uv).r;
-            shadow += (current_depth - SHADOW_BIAS > closest_depth ? 1.0 : 0.0);
+            float closest_depth = texture_2d_table[shadow_texture_index.shadow_texture_index].Sample(sampler_1, uv).r;
+            shadow += (current_depth - SHADOW_BIAS > closest_depth ? (1/(abs(y)+1))+(1/(abs(x)+1)) : 0.);
         }
     }
+    shadow /= 44.333;
+    //shadow /= 25;
 
-    shadow /= 9.;
+    // float2 uv = float2(proj_coords.x, 1 - proj_coords.y);
+    // float closest_depth = texture_2d_table[shadow_texture_index.shadow_texture_index].Sample(sampler_1, uv).r;
+    // shadow += (current_depth - SHADOW_BIAS > closest_depth ? 1.0 : 0.);
+
     return shadow;
 }
 
@@ -170,7 +147,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     ////////////////////////
     float2 UV = float2((IN.Position.x / output_dimensions.width), (IN.Position.y / output_dimensions.height));
 
-    float4 albedo_texture_color = texture_2d_table[albedo_index.i].Sample(
+    float4 albedo_texture_color = texture_2d_table[gbuffer_indices.albedo_index].Sample(
         sampler_1,
         UV
     );
@@ -178,28 +155,23 @@ float4 main(PixelShaderInput IN) : SV_Target {
         discard;
     }
 
-    float4 w_position = texture_2d_table[position_index.i].Sample(
+    float4 w_position = texture_2d_table[gbuffer_indices.position_index].Sample(
         sampler_1,
         UV
     );
     w_position.w = 1.;
 
-    float4 w_normal= texture_2d_table[normal_index.i].Sample(
+    float4 w_normal= texture_2d_table[gbuffer_indices.normal_index].Sample(
         sampler_1,
         UV
     );
 
-    float4 roughness_metallic = texture_2d_table[roughness_metallic_index.i].Sample(
+    float4 roughness_metallic = texture_2d_table[gbuffer_indices.roughness_metallic_index].Sample(
         sampler_1,
         UV
     );
     float roughness = roughness_metallic.g;
     float metallic  = roughness_metallic.r;
-
-    float depth = texture_2d_table[depth_buffer_index.i].Sample(
-        sampler_1,
-        UV
-    );
 
     // Calculate shading
 
@@ -251,58 +223,44 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     // Calculate SSAO
     
-    
-    float ambient_constant = 0.06;
+    // Scales the noise to our screen size, so the noise can wrap an repeat
+    float2 noise_scale = float2(output_dimensions.width / 4., output_dimensions.height / 4.0);
+    float3 random_vector = texture_2d_table[ssao_texture_index.ssao_rotation_texture_index].Sample(sampler_1, UV * noise_scale);
 
-    float current_pixel_depth = texture_2d_table[depth_buffer_index.i].Sample(
-        sampler_1,
-        UV
-    );
+    // create our TBN matrix from our random vector an our normal
+    float3 tangent = normalize(random_vector - N * dot(random_vector, N));
+    float3 bitangent = cross(N, tangent);
+    float3x3 TBN = float3x3(tangent, bitangent, N);
+    TBN = transpose(TBN);
 
-    float ao_factor = 0;
 
-    // Loop over x values
-    for(float j = -3; j <= 3; j++){
-
-        // Loop over y values
-        for(float k = -3; k <= 3; k++){
-
-            if(k == 0 && j == 0) continue;
-
-            float2 ao_uv = float2(((IN.Position.x + j) / output_dimensions.width), ((IN.Position.y + k) / output_dimensions.height));
-            float neighbour_depth = texture_2d_table[depth_buffer_index.i].Sample(
-                sampler_1,
-                ao_uv
-            );
-
-            if(neighbour_depth > current_pixel_depth && ((neighbour_depth - current_pixel_depth) < 0.00006)){
-                ao_factor += 1;
-            }
-        }
+    // Sample points with SSAO_RADIUS hemisphere and check if they're occluded. If so, add to occlusion variable3
+    float occlusion = 0;
+    float3 sample_position = float3(0, 0, 0);
+    float4 offset = float4(1,1,1,1.0);
+    float sample_depth = 0;
+    for(int k = 0; k < SSAO_KERNEL_SIZE; k++){
+        sample_position = mul(TBN, ssao_sample.ssao_sample[k].xyz);
+        sample_position = w_position.xyz + sample_position * SSAO_RADIUS;
+        offset = float4(sample_position, 1.0);
+        offset = mul(per_frame_data.view_projection_matrix, offset);
+        offset.xyz /= offset.w;
+        offset.xyz = offset.xyz * 0.5 + 0.5;
+        sample_depth = distance(per_frame_data.camera_pos, texture_2d_table[gbuffer_indices.position_index].Sample(sampler_1, float2(offset.x, 1-offset.y)).xyz);
+        float range_check = smoothstep(0.0, 1.0, SSAO_RADIUS / abs(distance(per_frame_data.camera_pos, w_position.xyz) - sample_depth));
+        //float range_check = 1.0;
+        occlusion += (sample_depth <= (distance(per_frame_data.camera_pos, sample_position.xyz) + SSAO_BIAS) ? 1.0 : 0.0) * range_check;
     }
-    ambient_constant = (ao_factor / 8.0) * ambient_constant;
-    float3 ambient = float3(ambient_constant, ambient_constant, ambient_constant);
+
+    occlusion = pow(1 - (occlusion / SSAO_KERNEL_SIZE),2);
+    float3 ambient = float3(0.06, 0.06, 0.06);
+    ambient += (occlusion/10.);
 
     ambient = ambient * albedo_texture_color.rgb;
     matrix light_space_matrix = per_frame_data.light_space_matrix;
     float4 frag_pos_light_space = mul(light_space_matrix, w_position);
     float shadow = calc_shadow_value(frag_pos_light_space, float2(w_position.x * w_normal.z, albedo_texture_color.g * w_normal.x));
     float3 color = ambient + (1.0 - shadow) * Lo;
-
-    #if 0
-    if(shadow == 0.){
-        color = ambient + (1.0 - shadow) * Lo;
-    } else {
-        color = ambient + Lo;
-        shadow = (shadow - 0.999) / 0.001;
-        color.r += shadow * 10;
-        color.g *= 0.01;
-        color.b *= 0.01;
-    }
-    #endif
-
-    //float3 color = ambient * Lo;
-    //float3 color = ambient;
 	
     color = color / (color + float3(1.0, 1.0, 1.0));
     color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  

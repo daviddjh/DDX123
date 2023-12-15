@@ -15,6 +15,7 @@ struct Vertex_Position {
     DirectX::XMFLOAT3 position;
 };
 
+/*
 struct Per_Frame_Data {
     float light_pos[3] = {0., -2., -1.};    
     float padding = 0.;
@@ -22,4 +23,6 @@ struct Per_Frame_Data {
     int   shadow_texture_index = 0;
     DirectX::XMMATRIX light_space_matrix;
     float camera_pos[3] = {0., 0., 0.};
+    DirectX::XMMATRIX view_projection_matrix;
 };
+*/

@@ -11,6 +11,13 @@ To Build:
   - `build.bat -d`   - Debug build (Default)
   - `build.bat -ods` - Release build with debug symbols
 
+## Added SSAO - 12/15/23
+
+Followed an implementation from https://learnopengl.com/Advanced-Lighting/SSAO \
+Runs inline with deferred light shading.
+
+![SSAO](pics/SSAO.png) 
+
 ## Lowered CPU frame time from 146µs to 77µs - 9/28/23
 
 This started by wanting to remove stdlib `map` calls during runtime.

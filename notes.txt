@@ -1,3 +1,30 @@
+11/8/23
+
+Many updates! Been writing in obsidian noteboot.
+
+1. Added SSAO! From an implementation on https://learnopengl.com/Advanced-Lighting/SSAO
+- Uploading random data in constant buffer and texture for better sampling
+- Reduced performance heavily. Probably due to GBuffer texture reads an misses? Performance goes down when SSAO radius goes up.
+- Want to move to a compute shader and see what happens!
+- Want to invesigate how to improve performance. (GBufffer optimization, Mipmapping??)
+
+2. ReVamped Shader parameters! No longer need to specify perameters when creating a shader.
+
+3. Added shader / cpp interop! Constant buffer data structures are defined once for cpp and hlsl.
+
+Next TODO:
+
+Get Compute shaders working. Start with some post processing, move SSAO to there, eventually SSR.
+Maybe do Environment maps?
+Find out why SSAO is so low performance.
+Improve editor!! - Want to select and view textures in ImGui (I already have this, but the texture is defined in cpp, can't be selected)
+Change shader compilation. Want to improve shader workflow: Remove from build directory, compile to DXIL during build, hot shader reload.
+
+11/8/23
+
+Got constant buffer upload working! Loading a buffer of random values to the pixel shader for SSAO.
+Need to document problems I saw and how I should go about fixing them.
+
 10/24/23
 
 Creating a plan for SSAO. Writing it down in OBSIDIAN file.

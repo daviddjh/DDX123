@@ -1,15 +1,7 @@
-struct ViewProjection
-{
-    matrix VP;
-};
 
-struct Model
-{
-    matrix M;
-};
+#include "common.hlsli"
 
-ConstantBuffer<ViewProjection> view_projection_matrix : register(b1);
-ConstantBuffer<Model>          model_matrix           : register(b2);
+ConstantBuffer<_Matrix>        model_matrix           : register(b1, VertexSpace);
 
 struct VertexShaderOutput
 {
@@ -34,13 +26,13 @@ VertexShaderOutput main(Vertex_Position_Normal_Tangent_Color_Texturecoord IN)
     VertexShaderOutput OUT;
 
     // Convert Tangent, Normal vectors to world space:
-    float3 n = normalize((mul(model_matrix.M, float4(IN.Normal.xyz, 0.0))).xyz);
-    float3 t = normalize((mul(model_matrix.M, float4(IN.Tangent.xyz, 0.0))).xyz);
+    float3 n = normalize((mul(model_matrix._matrix, float4(IN.Normal.xyz, 0.0))).xyz);
+    float3 t = normalize((mul(model_matrix._matrix, float4(IN.Tangent.xyz, 0.0))).xyz);
     
-    matrix mvp_matrix        = mul(view_projection_matrix.VP, model_matrix.M);
+    matrix mvp_matrix        = mul(per_frame_data.view_projection_matrix, model_matrix._matrix);
 
     OUT.Position             = mul(mvp_matrix, float4(IN.Position, 1.0));
-    OUT.Frag_Position        = mul(model_matrix.M, float4(IN.Position, 1.0));
+    OUT.Frag_Position        = mul(model_matrix._matrix, float4(IN.Position, 1.0));
     OUT.TextureCoordinate    = IN.texCoord;
     OUT.t = t;
     OUT.n = n;

@@ -21,74 +21,38 @@ namespace d_dx12 {
         // Shader bytecode
         wchar_t* vertex_shader; 
         wchar_t* pixel_shader; 
+        wchar_t* compute_shader; 
 
         u8           num_render_targets              = 1;
-        DXGI_FORMAT* render_target_formats = nullptr;
-        bool         depth_buffer_enabled          = true;
+        DXGI_FORMAT* render_target_formats           = nullptr;
+        bool         depth_buffer_enabled            = true;
 
-        // Root Parameters
-        // TODO: Should I have different types for Constant Parameters and Descriptor Tables?? Problably..
-        struct Parameter {
+        // Vertex Buffer Input Element Descriptions
+        struct Input_Element_Desc {
 
             d_std::d_string name;
-
-            enum Usage_Type {
-                TYPE_CONSTANT_BUFFER,   // CBV
-                TYPE_TEXTURE_READ,      // SRV
-                TYPE_TEXTURE_WRITE,     // UAV
-                TYPE_INLINE_CONSTANT,   // Root Sig Constant
-                TYPE_STATIC_SAMPLER,
-                TYPE_INVALID,           //  Used in the binding poinnts array to define unused binding points
-            };
-
-            Usage_Type usage_type;
-
-            struct Static_Sampler_Desc {
-                D3D12_FILTER filter;
-                D3D12_COMPARISON_FUNC comparison_func;
-                float min_lod;
-                float max_lod;
-            };
-
-            union {
-
-                Static_Sampler_Desc static_sampler_desc;
-                u16 count = 1;                  // Number of descriptors in descriptor range (Buffer, Texture)
-                u16 number_of_32bit_values; // Number of 32bit values in a constant parameter (Constant)
-
-            };
-
-            u16 register_space = 0;
-            u16 base_shader_register;
-            D3D12_SHADER_VISIBILITY shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
+            DXGI_FORMAT format;
+            UINT        input_slot;    // Vertex buffer slot
+            UINT        offset = D3D12_APPEND_ALIGNED_ELEMENT;
 
         };
 
-        // Descriptor Tables / Register Spaces
-        std::vector<Parameter> parameter_list;
-
-        // PSO
-        //struct Pipeline_State {
-
-            // Vertex Buffer Input Element Descriptions
-            struct Input_Element_Desc {
-
-                d_std::d_string name;
-                DXGI_FORMAT format;
-                UINT        input_slot;    // Vertex buffer slot
-                UINT        offset = D3D12_APPEND_ALIGNED_ELEMENT;
-
-            };
-
-            // List of input elements, not nesseceraly within the same stride, since each element
-            // layout could be for a different vertex buffer slot
-            std::vector<Input_Element_Desc> input_layout; 
-
-        //};
+        // List of input elements, not nesseceraly within the same stride, since each element
+        // layout could be for a different vertex buffer slot
+        std::vector<Input_Element_Desc> input_layout; 
 
     };
 
     struct Shader {
+
+        enum Input_Type {
+            TYPE_INVALID,                   // Used in the binding poinnts array to define unused binding points
+            TYPE_CONSTANT_BUFFER,           // CBV
+            TYPE_SHADER_RESOURCE,           // SRV
+            TYPE_UNORDERED_ACCESS_RESOURCE, // UAV
+            TYPE_INLINE_CONSTANT,           // Root Sig Constant
+            TYPE_SAMPLER,
+        };
 
         // Parameter Description
         Microsoft::WRL::ComPtr<ID3D12RootSignature> d3d12_root_signature;
@@ -98,10 +62,14 @@ namespace d_dx12 {
 
         // Binding points
         struct Binding_Point {
-            Shader_Desc::Parameter::Usage_Type usage_type = Shader_Desc::Parameter::Usage_Type::TYPE_INVALID;
-            D3D12_SHADER_INPUT_BIND_DESC       d3d12_binding_desc;
+            Shader::Input_Type                 input_type = Shader::Input_Type::TYPE_INVALID;
             D3D12_SHADER_VISIBILITY            shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
             u8                                 root_signature_index;
+            u16                                bind_point;
+            u16                                bind_space;
+            u16                                bind_count;
+            d_std::d_string                    name;
+            u32                                cb_size;
         };
 
         Binding_Point binding_points[BINDING_POINT_INDEX_COUNT];
@@ -185,7 +153,6 @@ namespace d_dx12 {
         USAGE                                     usage = USAGE_NONE;
         u16                                       width;
         u16                                       height;
-        u16                                       pixel_size;
         DXGI_FORMAT                               format;
         u16                                       is_bound_index;
         float                                     clear_color[4] = {0.0, 0.0, 0.0, 0.0};
@@ -201,7 +168,6 @@ namespace d_dx12 {
         bool           rtv_connect_to_next_swapchain_buffer = false;
         u16            width;
         u16            height;
-        u16            pixel_size;
         DXGI_FORMAT    format;
         float          clear_color[4] = {0.0, 0.0, 0.0, 0.0};
         wchar_t*       name = NULL;
@@ -242,6 +208,7 @@ namespace d_dx12 {
         Buffer::USAGE usage = Buffer::USAGE::USAGE_NONE; 
         u64 number_of_elements;
         u64 size_of_each_element;
+        DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
 
     };
 
@@ -274,7 +241,7 @@ namespace d_dx12 {
         void clear_depth_stencil(Texture* ds, const float depth);
         void load_buffer(Buffer* buffer, u8* data, u64 size, u64 alignment);
         void load_texture_from_file(Texture* texture, const wchar_t* filename);
-        void load_decoded_texture_from_memory(Texture* texture, d_std::Span<u8> data, bool create_mipchain);
+        void load_decoded_texture_from_memory(Texture* texture, u_ptr data, bool create_mipchain);
         void reset();
         void close();
         void bind_vertex_buffer(Buffer* buffer, u32 slot);
@@ -321,7 +288,7 @@ namespace d_dx12 {
 
     };
 
-    #define DYNAMIC_BUFFER_SIZE _64MB
+    #define DYNAMIC_BUFFER_SIZE _64MB * 4
     struct Dynamic_Buffer {
 
         struct Allocation {

@@ -83,7 +83,7 @@ namespace d_std {
 
     }
 
-    void  os_debug_printf(Memory_Arena *arena, char* lit_string, ...){
+    void __cdecl os_debug_printf(Memory_Arena *arena, char* lit_string, ...){
 
         // va_list
         u_ptr va_args;

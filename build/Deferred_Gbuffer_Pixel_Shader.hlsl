@@ -10,40 +10,9 @@
 * 
 */
 
-#define Tex2DSpace space1
-#define MATERIAL_FLAG_NONE                     0x0
-#define MATERIAL_FLAG_NORMAL_TEXTURE           0x1
-#define MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE 0x2
+#include "common.hlsli"
 
-// Our texture sampler and texture table
-SamplerState sampler_1          : register(s0);
-Texture2D    texture_2d_table[] : register(t0, Tex2DSpace);
-
-
-// Constant buffer holding our camera position
-struct Camera_Position {
-    float3 camera_position;
-};
-ConstantBuffer<Camera_Position> camera_position_buffer: register(b4);
-
-
-// Constant buffers contianing the texture indicies for the current material
-struct TextureIndex
-{
-    int i;
-};
-ConstantBuffer<TextureIndex> albedo_index:            register(b5);
-ConstantBuffer<TextureIndex> normal_index:            register(b6);
-ConstantBuffer<TextureIndex> roughness_metallic_index: register(b7);
-
-
-// Constant buffers containing the flags for the current material ( Normals from texture? Does the material include roughness / metallic? )
-struct Material_Flags {
-    uint flags;
-};
-ConstantBuffer<Material_Flags> material_flags: register(b3);
-
-
+ConstantBuffer<Material_Data> material_data : register(b0, PixelSpace);
 
 struct PixelShaderInput
 {
@@ -78,17 +47,17 @@ PixelShaderOutput main(PixelShaderInput IN) {
     UV.x = IN.TextureCoordinate.x;
     UV.y = IN.TextureCoordinate.y;
 
-    float4 albedo_texture_color = pow(texture_2d_table[albedo_index.i].Sample(sampler_1, UV), 2.2);
+    float4 albedo_texture_color = pow(texture_2d_table[material_data.albedo_index].Sample(sampler_1, UV), 2.2);
 
     // This is to discard transparent pixels in textures. See: Chains and foliage in GLTF2.0 Sponza
-    if (albedo_texture_color.a < 0.5) {
+    if (albedo_texture_color.a < 0.3) {
         discard;
     }
 
     float3 wNormal;
-    if((material_flags.flags & MATERIAL_FLAG_NORMAL_TEXTURE)){
+    if((material_data.flags & MATERIAL_FLAG_NORMAL_TEXTURE)){
 
-        float3 normal_texture_color = texture_2d_table[normal_index.i].Sample(sampler_1, UV).xyz;
+        float3 normal_texture_color = texture_2d_table[material_data.normal_index].Sample(sampler_1, UV).xyz;
         float3 tNormal = (normal_texture_color * 2.) - 1.;
         wNormal = normalize(mul(TBN, tNormal));
 
@@ -100,9 +69,9 @@ PixelShaderOutput main(PixelShaderInput IN) {
 
     float roughness;
     float metallic;
-    if((material_flags.flags & MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE)){
+    if((material_data.flags & MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE)){
 
-        float3 rm_texture_color = texture_2d_table[roughness_metallic_index.i].Sample(sampler_1, UV).xyz;
+        float3 rm_texture_color = texture_2d_table[material_data.roughness_metallic_index].Sample(sampler_1, UV).xyz;
         roughness = rm_texture_color.g;
         metallic = rm_texture_color.r;
 
