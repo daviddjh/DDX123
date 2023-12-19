@@ -267,7 +267,7 @@ namespace d_dx12 {
             // Get shader input reflection data, find binding point index for shader->binding_points
             D3D12_SHADER_INPUT_BIND_DESC d3d12_shader_input_binding_point_desc;
             d3d12_shader_reflection->GetResourceBindingDesc(i, &(d3d12_shader_input_binding_point_desc));
-            u32 binding_point_index = binding_point_string_lookup(d3d12_shader_input_binding_point_desc.Name);                    
+            const u32 binding_point_index = binding_point_string_lookup(d3d12_shader_input_binding_point_desc.Name);                    
 
             Shader::Binding_Point& ddx12_binding_point = ddx12_shader->binding_points[binding_point_index];
 
@@ -322,7 +322,202 @@ namespace d_dx12 {
         }
     }
 
-    void compile_and_reflect_shader(Shader_Desc& desc, Shader* shader, Microsoft::WRL::ComPtr<ID3DBlob>& d3d12_vertex_shader_blob, Microsoft::WRL::ComPtr<ID3DBlob>& d3d12_pixel_shader_blob){
+    void compile_and_reflect_compute_shader(Shader_Desc& desc, Shader* shader, Microsoft::WRL::ComPtr<ID3DBlob>& d3d12_compute_shader_blob){
+
+        u16 shader_binding_array_index = 0;
+
+        Microsoft::WRL::ComPtr<IDxcUtils> pUtils;
+        Microsoft::WRL::ComPtr<IDxcCompiler3> pCompiler;
+        DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&pUtils));
+        DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&pCompiler));
+
+        //
+        // Create default include handler. (You can create your own...)
+        //
+        Microsoft::WRL::ComPtr<IDxcIncludeHandler> pIncludeHandler;
+        pUtils->CreateDefaultIncludeHandler(&pIncludeHandler);
+
+        ////////////////////////////////////////////////////////////////////////////////////
+        /// Compute Shader!
+        ////////////////////////////////////////////////////////////////////////////////////
+
+        {
+            std::wstring compute_shader_name(desc.compute_shader);
+            size_t last_dot_pos = compute_shader_name.find_last_of(L".");
+            if(last_dot_pos != std::wstring::npos)
+                compute_shader_name = compute_shader_name.substr(0, last_dot_pos);
+
+            std::wstring compute_shader_name_bin = compute_shader_name + L".bin";    // The file name of the bin.
+            std::wstring compute_shader_name_pdb = compute_shader_name + L".pdb";    // The file name of the pdb.
+
+            LPCWSTR compute_shader_arguments[] =
+            {
+                // Optional shader source file name for error reporting
+                // and for PIX shader source view.  
+                compute_shader_name.c_str(),
+                L"-Fo", compute_shader_name_bin.c_str(),     // The file name of the bin.
+                L"-Fd", L".\\",// vertex_shader_name_pdb.c_str(),     // The file name of the pdb.
+
+                // Entry point.
+                L"-E", L"main",              
+
+                // Target.
+                L"-T", L"cs_6_0",            
+
+                // Enable debug information (slim format)
+                //#ifdef _DEBUG
+                L"-Zi",                      
+                L"-Od",
+                L"-Qembed_debug"
+                //#endif
+
+                // Strip reflection into a separate blob. 
+                //L"-Qstrip_reflect",          
+            };
+
+            //
+            // Open source file.  
+            //
+            Microsoft::WRL::ComPtr<IDxcBlobEncoding> pSource = nullptr;
+            pUtils->LoadFile(desc.compute_shader, nullptr, &pSource);
+            DxcBuffer Source;
+            Source.Ptr = pSource->GetBufferPointer();
+            Source.Size = pSource->GetBufferSize();
+            Source.Encoding = DXC_CP_ACP; // Assume BOM says UTF8 or UTF16 or this is ANSI text.
+
+
+            //
+            // Compile it with specified arguments.
+            //
+            Microsoft::WRL::ComPtr<IDxcResult> pResults;
+            pCompiler->Compile(
+                &Source,                            // Source buffer.
+                compute_shader_arguments,           // Array of pointers to arguments.
+                _countof(compute_shader_arguments), // Number of arguments.
+                pIncludeHandler.Get(),              // User-provided interface to handle #include directives (optional).
+                IID_PPV_ARGS(&pResults)             // Compiler output status, buffer, and errors.
+            );
+
+            //
+            // Print errors if present.
+            //
+            Microsoft::WRL::ComPtr<IDxcBlobUtf8> pErrors = nullptr;
+            pResults->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&pErrors), nullptr);
+            // Note that d3dcompiler would return null if no errors or warnings are present.
+            // IDxcCompiler3::Compile will always return an error buffer, but its length
+            // will be zero if there are no warnings or errors.
+            if (pErrors != nullptr && pErrors->GetStringLength() != 0)
+                OutputDebugString(pErrors->GetStringPointer());
+
+            //
+            // Quit if the compilation failed.
+            //
+            HRESULT hrStatus;
+            pResults->GetStatus(&hrStatus);
+            if (FAILED(hrStatus))
+            {
+                wprintf(L"Compilation Failed\n");
+                DEBUG_BREAK;
+            }
+
+            //
+            // Save shader binary.
+            //
+            IDxcBlobUtf16* pShaderName = nullptr;
+            HRESULT hr = pResults->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&d3d12_compute_shader_blob), &pShaderName);
+            if (d3d12_compute_shader_blob != nullptr)
+            {
+                FILE* fp = NULL;
+
+                LPCWSTR shader_name = pShaderName->GetStringPointer();
+                int error_num = _wfopen_s(&fp, shader_name, L"wb");
+                fwrite(d3d12_compute_shader_blob->GetBufferPointer(), d3d12_compute_shader_blob->GetBufferSize(), 1, fp);
+                fclose(fp);
+            }
+
+            //
+            // Save pdb.
+            //
+            Microsoft::WRL::ComPtr<IDxcBlob> pPDB = nullptr;
+            Microsoft::WRL::ComPtr<IDxcBlobUtf16> pPDBName = nullptr;
+            pResults->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&pPDB), &pPDBName);
+            {
+                FILE* fp = NULL;
+
+                // Note that if you don't specify -Fd, a pdb name will be automatically generated.
+                // Use this file name to save the pdb so that PIX can find it quickly.
+                _wfopen_s(&fp, pPDBName->GetStringPointer(), L"wb");
+                fwrite(pPDB->GetBufferPointer(), pPDB->GetBufferSize(), 1, fp);
+                fclose(fp);
+            }
+
+            /*
+            //
+            // Print hash.
+            //
+            Microsoft::WRL::ComPtr<IDxcBlob> pHash = nullptr;
+            pResults->GetOutput(DXC_OUT_SHADER_HASH, IID_PPV_ARGS(&pHash), nullptr);
+            if (pHash != nullptr)
+            {
+                wprintf(L"Hash: ");
+                DxcShaderHash* pHashBuf = (DxcShaderHash*)pHash->GetBufferPointer();
+                for (int i = 0; i < _countof(pHashBuf->HashDigest); i++)
+                    wprintf(L"%.2x", pHashBuf->HashDigest[i]);
+                wprintf(L"\n");
+            }
+
+            //
+            // Demonstrate getting the hash from the PDB blob using the IDxcUtils::GetPDBContents API
+            //
+            Microsoft::WRL::ComPtr<IDxcBlob> pHashDigestBlob = nullptr;
+            Microsoft::WRL::ComPtr<IDxcBlob> pDebugDxilContainer = nullptr;
+            if (SUCCEEDED(pUtils->GetPDBContents(pPDB.Get(), &pHashDigestBlob, &pDebugDxilContainer)))
+            {
+                // This API returns the raw hash digest, rather than a DxcShaderHash structure.
+                // This will be the same as the DxcShaderHash::HashDigest returned from
+                // IDxcResult::GetOutput(DXC_OUT_SHADER_HASH, ...).
+                wprintf(L"Hash from PDB: ");
+                const BYTE *pHashDigest = (const BYTE*)pHashDigestBlob->GetBufferPointer();
+                assert(pHashDigestBlob->GetBufferSize() == 16); // hash digest is always 16 bytes.
+                for (int i = 0; i < pHashDigestBlob->GetBufferSize(); i++)
+                    wprintf(L"%.2x", pHashDigest[i]);
+                wprintf(L"\n");
+
+                // The pDebugDxilContainer blob will contain a DxilContainer formatted
+                // binary, but with different parts than the pShader blob retrieved
+                // earlier.
+                // The parts in this container will vary depending on debug options and
+                // the compiler version.
+                // This blob is not meant to be directly interpreted by an application.
+            }
+            */
+
+            //
+            // Get separate reflection.
+            //
+            Microsoft::WRL::ComPtr<IDxcBlob> pReflectionData;
+            pResults->GetOutput(DXC_OUT_REFLECTION, IID_PPV_ARGS(&pReflectionData), nullptr);
+            if (pReflectionData != nullptr)
+            {
+                // Optionally, save reflection blob for later here.
+
+                // Create reflection interface.
+                DxcBuffer ReflectionData;
+                ReflectionData.Encoding = DXC_CP_ACP;
+                ReflectionData.Ptr = pReflectionData->GetBufferPointer();
+                ReflectionData.Size = pReflectionData->GetBufferSize();
+
+                Microsoft::WRL::ComPtr< ID3D12ShaderReflection > pReflection;
+                pUtils->CreateReflection(&ReflectionData, IID_PPV_ARGS(&pReflection));
+
+                create_binding_points_from_d3d12_reflection(shader, pReflection);
+                
+            }
+
+        }
+    }
+
+    void compile_and_reflect_graphics_shader(Shader_Desc& desc, Shader* shader, Microsoft::WRL::ComPtr<ID3DBlob>& d3d12_vertex_shader_blob, Microsoft::WRL::ComPtr<ID3DBlob>& d3d12_pixel_shader_blob){
 
         u16 shader_binding_array_index = 0;
 
@@ -745,260 +940,456 @@ namespace d_dx12 {
         Shader* shader = new Shader;
         memset(shader->binding_points, 0, sizeof(Shader::Binding_Point) * BINDING_POINT_INDEX_COUNT);
 
-        Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_vertex_shader_blob;
-        Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_pixel_shader_blob;
+        shader->type = desc.type;
 
+        if(shader->type == Shader::Shader_Type::TYPE_GRAPHICS){
 
-        /*
-        *   Compiles the shader with dxcompiler.dll, reflection data stored in "shader" struct
-        */
-
-        compile_and_reflect_shader(desc, shader, d3d12_vertex_shader_blob, d3d12_pixel_shader_blob);
-
-        /*
-        *   Set up Root Signiture
-        */
-
-        // Create the root signature
-        D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { };
-        featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
-        if (FAILED(d3d12_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData)))) {
-            featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
-        }
-
-        // Default Flags
-        D3D12_ROOT_SIGNATURE_FLAGS root_signature_flags =
-            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
-            D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
-            D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
-            D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
-
-
-        CD3DX12_ROOT_PARAMETER1 root_parameters[64];
-        u8 num_root_paramters = 0;
-
-        CD3DX12_STATIC_SAMPLER_DESC static_samplers[64];
-        u8 num_static_samplers = 0;
-            
-        // Iterate through the parameter_list provided by user.
-        for(int j = 0; j < BINDING_POINT_INDEX_COUNT; j++){
-            
-            // Get shader_binding_point from shader reflection with same name as jth parameter in user provided parameter list
-            Shader::Binding_Point * shader_binding_point = &(shader->binding_points[j]);
-
-            switch(shader_binding_point->input_type){
-
-                // Skip if the current shader doesn't use this binding point
-                case(Shader::Input_Type::TYPE_INVALID):
-                case(Shader::Input_Type::TYPE_INLINE_CONSTANT):
-                break;
-
-                case(Shader::Input_Type::TYPE_SAMPLER):
-                    //DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Static Sampler, Shader Register: %u, Shader Space: %u\n\n", desc.parameter_list[j].name, shader_binding_point->d3d12_binding_desc.BindPoint, shader_binding_point->d3d12_binding_desc.Space);
-                    {
-
-                        DEBUG_LOG("Static Sampler!");
-
-                        CD3DX12_STATIC_SAMPLER_DESC * static_sampler_desc = &(static_samplers[num_static_samplers]);
-
-                        //static_sampler_desc->Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-                        static_sampler_desc->Filter = D3D12_FILTER_ANISOTROPIC;
-                        static_sampler_desc->AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-                        static_sampler_desc->AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-                        static_sampler_desc->AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-                        static_sampler_desc->MipLODBias = 0;
-                        static_sampler_desc->MaxAnisotropy = 8;
-                        static_sampler_desc->ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-                        static_sampler_desc->BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
-                        static_sampler_desc->MinLOD = 0;
-                        static_sampler_desc->MaxLOD = D3D12_FLOAT32_MAX;
-                        static_sampler_desc->ShaderRegister = shader_binding_point->bind_point;
-                        static_sampler_desc->RegisterSpace = shader_binding_point->bind_space;
-                        static_sampler_desc->ShaderVisibility = shader_binding_point->shader_visibility;
-
-                        num_static_samplers++;
-
-                    }
-                break;
-
-                #if 0  // Not using root constants.. for now
-                case(Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT):
-
-                    {
-                        
-                    // DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Inline Constant, Shader Register: %u", desc.parameter_list[j].name, shader_binding_point->d3d12_binding_desc.BindPoint);
-                    // os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->d3d12_binding_desc.Space, num_root_paramters);
-
-                    DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Inline Constant, Shader Register: %u, Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->name, shader_binding_point->bind_point, shader_binding_point->bind_space, num_root_paramters);
-
-                    root_parameters[num_root_paramters].InitAsConstants(
-                        shader_binding_point->cb_size,
-                        shader_binding_point->bind_point,
-                        shader_binding_point->bind_space,
-                        shader_binding_point->shader_visibility
-                    );
-                    shader_binding_point->root_signature_index = num_root_paramters;
-                    num_root_paramters++;
-
-                    }
-
-                break;
-                #endif
-
-                case(Shader::Input_Type::TYPE_CONSTANT_BUFFER):
-                    // TODO: Add Root Constant Support
-                case(Shader::Input_Type::TYPE_SHADER_RESOURCE):
-                case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
-
-                {
-                    DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
-                    os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
-
-                    //Shader::Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
-                    D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
-
-                    descriptor_range->BaseShaderRegister                = shader_binding_point->bind_point,
-                    descriptor_range->RegisterSpace                     = shader_binding_point->bind_space;
-                    descriptor_range->OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-                    descriptor_range->Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
-
-                    descriptor_range->NumDescriptors                    = shader_binding_point->bind_count;
-                    // If the number of descriptors is 0, then we assume it's an unbound descriptor array
-                    if(descriptor_range->NumDescriptors == 0){
-                        descriptor_range->NumDescriptors = DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE;
-                        descriptor_range->Flags |= D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
-                    }
-
-
-                    switch(shader_binding_point->input_type){
-                        case(Shader::Input_Type::TYPE_CONSTANT_BUFFER):
-                            descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-                            break;
-                        case(Shader::Input_Type::TYPE_SHADER_RESOURCE):
-                            descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-                            break;
-                        case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
-                            descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-                            break;
-                    }
-
-                    root_parameters[num_root_paramters].InitAsDescriptorTable(1, descriptor_range, shader_binding_point->shader_visibility);
-                    shader_binding_point->root_signature_index = num_root_paramters;
-                    num_root_paramters++;
-                }
-
-                break;
+            if(desc.vertex_shader == nullptr){
+                DEBUG_ERROR("Trying to compile a graphics shader without a path to a vertex shader. Did you mean to compile a graphics shader? (shader.type == TYPE_GRAPHICS)");
             }
 
-        }
+            Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_vertex_shader_blob;
+            Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_pixel_shader_blob;
 
 
-        CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDescription;
-        rootSignatureDescription.Init_1_1(num_root_paramters, root_parameters, num_static_samplers, static_samplers, root_signature_flags);
+            /*
+            *   Compiles the shader with dxcompiler.dll, reflection data stored in "shader" struct
+            */
 
-        // Serialize the root sig
-        Microsoft::WRL::ComPtr<ID3DBlob> rootSigitureBlob;
-        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-        HRESULT hr  = D3DX12SerializeVersionedRootSignature(&rootSignatureDescription, featureData.HighestVersion, &rootSigitureBlob, &errorBlob);
-        if (FAILED(hr)) {
-            OutputDebugStringA((char*)errorBlob->GetBufferPointer());
-            throw std::exception();
-        }
-        // Create root sig
-        // This can be pre compiled
-        ThrowIfFailed(d3d12_device->CreateRootSignature(0, rootSigitureBlob->GetBufferPointer(), rootSigitureBlob->GetBufferSize(), IID_PPV_ARGS(&(shader->d3d12_root_signature))));
+            compile_and_reflect_graphics_shader(desc, shader, d3d12_vertex_shader_blob, d3d12_pixel_shader_blob);
 
-        /*
-        *   Set pipeline state object
-        */
+            /*
+            *   Set up Root Signiture
+            */
+
+            // Create the root signature
+            D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { };
+            featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+            if (FAILED(d3d12_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData)))) {
+                featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+            }
+
+            // Default Flags
+            D3D12_ROOT_SIGNATURE_FLAGS root_signature_flags =
+                D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+                D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+                D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+                D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+
+
+            CD3DX12_ROOT_PARAMETER1 root_parameters[64];
+            u8 num_root_paramters = 0;
+
+            CD3DX12_STATIC_SAMPLER_DESC static_samplers[64];
+            u8 num_static_samplers = 0;
+                
+            // Iterate through the parameter_list provided by user.
+            for(int j = 0; j < BINDING_POINT_INDEX_COUNT; j++){
+                
+                // Get shader_binding_point from shader reflection with same name as jth parameter in user provided parameter list
+                Shader::Binding_Point * shader_binding_point = &(shader->binding_points[j]);
+
+                switch(shader_binding_point->input_type){
+
+                    // Skip if the current shader doesn't use this binding point
+                    case(Shader::Input_Type::TYPE_INVALID):
+                    case(Shader::Input_Type::TYPE_INLINE_CONSTANT):
+                    break;
+
+                    case(Shader::Input_Type::TYPE_SAMPLER):
+                        //DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Static Sampler, Shader Register: %u, Shader Space: %u\n\n", desc.parameter_list[j].name, shader_binding_point->d3d12_binding_desc.BindPoint, shader_binding_point->d3d12_binding_desc.Space);
+                        {
+
+                            DEBUG_LOG("Static Sampler!");
+
+                            CD3DX12_STATIC_SAMPLER_DESC * static_sampler_desc = &(static_samplers[num_static_samplers]);
+
+                            //static_sampler_desc->Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+                            static_sampler_desc->Filter = D3D12_FILTER_ANISOTROPIC;
+                            static_sampler_desc->AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                            static_sampler_desc->AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                            static_sampler_desc->AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                            static_sampler_desc->MipLODBias = 0;
+                            static_sampler_desc->MaxAnisotropy = 8;
+                            static_sampler_desc->ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+                            static_sampler_desc->BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+                            static_sampler_desc->MinLOD = 0;
+                            static_sampler_desc->MaxLOD = D3D12_FLOAT32_MAX;
+                            static_sampler_desc->ShaderRegister = shader_binding_point->bind_point;
+                            static_sampler_desc->RegisterSpace = shader_binding_point->bind_space;
+                            static_sampler_desc->ShaderVisibility = shader_binding_point->shader_visibility;
+
+                            num_static_samplers++;
+
+                        }
+                    break;
+
+                    #if 0  // Not using root constants.. for now
+                    case(Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT):
+
+                        {
+                            
+                        // DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Inline Constant, Shader Register: %u", desc.parameter_list[j].name, shader_binding_point->d3d12_binding_desc.BindPoint);
+                        // os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->d3d12_binding_desc.Space, num_root_paramters);
+
+                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Inline Constant, Shader Register: %u, Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->name, shader_binding_point->bind_point, shader_binding_point->bind_space, num_root_paramters);
+
+                        root_parameters[num_root_paramters].InitAsConstants(
+                            shader_binding_point->cb_size,
+                            shader_binding_point->bind_point,
+                            shader_binding_point->bind_space,
+                            shader_binding_point->shader_visibility
+                        );
+                        shader_binding_point->root_signature_index = num_root_paramters;
+                        num_root_paramters++;
+
+                        }
+
+                    break;
+                    #endif
+
+                    case(Shader::Input_Type::TYPE_CONSTANT_BUFFER):
+                        // TODO: Add Root Constant Support
+                    case(Shader::Input_Type::TYPE_SHADER_RESOURCE):
+                    case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
+
+                    {
+                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
+                        os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
+
+                        //Shader::Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
+                        D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
+
+                        descriptor_range->BaseShaderRegister                = shader_binding_point->bind_point,
+                        descriptor_range->RegisterSpace                     = shader_binding_point->bind_space;
+                        descriptor_range->OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+                        descriptor_range->Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+
+                        descriptor_range->NumDescriptors                    = shader_binding_point->bind_count;
+                        // If the number of descriptors is 0, then we assume it's an unbound descriptor array
+                        if(descriptor_range->NumDescriptors == 0){
+                            descriptor_range->NumDescriptors = DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE;
+                            descriptor_range->Flags |= D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+                        }
+
+
+                        switch(shader_binding_point->input_type){
+                            case(Shader::Input_Type::TYPE_CONSTANT_BUFFER):
+                                descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+                                break;
+                            case(Shader::Input_Type::TYPE_SHADER_RESOURCE):
+                                descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+                                break;
+                            case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
+                                descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+                                break;
+                        }
+
+                        root_parameters[num_root_paramters].InitAsDescriptorTable(1, descriptor_range, shader_binding_point->shader_visibility);
+                        shader_binding_point->root_signature_index = num_root_paramters;
+                        num_root_paramters++;
+                    }
+
+                    break;
+                }
+
+            }
+
+
+            CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDescription;
+            rootSignatureDescription.Init_1_1(num_root_paramters, root_parameters, num_static_samplers, static_samplers, root_signature_flags);
+
+            // Serialize the root sig
+            Microsoft::WRL::ComPtr<ID3DBlob> rootSigitureBlob;
+            Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+            HRESULT hr  = D3DX12SerializeVersionedRootSignature(&rootSignatureDescription, featureData.HighestVersion, &rootSigitureBlob, &errorBlob);
+            if (FAILED(hr)) {
+                OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+                throw std::exception();
+            }
+            // Create root sig
+            // This can be pre compiled
+            ThrowIfFailed(d3d12_device->CreateRootSignature(0, rootSigitureBlob->GetBufferPointer(), rootSigitureBlob->GetBufferSize(), IID_PPV_ARGS(&(shader->d3d12_root_signature))));
+
+            /*
+            *   Set pipeline state object
+            */
 
 
 
-        struct PipelineStateStream {
-            CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE pRootSignature;
-            CD3DX12_PIPELINE_STATE_STREAM_INPUT_LAYOUT InputLayout;
-            CD3DX12_PIPELINE_STATE_STREAM_PRIMITIVE_TOPOLOGY PrimitiveTopologyType;
-            CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC blend_desc;
-            CD3DX12_PIPELINE_STATE_STREAM_VS VS;
-            CD3DX12_PIPELINE_STATE_STREAM_PS PS;
-            CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
-            CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
-        } pipelineStateStream;
+            struct PipelineStateStream {
+                CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE pRootSignature;
+                CD3DX12_PIPELINE_STATE_STREAM_INPUT_LAYOUT InputLayout;
+                CD3DX12_PIPELINE_STATE_STREAM_PRIMITIVE_TOPOLOGY PrimitiveTopologyType;
+                CD3DX12_PIPELINE_STATE_STREAM_BLEND_DESC blend_desc;
+                CD3DX12_PIPELINE_STATE_STREAM_VS VS;
+                CD3DX12_PIPELINE_STATE_STREAM_PS PS;
+                CD3DX12_PIPELINE_STATE_STREAM_DEPTH_STENCIL_FORMAT DSVFormat;
+                CD3DX12_PIPELINE_STATE_STREAM_RENDER_TARGET_FORMATS RTVFormats;
+            } pipelineStateStream;
 
-        // Number of render targets and their format are defined
-        D3D12_RT_FORMAT_ARRAY rtvFormats = { };
-        if(desc.num_render_targets == 1 && desc.render_target_formats == nullptr){
+            // Number of render targets and their format are defined
+            D3D12_RT_FORMAT_ARRAY rtvFormats = { };
+            if(desc.num_render_targets == 1 && desc.render_target_formats == nullptr){
 
-            rtvFormats.NumRenderTargets = 1;
-            rtvFormats.RTFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+                rtvFormats.NumRenderTargets = 1;
+                rtvFormats.RTFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+            } else {
+
+                rtvFormats.NumRenderTargets = desc.num_render_targets;
+                for(int i = 0; i < desc.num_render_targets; i++){
+                    rtvFormats.RTFormats[i] = desc.render_target_formats[i];
+                }
+
+            }
+
+            std::vector<D3D12_INPUT_ELEMENT_DESC> input_layout;
+            for(int i = 0; i < desc.input_layout.size(); i++){
+
+                D3D12_INPUT_ELEMENT_DESC input_element_desc;
+                input_element_desc.SemanticName         = desc.input_layout[i].name.c_str(d_dx12_arena);
+                input_element_desc.SemanticIndex        = 0; // Good Default??
+                input_element_desc.Format               = desc.input_layout[i].format;
+                input_element_desc.InputSlot            = desc.input_layout[i].input_slot;
+                input_element_desc.AlignedByteOffset    = desc.input_layout[i].offset; // Good Default?
+                input_element_desc.InputSlotClass       = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;  // Good Default?
+                input_element_desc.InstanceDataStepRate = 0;
+
+                input_layout.push_back(input_element_desc);
+            }
+
+            // Create Blend Desc
+            CD3DX12_BLEND_DESC alpha_blend_desc;
+            alpha_blend_desc.AlphaToCoverageEnable = false;
+            alpha_blend_desc.IndependentBlendEnable = false;
+
+            // Learned from: https://wickedengine.net/2017/10/22/which-blend-state-for-me/
+            D3D12_RENDER_TARGET_BLEND_DESC render_target_blend_desc;
+            render_target_blend_desc.BlendEnable   = true;
+            render_target_blend_desc.LogicOpEnable = false;
+            render_target_blend_desc.SrcBlend  = D3D12_BLEND_SRC_ALPHA;
+            render_target_blend_desc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+            render_target_blend_desc.BlendOp   = D3D12_BLEND_OP_ADD;
+            render_target_blend_desc.SrcBlendAlpha  = D3D12_BLEND_ONE;
+            render_target_blend_desc.DestBlendAlpha = D3D12_BLEND_ONE;
+            render_target_blend_desc.BlendOpAlpha   = D3D12_BLEND_OP_ADD;
+            render_target_blend_desc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+            for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
+                alpha_blend_desc.RenderTarget[ i ] = render_target_blend_desc;
+            
+
+            // Describe PSO
+            pipelineStateStream.pRootSignature        = shader->d3d12_root_signature.Get();
+            pipelineStateStream.InputLayout           = { input_layout.data(), (u16)input_layout.size() };
+            pipelineStateStream.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+            pipelineStateStream.blend_desc            = alpha_blend_desc;
+            pipelineStateStream.VS                    = CD3DX12_SHADER_BYTECODE(d3d12_vertex_shader_blob.Get());
+            pipelineStateStream.PS                    = CD3DX12_SHADER_BYTECODE(d3d12_pixel_shader_blob.Get());
+            pipelineStateStream.RTVFormats            = rtvFormats;
+
+            if(desc.depth_buffer_enabled)
+                pipelineStateStream.DSVFormat = DXGI_FORMAT_D32_FLOAT;   // Hopefully a good default!
+            else
+                pipelineStateStream.DSVFormat = DXGI_FORMAT_UNKNOWN;
+
+
+
+            // Create PSO
+            D3D12_PIPELINE_STATE_STREAM_DESC pipelineStateStreamDesc = {
+                sizeof(PipelineStateStream), &pipelineStateStream
+            };
+
+            ThrowIfFailed(d3d12_device->CreatePipelineState(&pipelineStateStreamDesc, IID_PPV_ARGS(&(shader->d3d12_pipeline_state))));
 
         } else {
 
-            rtvFormats.NumRenderTargets = desc.num_render_targets;
-            for(int i = 0; i < desc.num_render_targets; i++){
-                rtvFormats.RTFormats[i] = desc.render_target_formats[i];
+            Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_compute_shader_blob;
+
+            /*
+            *   Compiles the shader with dxcompiler.dll, reflection data stored in "shader" struct
+            */
+
+            compile_and_reflect_compute_shader(desc, shader, d3d12_compute_shader_blob);
+
+            /*
+            *   Set up Root Signiture
+            */
+
+            // Create the root signature
+            D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { };
+            featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+            if (FAILED(d3d12_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData)))) {
+                featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
             }
 
+            // Default Flags
+            D3D12_ROOT_SIGNATURE_FLAGS root_signature_flags =
+                D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+                D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+                D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+                D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+
+
+            CD3DX12_ROOT_PARAMETER1 root_parameters[64];
+            u8 num_root_paramters = 0;
+
+            CD3DX12_STATIC_SAMPLER_DESC static_samplers[64];
+            u8 num_static_samplers = 0;
+                
+            // Iterate through the parameter_list provided by user.
+            for(int j = 0; j < BINDING_POINT_INDEX_COUNT; j++){
+                
+                // Get shader_binding_point from shader reflection with same name as jth parameter in user provided parameter list
+                Shader::Binding_Point * shader_binding_point = &(shader->binding_points[j]);
+
+                switch(shader_binding_point->input_type){
+
+                    // Skip if the current shader doesn't use this binding point
+                    case(Shader::Input_Type::TYPE_INVALID):
+                    case(Shader::Input_Type::TYPE_INLINE_CONSTANT):
+                    break;
+
+                    case(Shader::Input_Type::TYPE_SAMPLER):
+                        //DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Static Sampler, Shader Register: %u, Shader Space: %u\n\n", desc.parameter_list[j].name, shader_binding_point->d3d12_binding_desc.BindPoint, shader_binding_point->d3d12_binding_desc.Space);
+                        {
+
+                            DEBUG_LOG("Static Sampler!");
+
+                            CD3DX12_STATIC_SAMPLER_DESC * static_sampler_desc = &(static_samplers[num_static_samplers]);
+
+                            //static_sampler_desc->Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+                            static_sampler_desc->Filter = D3D12_FILTER_ANISOTROPIC;
+                            static_sampler_desc->AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                            static_sampler_desc->AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                            static_sampler_desc->AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                            static_sampler_desc->MipLODBias = 0;
+                            static_sampler_desc->MaxAnisotropy = 8;
+                            static_sampler_desc->ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+                            static_sampler_desc->BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+                            static_sampler_desc->MinLOD = 0;
+                            static_sampler_desc->MaxLOD = D3D12_FLOAT32_MAX;
+                            static_sampler_desc->ShaderRegister = shader_binding_point->bind_point;
+                            static_sampler_desc->RegisterSpace = shader_binding_point->bind_space;
+                            static_sampler_desc->ShaderVisibility = shader_binding_point->shader_visibility;
+
+                            num_static_samplers++;
+
+                        }
+                    break;
+
+                    #if 0  // Not using root constants.. for now
+                    case(Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT):
+
+                        {
+                            
+                        // DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Inline Constant, Shader Register: %u", desc.parameter_list[j].name, shader_binding_point->d3d12_binding_desc.BindPoint);
+                        // os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->d3d12_binding_desc.Space, num_root_paramters);
+
+                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Inline Constant, Shader Register: %u, Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->name, shader_binding_point->bind_point, shader_binding_point->bind_space, num_root_paramters);
+
+                        root_parameters[num_root_paramters].InitAsConstants(
+                            shader_binding_point->cb_size,
+                            shader_binding_point->bind_point,
+                            shader_binding_point->bind_space,
+                            shader_binding_point->shader_visibility
+                        );
+                        shader_binding_point->root_signature_index = num_root_paramters;
+                        num_root_paramters++;
+
+                        }
+
+                    break;
+                    #endif
+
+                    case(Shader::Input_Type::TYPE_CONSTANT_BUFFER):
+                        // TODO: Add Root Constant Support
+                    case(Shader::Input_Type::TYPE_SHADER_RESOURCE):
+                    case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
+
+                    {
+                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
+                        os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
+
+                        //Shader::Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
+                        D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
+
+                        descriptor_range->BaseShaderRegister                = shader_binding_point->bind_point,
+                        descriptor_range->RegisterSpace                     = shader_binding_point->bind_space;
+                        descriptor_range->OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+                        descriptor_range->Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+
+                        descriptor_range->NumDescriptors                    = shader_binding_point->bind_count;
+                        // If the number of descriptors is 0, then we assume it's an unbound descriptor array
+                        if(descriptor_range->NumDescriptors == 0){
+                            descriptor_range->NumDescriptors = DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE;
+                            descriptor_range->Flags |= D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+                        }
+
+
+                        switch(shader_binding_point->input_type){
+                            case(Shader::Input_Type::TYPE_CONSTANT_BUFFER):
+                                descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+                                break;
+                            case(Shader::Input_Type::TYPE_SHADER_RESOURCE):
+                                descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+                                break;
+                            case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
+                                descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+                                break;
+                        }
+
+                        root_parameters[num_root_paramters].InitAsDescriptorTable(1, descriptor_range, shader_binding_point->shader_visibility);
+                        shader_binding_point->root_signature_index = num_root_paramters;
+                        num_root_paramters++;
+                    }
+
+                    break;
+                }
+
+            }
+
+
+            CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDescription;
+            rootSignatureDescription.Init_1_1(num_root_paramters, root_parameters, num_static_samplers, static_samplers, root_signature_flags);
+
+            // Serialize the root sig
+            Microsoft::WRL::ComPtr<ID3DBlob> rootSigitureBlob;
+            Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+            HRESULT hr  = D3DX12SerializeVersionedRootSignature(&rootSignatureDescription, featureData.HighestVersion, &rootSigitureBlob, &errorBlob);
+            if (FAILED(hr)) {
+                OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+                throw std::exception();
+            }
+            // Create root sig
+            // This can be pre compiled
+            ThrowIfFailed(d3d12_device->CreateRootSignature(0, rootSigitureBlob->GetBufferPointer(), rootSigitureBlob->GetBufferSize(), IID_PPV_ARGS(&(shader->d3d12_root_signature))));
+
+            /*
+            *   Set pipeline state object
+            */
+
+
+
+            struct PipelineStateStream {
+                CD3DX12_PIPELINE_STATE_STREAM_ROOT_SIGNATURE pRootSignature;
+                CD3DX12_PIPELINE_STATE_STREAM_CS             CS;
+            } pipelineStateStream;
+
+            // Describe PSO
+            pipelineStateStream.pRootSignature        = shader->d3d12_root_signature.Get();
+            pipelineStateStream.CS                    = CD3DX12_SHADER_BYTECODE(d3d12_compute_shader_blob.Get());
+
+            // Create PSO
+            D3D12_PIPELINE_STATE_STREAM_DESC pipelineStateStreamDesc = {
+                sizeof(PipelineStateStream), &pipelineStateStream
+            };
+
+            ThrowIfFailed(d3d12_device->CreatePipelineState(&pipelineStateStreamDesc, IID_PPV_ARGS(&(shader->d3d12_pipeline_state))));
+
+
         }
-
-        std::vector<D3D12_INPUT_ELEMENT_DESC> input_layout;
-        for(int i = 0; i < desc.input_layout.size(); i++){
-
-            D3D12_INPUT_ELEMENT_DESC input_element_desc;
-            input_element_desc.SemanticName         = desc.input_layout[i].name.c_str(d_dx12_arena);
-            input_element_desc.SemanticIndex        = 0; // Good Default??
-            input_element_desc.Format               = desc.input_layout[i].format;
-            input_element_desc.InputSlot            = desc.input_layout[i].input_slot;
-            input_element_desc.AlignedByteOffset    = desc.input_layout[i].offset; // Good Default?
-            input_element_desc.InputSlotClass       = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;  // Good Default?
-            input_element_desc.InstanceDataStepRate = 0;
-
-            input_layout.push_back(input_element_desc);
-        }
-
-        // Create Blend Desc
-        CD3DX12_BLEND_DESC alpha_blend_desc;
-        alpha_blend_desc.AlphaToCoverageEnable = false;
-        alpha_blend_desc.IndependentBlendEnable = false;
-
-        // Learned from: https://wickedengine.net/2017/10/22/which-blend-state-for-me/
-        D3D12_RENDER_TARGET_BLEND_DESC render_target_blend_desc;
-        render_target_blend_desc.BlendEnable   = true;
-        render_target_blend_desc.LogicOpEnable = false;
-        render_target_blend_desc.SrcBlend  = D3D12_BLEND_SRC_ALPHA;
-        render_target_blend_desc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-        render_target_blend_desc.BlendOp   = D3D12_BLEND_OP_ADD;
-        render_target_blend_desc.SrcBlendAlpha  = D3D12_BLEND_ONE;
-        render_target_blend_desc.DestBlendAlpha = D3D12_BLEND_ONE;
-        render_target_blend_desc.BlendOpAlpha   = D3D12_BLEND_OP_ADD;
-        render_target_blend_desc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-
-        for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
-            alpha_blend_desc.RenderTarget[ i ] = render_target_blend_desc;
-        
-
-        // Describe PSO
-        pipelineStateStream.pRootSignature        = shader->d3d12_root_signature.Get();
-        pipelineStateStream.InputLayout           = { input_layout.data(), (u16)input_layout.size() };
-        pipelineStateStream.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        pipelineStateStream.blend_desc            = alpha_blend_desc;
-        pipelineStateStream.VS                    = CD3DX12_SHADER_BYTECODE(d3d12_vertex_shader_blob.Get());
-        pipelineStateStream.PS                    = CD3DX12_SHADER_BYTECODE(d3d12_pixel_shader_blob.Get());
-        pipelineStateStream.RTVFormats            = rtvFormats;
-
-        if(desc.depth_buffer_enabled)
-            pipelineStateStream.DSVFormat = DXGI_FORMAT_D32_FLOAT;   // Hopefully a good default!
-        else
-            pipelineStateStream.DSVFormat = DXGI_FORMAT_UNKNOWN;
-
-
-
-        // Create PSO
-        D3D12_PIPELINE_STATE_STREAM_DESC pipelineStateStreamDesc = {
-            sizeof(PipelineStateStream), &pipelineStateStream
-        };
-
-        ThrowIfFailed(d3d12_device->CreatePipelineState(&pipelineStateStreamDesc, IID_PPV_ARGS(&(shader->d3d12_pipeline_state))));
 
         return shader;
     }
@@ -1530,9 +1921,7 @@ namespace d_dx12 {
     void Resource_Manager::reset_is_bound_online(){
 
         // Need to fill is_bound_online table with invalid online_descriptor_heap_index values
-        for(int i = 0; i < IS_BOUND_ONLINE_TABLE_SIZE; i++){
-            is_bound_online[i] = ((u16)-1);
-        }
+        memset(is_bound_online, 0, sizeof(Bind_Status) * IS_BOUND_ONLINE_TABLE_SIZE);
 
     }
 
@@ -1570,8 +1959,9 @@ namespace d_dx12 {
                     DXGI_SWAP_CHAIN_DESC1 swap_chain_desc;
                     ThrowIfFailed(display.d3d12_swap_chain->GetDesc1(&swap_chain_desc));
 
-                    texture->width = swap_chain_desc.Width;
+                    texture->width  = swap_chain_desc.Width;
                     texture->height = swap_chain_desc.Height;
+                    texture->format = swap_chain_desc.Format;
 
                     texture->state = D3D12_RESOURCE_STATE_COMMON;
 
@@ -1589,7 +1979,7 @@ namespace d_dx12 {
                     D3D12_HEAP_PROPERTIES render_target_heap_properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
 
                     D3D12_RESOURCE_DESC render_target_resource_description = CD3DX12_RESOURCE_DESC::Tex2D(desc.format, desc.width, desc.height,
-                        1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+                        1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 
                     ThrowIfFailed(d3d12_device->CreateCommittedResource(
                         &render_target_heap_properties,
@@ -1602,6 +1992,8 @@ namespace d_dx12 {
 
                     texture->format = desc.format;
                     texture->state  = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                    texture->width  = desc.width;
+                    texture->height = desc.height;
 
                     texture->d3d12_resource->SetName(name);
 
@@ -2245,12 +2637,16 @@ namespace d_dx12 {
 
     void Command_List::bind_handle(Descriptor_Handle handle, u32 binding_point_index){
 
-        d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
+        if(current_bound_shader->type == Shader::Shader_Type::TYPE_GRAPHICS){
+            d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
+        } else if(current_bound_shader->type == Shader::Shader_Type::TYPE_COMPUTE){
+            d3d12_command_list->SetComputeRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
+        }
         return;
 
     }
 
-    void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32 binding_point_index){
+    void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32 binding_point_index, bool write){
 
         if(buffer->usage == Buffer::USAGE::USAGE_CONSTANT_BUFFER){
             if(resource_manager == NULL){
@@ -2262,7 +2658,7 @@ namespace d_dx12 {
                 this->transition_buffer(buffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
             }
 
-            if(resource_manager->is_bound_online[buffer->is_bound_index] == ((u16)-1)){
+            if((resource_manager->is_bound_online[buffer->is_bound_index].bind_status & IS_CBV_BOUND) == 0){
 
                 // OOF thats a long line, descriptive though..
                 buffer->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
@@ -2273,7 +2669,7 @@ namespace d_dx12 {
                 d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
 
                 // Don't need to save the index into the descriptor heap because these aren't bindless buffers
-                resource_manager->is_bound_online[buffer->is_bound_index] = 1;
+                resource_manager->is_bound_online[buffer->is_bound_index].cbv_index = 1;
 
             }
 
@@ -2285,7 +2681,7 @@ namespace d_dx12 {
         return;
     }
 
-    u8 Command_List::bind_texture(Texture* texture, Resource_Manager* resource_manager, u32 binding_point_index){
+    u8 Command_List::bind_texture(Texture* texture, Resource_Manager* resource_manager, u32 binding_point_index, bool write){
 
         u16 index_to_return = -1;
         
@@ -2302,7 +2698,9 @@ namespace d_dx12 {
                     this->transition_texture(texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                 }
 
-                if(resource_manager->is_bound_online[texture->is_bound_index] == ((u16)-1)){
+                if((resource_manager->is_bound_online[texture->is_bound_index].bind_status & IS_SRV_BOUND) == 0){
+
+                    resource_manager->is_bound_online[texture->is_bound_index].bind_status |= IS_SRV_BOUND;
 
                     // OOF thats a long line, descriptive though..
                     texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();
@@ -2312,11 +2710,11 @@ namespace d_dx12 {
                     index_to_return = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size - 1;
                     
                     // Remember that we have bound this texture to the online_descriptor_heap
-                    resource_manager->is_bound_online[texture->is_bound_index] = index_to_return;
+                    resource_manager->is_bound_online[texture->is_bound_index].srv_index = index_to_return;
 
                 } else {
 
-                    index_to_return = resource_manager->is_bound_online[texture->is_bound_index];
+                    index_to_return = resource_manager->is_bound_online[texture->is_bound_index].srv_index;
 
                 }
 
@@ -2336,7 +2734,9 @@ namespace d_dx12 {
                     this->transition_texture(texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                 }
 
-                if(resource_manager->is_bound_online[texture->is_bound_index] == ((u16)-1)){
+                if((resource_manager->is_bound_online[texture->is_bound_index].bind_status & IS_SRV_BOUND) == 0){
+
+                    resource_manager->is_bound_online[texture->is_bound_index].bind_status |= IS_SRV_BOUND;
 
                     // OOF thats a long line, descriptive though..
                     texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();
@@ -2355,11 +2755,11 @@ namespace d_dx12 {
 
                     
                     // Remember that we have bound this texture to the online_descriptor_heap
-                    resource_manager->is_bound_online[texture->is_bound_index] = index_to_return;
+                    resource_manager->is_bound_online[texture->is_bound_index].srv_index = index_to_return;
 
                 } else {
 
-                    index_to_return = resource_manager->is_bound_online[texture->is_bound_index];
+                    index_to_return = resource_manager->is_bound_online[texture->is_bound_index].srv_index;
 
                 }
             }
@@ -2371,35 +2771,73 @@ namespace d_dx12 {
                     DEBUG_BREAK;
                 }
 
-                if(texture->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE){
-                    this->transition_texture(texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                }
+                if(write == false){
 
-                // If this texture descriptor is not already copied to the online heap
-                if(resource_manager->is_bound_online[texture->is_bound_index] == ((u16)-1)){
+                    if(texture->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE){
+                        this->transition_texture(texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                    }
 
-                    // OOF thats a long line, descriptive though..
-                    texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();
-                    index_to_return = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size - 1;
+                    // If this texture descriptor is not already copied to the online heap
+                    if((resource_manager->is_bound_online[texture->is_bound_index].bind_status & IS_SRV_BOUND) == 0){
 
-                    // Create the shader resource view for the depth texture
-                    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                    srvDesc.Format                          = texture->format; // Use R32_FLOAT for depth textures
-                    srvDesc.ViewDimension                   = D3D12_SRV_DIMENSION_TEXTURE2D;
-                    srvDesc.Texture2D.MipLevels             = 1;
-                    srvDesc.Texture2D.MostDetailedMip       = 0;
-                    srvDesc.Texture2D.PlaneSlice            = 0;
-                    srvDesc.Texture2D.ResourceMinLODClamp   = 0.0f;
-                    srvDesc.Shader4ComponentMapping         = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                    d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srvDesc, texture->online_descriptor_handle.cpu_descriptor_handle);
+                        resource_manager->is_bound_online[texture->is_bound_index].bind_status |= IS_SRV_BOUND;
 
-                    // Remember that we have bound this texture to the online_descriptor_heap
-                    resource_manager->is_bound_online[texture->is_bound_index] = index_to_return;
+                        // OOF thats a long line, descriptive though..
+                        texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();
+                        index_to_return = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size - 1;
+
+                        // Create the shader resource view for the depth texture
+                        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                        srvDesc.Format                          = texture->format; // Use R32_FLOAT for depth textures
+                        srvDesc.ViewDimension                   = D3D12_SRV_DIMENSION_TEXTURE2D;
+                        srvDesc.Texture2D.MipLevels             = 1;
+                        srvDesc.Texture2D.MostDetailedMip       = 0;
+                        srvDesc.Texture2D.PlaneSlice            = 0;
+                        srvDesc.Texture2D.ResourceMinLODClamp   = 0.0f;
+                        srvDesc.Shader4ComponentMapping         = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srvDesc, texture->online_descriptor_handle.cpu_descriptor_handle);
+
+                        // Remember that we have bound this texture to the online_descriptor_heap
+                        resource_manager->is_bound_online[texture->is_bound_index].srv_index = index_to_return;
+
+                    } else {
+
+                        index_to_return = resource_manager->is_bound_online[texture->is_bound_index].srv_index;
+
+                    }
 
                 } else {
 
-                    index_to_return = resource_manager->is_bound_online[texture->is_bound_index];
+                    if(texture->state != D3D12_RESOURCE_STATE_UNORDERED_ACCESS){
+                        this->transition_texture(texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                    }
 
+                    // If this texture descriptor is not already copied to the online heap
+                    if((resource_manager->is_bound_online[texture->is_bound_index].bind_status & IS_UAV_BOUND) == 0){
+
+                        resource_manager->is_bound_online[texture->is_bound_index].bind_status |= IS_UAV_BOUND;
+
+                        // OOF thats a long line, descriptive though..
+                        texture->online_descriptor_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();
+                        index_to_return = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size - 1;
+
+                        // d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srvDesc, texture->online_descriptor_handle.cpu_descriptor_handle);
+
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+                        uavDesc.Format = texture->format;
+                        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+                        uavDesc.Texture2D.MipSlice = 0;
+                        uavDesc.Texture2D.PlaneSlice = 0;
+                        d3d12_device->CreateUnorderedAccessView(texture->d3d12_resource.Get(), nullptr, &uavDesc, texture->online_descriptor_handle.cpu_descriptor_handle);
+
+                        // Remember that we have bound this texture to the online_descriptor_heap
+                        resource_manager->is_bound_online[texture->is_bound_index].uav_index = index_to_return;
+
+                    } else {
+
+                        index_to_return = resource_manager->is_bound_online[texture->is_bound_index].uav_index;
+
+                    }
                 }
             }
             break;
@@ -2432,7 +2870,11 @@ namespace d_dx12 {
             Descriptor_Handle handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(0);
 
             // Set descriptor in Root Signature
-            d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
+            if(current_bound_shader->type == Shader::Shader_Type::TYPE_GRAPHICS){
+                d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
+            } else if (current_bound_shader->type == Shader::Shader_Type::TYPE_COMPUTE){
+                d3d12_command_list->SetComputeRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
+            }
 
         //}
 
@@ -2488,7 +2930,11 @@ namespace d_dx12 {
 
     void Command_List::set_shader(Shader* shader){
         this->current_bound_shader = shader;
-        d3d12_command_list->SetGraphicsRootSignature(shader->d3d12_root_signature.Get());
+        if(shader->type == Shader::Shader_Type::TYPE_GRAPHICS){
+            d3d12_command_list->SetGraphicsRootSignature(shader->d3d12_root_signature.Get());
+        } else {
+            d3d12_command_list->SetComputeRootSignature(shader->d3d12_root_signature.Get());
+        }
         d3d12_command_list->SetPipelineState(shader->d3d12_pipeline_state.Get());
     }
 

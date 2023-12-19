@@ -15,13 +15,61 @@ namespace d_dx12 {
     struct Texture_Desc;
     struct Buffer;
     struct Buffer_Desc;
+    struct Shader;
+    struct Shader_Desc;
+
+    struct Shader {
+
+        enum Shader_Type {
+            TYPE_GRAPHICS,
+            TYPE_COMPUTE,
+        };
+
+        enum Input_Type {
+            TYPE_INVALID,                   // Used in the binding poinnts array to define unused binding points
+            TYPE_CONSTANT_BUFFER,           // CBV
+            TYPE_SHADER_RESOURCE,           // SRV
+            TYPE_UNORDERED_ACCESS_RESOURCE, // UAV
+            TYPE_INLINE_CONSTANT,           // Root Sig Constant
+            TYPE_SAMPLER,
+        };
+
+        // Parameter Description
+        Microsoft::WRL::ComPtr<ID3D12RootSignature> d3d12_root_signature;
+
+        // Graphics Pipeline State
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> d3d12_pipeline_state;
+
+        Shader::Shader_Type type = Shader::Shader_Type::TYPE_GRAPHICS; 
+
+        // Binding points
+        struct Binding_Point {
+            Shader::Input_Type                 input_type = Shader::Input_Type::TYPE_INVALID;
+            D3D12_SHADER_VISIBILITY            shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
+            u8                                 root_signature_index;
+            u16                                bind_point;
+            u16                                bind_space;
+            u16                                bind_count;
+            d_std::d_string                    name;
+            u32                                cb_size;
+        };
+
+        Binding_Point binding_points[BINDING_POINT_INDEX_COUNT];
+
+        void d_dx12_release();
+
+    };
 
     struct Shader_Desc {
 
+        Shader::Shader_Type type = Shader::Shader_Type::TYPE_GRAPHICS; 
+
         // Shader bytecode
-        wchar_t* vertex_shader; 
-        wchar_t* pixel_shader; 
-        wchar_t* compute_shader; 
+        wchar_t* vertex_shader = nullptr; 
+        union {
+            wchar_t* pixel_shader = nullptr; 
+            wchar_t* compute_shader; 
+        };
 
         u8           num_render_targets              = 1;
         DXGI_FORMAT* render_target_formats           = nullptr;
@@ -40,41 +88,6 @@ namespace d_dx12 {
         // List of input elements, not nesseceraly within the same stride, since each element
         // layout could be for a different vertex buffer slot
         std::vector<Input_Element_Desc> input_layout; 
-
-    };
-
-    struct Shader {
-
-        enum Input_Type {
-            TYPE_INVALID,                   // Used in the binding poinnts array to define unused binding points
-            TYPE_CONSTANT_BUFFER,           // CBV
-            TYPE_SHADER_RESOURCE,           // SRV
-            TYPE_UNORDERED_ACCESS_RESOURCE, // UAV
-            TYPE_INLINE_CONSTANT,           // Root Sig Constant
-            TYPE_SAMPLER,
-        };
-
-        // Parameter Description
-        Microsoft::WRL::ComPtr<ID3D12RootSignature> d3d12_root_signature;
-
-        // Graphics Pipeline State
-        Microsoft::WRL::ComPtr<ID3D12PipelineState> d3d12_pipeline_state;
-
-        // Binding points
-        struct Binding_Point {
-            Shader::Input_Type                 input_type = Shader::Input_Type::TYPE_INVALID;
-            D3D12_SHADER_VISIBILITY            shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
-            u8                                 root_signature_index;
-            u16                                bind_point;
-            u16                                bind_space;
-            u16                                bind_count;
-            d_std::d_string                    name;
-            u32                                cb_size;
-        };
-
-        Binding_Point binding_points[BINDING_POINT_INDEX_COUNT];
-
-        void d_dx12_release();
 
     };
 
@@ -111,6 +124,16 @@ namespace d_dx12 {
         void d_dx12_release();
     };
 
+    #define IS_CBV_BOUND (1 << 0)
+    #define IS_SRV_BOUND (1 << 1)
+    #define IS_UAV_BOUND (1 << 2)
+    struct Bind_Status {
+        u8  bind_status; // Tracks bind status with IS_**V_BOUND flags
+        u16 cbv_index;
+        u16 srv_index;
+        u16 uav_index;
+    };
+
     // Resource Manager
     struct Resource_Manager {
 
@@ -118,7 +141,7 @@ namespace d_dx12 {
         Descriptor_Heap    dsv_descriptor_heap;
         Descriptor_Heap    offline_cbv_srv_uav_descriptor_heap;
         Descriptor_Heap    online_cbv_srv_uav_descriptor_heap[NUM_BACK_BUFFERS];
-        u16                is_bound_online[IS_BOUND_ONLINE_TABLE_SIZE];
+        Bind_Status        is_bound_online[IS_BOUND_ONLINE_TABLE_SIZE];
         u8                 is_bound_online_index = 0;
 
         // TODO: ...
@@ -247,8 +270,8 @@ namespace d_dx12 {
         void bind_vertex_buffer(Buffer* buffer, u32 slot);
         void bind_index_buffer(Buffer* buffer);
         void bind_handle(Descriptor_Handle handle, u32 binding_point);
-        void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32  binding_point);
-        u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, u32  binding_point);
+        void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32  binding_point, bool write = false);
+        u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, u32  binding_point, bool write = false);
         void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, u32  parameter_name);
         void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, u32 binding_point);
         Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);

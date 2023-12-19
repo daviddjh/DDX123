@@ -190,3 +190,28 @@ Shader* create_shadow_mapping_shader()
     return create_shader(shader_desc);
 
 }
+
+Shader* create_post_processing_shader()
+{
+
+    DEBUG_LOG("Creating Post Processing Shader");
+
+    //////////////////////////////////
+    //  Create our shader / PSO
+    //////////////////////////////////
+
+    Shader_Desc shader_desc;
+
+    //////////////////////////////////
+    //  Set compiled shader code
+    //////////////////////////////////
+
+    shader_desc.type = Shader::Shader_Type::TYPE_COMPUTE;
+    shader_desc.compute_shader = L"PostProcessing.hlsl";
+
+    /////////////////////////////////////////
+    //  Create PSO using shader reflection
+    /////////////////////////////////////////
+
+    return create_shader(shader_desc);
+}

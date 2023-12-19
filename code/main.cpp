@@ -34,16 +34,15 @@ struct D_Camera {
     float fov   = 40.;
 };
 
-// Global Vars, In order of creation
-struct D_Renderer {
-
-    HWND              hWnd;
-    Resource_Manager  resource_manager;
+struct D_Shaders {
     Shader*           pbr_shader;
     Shader*           deferred_g_buffer_shader;
     Shader*           deferred_shading_shader;
     Shader*           shadow_map_shader;
-    Command_List*     direct_command_lists[NUM_BACK_BUFFERS];
+    Shader*           post_processing_shader;
+};
+
+struct D_Textures {
     Texture*          rt[NUM_BACK_BUFFERS];
     Texture*          ds;
     Texture*          shadow_ds;
@@ -52,19 +51,38 @@ struct D_Renderer {
     Texture*          g_buffer_normal;
     Texture*          g_buffer_rough_metal;
     Texture*          sampled_texture;
+    Texture*          ssao_rotation_texture;
+    Texture*          main_render_target;
+};
+
+struct D_Buffers{
     Buffer*           full_screen_quad_vertex_buffer;
     Buffer*           full_screen_quad_index_buffer;
     Buffer*           ssao_sample_kernel;
-    Texture*          ssao_rotation_texture;
-    Descriptor_Handle imgui_font_handle;
+};
+
+struct D_Renderer_Config {
     bool              fullscreen_mode = false;
+    bool              deferred_rendering = false;
+};
+
+// Global Vars, In order of creation
+struct D_Renderer {
+    HWND              hWnd;
+    Resource_Manager  resource_manager;
+    Command_List*     direct_command_lists[NUM_BACK_BUFFERS];
+    D_Shaders         shaders;
+    Shader*           shader_array[sizeof(D_Shaders) / sizeof(Shader*)];
+    D_Textures        textures;
+    D_Buffers         buffers;
+    D_Camera          camera;
+    D_Renderer_Config config;
+
+    Descriptor_Handle imgui_font_handle;
     RECT              window_rect;
     Span<D_Model>     models;
-    D_Camera          camera;
-
     Per_Frame_Data    per_frame_data;
 
-    bool              deferred_rendering = false;
 
     int  init();
     void render();
@@ -258,17 +276,13 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             D_Draw_Call draw_call = mesh->draw_calls.ptr[j];
             
             // Check if table index is < 0 (-1). Only bind albedo texture if it needs to be bound to avoid unncessary descriptor copies
-            if(model->materials.ptr[draw_call.material_index].albedo_texture.texture_binding_table_index < 0){
-                model->materials.ptr[draw_call.material_index].albedo_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].albedo_texture.texture, &resource_manager, 0);
-            }
+            model->materials.ptr[draw_call.material_index].albedo_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].albedo_texture.texture, &resource_manager, 0);
 
             // If this material uses a normal map
             if(model->materials.ptr[draw_call.material_index].material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
 
                 // Check if table index is < 0 (-1). Only bind albedo texture if it needs to be bound to avoid unncessary descriptor copies
-                if(model->materials.ptr[draw_call.material_index].normal_texture.texture_binding_table_index < 0){
-                    model->materials.ptr[draw_call.material_index].normal_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].normal_texture.texture, &resource_manager, 0);
-                }
+                model->materials.ptr[draw_call.material_index].normal_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].normal_texture.texture, &resource_manager, 0);
 
             }
 
@@ -276,9 +290,7 @@ void D_Renderer::bind_and_draw_model(Command_List* command_list, D_Model* model)
             if(model->materials.ptr[draw_call.material_index].material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE){
 
                 // Check if table index is < 0 (-1). Only bind albedo texture if it needs to be bound to avoid unncessary descriptor copies
-                if(model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture_binding_table_index < 0){
-                    model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture, &resource_manager, 0);
-                }
+                model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture_binding_table_index = command_list->bind_texture(model->materials.ptr[draw_call.material_index].roughness_metallic_texture.texture, &resource_manager, 0);
 
             }
         }
@@ -349,15 +361,15 @@ void D_Renderer::shutdown(){
     // d_dx12 shutdown
 
     resource_manager.d_dx12_release();
-    pbr_shader->d_dx12_release();
+    shaders.pbr_shader->d_dx12_release();
 
     for(int i = 0; i < NUM_BACK_BUFFERS; i++){
         direct_command_lists[i]->d_dx12_release();
-        rt[i]->d_dx12_release();
+        textures.rt[i]->d_dx12_release();
     }
 
-    ds->d_dx12_release();
-    ssao_sample_kernel->d_dx12_release();
+    textures.ds->d_dx12_release();
+    buffers.ssao_sample_kernel->d_dx12_release();
 
     // Release model resources
     D_Model* model = &models.ptr[0];
@@ -437,22 +449,33 @@ int D_Renderer::init(){
     rt_desc.rtv_connect_to_next_swapchain_buffer = true;
 
     for(int i = 0; i < NUM_BACK_BUFFERS; i++){
-        rt[i] = resource_manager.create_texture(L"Render Target", rt_desc);
+        textures.rt[i] = resource_manager.create_texture(L"Render Target", rt_desc);
     }
+
+    Texture_Desc main_rt_desc;
+    main_rt_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
+    main_rt_desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    main_rt_desc.width  = display.display_width;
+    main_rt_desc.height = display.display_height;
+    main_rt_desc.clear_color[0] = 0.3f; 
+    main_rt_desc.clear_color[1] = 0.6f; 
+    main_rt_desc.clear_color[2] = 1.0f; 
+    main_rt_desc.clear_color[3] = 1.0f;
+    textures.main_render_target = resource_manager.create_texture(L"Main Render Target", main_rt_desc);
 
     Texture_Desc ds_desc;
     ds_desc.usage = Texture::USAGE::USAGE_DEPTH_STENCIL;
     ds_desc.width = display_width;
     ds_desc.height = display_height;
 
-    ds = resource_manager.create_texture(L"Depth Stencil", ds_desc);
+    textures.ds = resource_manager.create_texture(L"Depth Stencil", ds_desc);
 
     Texture_Desc shadow_ds_desc;
     shadow_ds_desc.usage = Texture::USAGE::USAGE_DEPTH_STENCIL;
     shadow_ds_desc.width = display_width;
     shadow_ds_desc.height = display_height;
 
-    shadow_ds = resource_manager.create_texture(L"Shadow Depth Stencil", shadow_ds_desc);
+    textures.shadow_ds = resource_manager.create_texture(L"Shadow Depth Stencil", shadow_ds_desc);
 
     Texture_Desc g_buffer_albedo_desc;
     g_buffer_albedo_desc.width  = display_width;
@@ -464,7 +487,7 @@ int D_Renderer::init(){
     g_buffer_albedo_desc.clear_color[2] = 1.0;
     g_buffer_albedo_desc.clear_color[3] = 0.0;
 
-    g_buffer_albedo = resource_manager.create_texture(L"Gbuffer Albedo", g_buffer_albedo_desc);
+    textures.g_buffer_albedo = resource_manager.create_texture(L"Gbuffer Albedo", g_buffer_albedo_desc);
 
     Texture_Desc g_buffer_position_desc;
     g_buffer_position_desc.width  = display_width;
@@ -472,7 +495,7 @@ int D_Renderer::init(){
     g_buffer_position_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     g_buffer_position_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
 
-    g_buffer_position = resource_manager.create_texture(L"Gbuffer Position", g_buffer_position_desc);
+    textures.g_buffer_position = resource_manager.create_texture(L"Gbuffer Position", g_buffer_position_desc);
 
     Texture_Desc g_buffer_normal_desc;
     g_buffer_normal_desc.width  = display_width;
@@ -480,7 +503,7 @@ int D_Renderer::init(){
     g_buffer_normal_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     g_buffer_normal_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
 
-    g_buffer_normal = resource_manager.create_texture(L"Gbuffer Normal", g_buffer_normal_desc);
+    textures.g_buffer_normal = resource_manager.create_texture(L"Gbuffer Normal", g_buffer_normal_desc);
 
     Texture_Desc g_buffer_rough_metal_desc;
     g_buffer_rough_metal_desc.width  = display_width;
@@ -488,7 +511,7 @@ int D_Renderer::init(){
     g_buffer_rough_metal_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     g_buffer_rough_metal_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
 
-    g_buffer_rough_metal = resource_manager.create_texture(L"Gbuffer Roughness and Metallic", g_buffer_rough_metal_desc);
+    textures.g_buffer_rough_metal = resource_manager.create_texture(L"Gbuffer Roughness and Metallic", g_buffer_rough_metal_desc);
 
     ///////////////////////////////////////////////
     //  Create command allocators and command lists
@@ -502,10 +525,11 @@ int D_Renderer::init(){
     // Set Shaders
     ////////////////////////////////////////
 
-    pbr_shader               = create_forward_render_pbr_shader();
-    deferred_g_buffer_shader = create_deferred_render_gbuffer_shader();
-    deferred_shading_shader  = create_deferred_render_shading_shader();
-    shadow_map_shader        = create_shadow_mapping_shader();
+    shaders.pbr_shader               = create_forward_render_pbr_shader();
+    shaders.deferred_g_buffer_shader = create_deferred_render_gbuffer_shader();
+    shaders.deferred_shading_shader  = create_deferred_render_shading_shader();
+    shaders.shadow_map_shader        = create_shadow_mapping_shader();
+    shaders.post_processing_shader   = create_post_processing_shader();
 
     ////////////////////////////
     //  Create our command list
@@ -537,7 +561,7 @@ int D_Renderer::init(){
     ssao_sample_kernel_desc.size_of_each_element = sizeof(DirectX::XMFLOAT4);
     ssao_sample_kernel_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
 
-    ssao_sample_kernel = resource_manager.create_buffer(L"Test Constant Buffer", ssao_sample_kernel_desc);
+    buffers.ssao_sample_kernel = resource_manager.create_buffer(L"Test Constant Buffer", ssao_sample_kernel_desc);
 
     std::uniform_real_distribution<float> random_floats(0., 1.);
     std::default_random_engine generator;
@@ -568,7 +592,7 @@ int D_Renderer::init(){
 
     }
 
-    upload_command_list->load_buffer(ssao_sample_kernel, (u8*)&ssao_sample, sizeof(SSAO_Sample), 32);
+    upload_command_list->load_buffer(buffers.ssao_sample_kernel, (u8*)&ssao_sample, sizeof(SSAO_Sample), 32);
 
     ////////////////////////////
     //  SSAO Rotation Texture
@@ -580,7 +604,7 @@ int D_Renderer::init(){
     ssao_rotation_texture_desc.name = L"SSAO Rotation Texture";
     ssao_rotation_texture_desc.usage = Texture::USAGE::USAGE_SAMPLED;
 
-    ssao_rotation_texture = resource_manager.create_texture(L"SSAO_Rotation Texture", ssao_rotation_texture_desc);
+    textures.ssao_rotation_texture = resource_manager.create_texture(L"SSAO_Rotation Texture", ssao_rotation_texture_desc);
 
     Span<DirectX::XMFLOAT3> ssao_rotation_texture_data;
     ssao_rotation_texture_data.alloc(16);
@@ -592,7 +616,7 @@ int D_Renderer::init(){
         rotation_data_ptr[i].z = 0.0;
     }
     
-    upload_command_list->load_decoded_texture_from_memory(ssao_rotation_texture, (u_ptr)ssao_rotation_texture_data.ptr, false);
+    upload_command_list->load_decoded_texture_from_memory(textures.ssao_rotation_texture, (u_ptr)ssao_rotation_texture_data.ptr, false);
 
     ////////////////////////////////////////////////
     // Vertex Buffer for full screen quad
@@ -627,9 +651,9 @@ int D_Renderer::init(){
     vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position);
     vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
 
-    full_screen_quad_vertex_buffer = resource_manager.create_buffer(L"Full Screen Quad Vertex Buffer", vertex_buffer_desc);
+    buffers.full_screen_quad_vertex_buffer = resource_manager.create_buffer(L"Full Screen Quad Vertex Buffer", vertex_buffer_desc);
 
-    upload_command_list->load_buffer(full_screen_quad_vertex_buffer, (u8*)fsq_verticies, 6 * sizeof(Vertex_Position), sizeof(Vertex_Position));
+    upload_command_list->load_buffer(buffers.full_screen_quad_vertex_buffer, (u8*)fsq_verticies, 6 * sizeof(Vertex_Position), sizeof(Vertex_Position));
 
     u16 fsq_index_buffer[] = {
         0, 1, 2,
@@ -642,9 +666,9 @@ int D_Renderer::init(){
     index_buffer_desc.size_of_each_element = sizeof(u16);
     index_buffer_desc.usage = Buffer::USAGE::USAGE_INDEX_BUFFER;
 
-    full_screen_quad_index_buffer = resource_manager.create_buffer(L"Full Screen Quad Index Buffer", index_buffer_desc);
+    buffers.full_screen_quad_index_buffer = resource_manager.create_buffer(L"Full Screen Quad Index Buffer", index_buffer_desc);
 
-    upload_command_list->load_buffer(full_screen_quad_index_buffer, (u8*)fsq_index_buffer, 6 * sizeof(u16), sizeof(u16));
+    upload_command_list->load_buffer(buffers.full_screen_quad_index_buffer, (u8*)fsq_index_buffer, 6 * sizeof(u16), sizeof(u16));
 
 
     ///////////////////////
@@ -719,17 +743,17 @@ void D_Renderer::render_shadow_map(Command_List* command_list){
     per_frame_data.light_space_matrix = light_view_projection_matrix;
 
     // Fill the command list:
-    command_list->set_shader(shadow_map_shader);
+    command_list->set_shader(shaders.shadow_map_shader);
 
-    if(shadow_ds->state != D3D12_RESOURCE_STATE_DEPTH_WRITE){
-        command_list->transition_texture(shadow_ds, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    if(textures.shadow_ds->state != D3D12_RESOURCE_STATE_DEPTH_WRITE){
+        command_list->transition_texture(textures.shadow_ds, D3D12_RESOURCE_STATE_DEPTH_WRITE);
     }
     // Set up render targets. Here, we are just using a depth buffer
     command_list->set_viewport(display.viewport);
     command_list->set_scissor_rect(display.scissor_rect);
-    command_list->set_render_targets(0, NULL, shadow_ds);
+    command_list->set_render_targets(0, NULL, textures.shadow_ds);
 
-    command_list->clear_depth_stencil(shadow_ds, 1.0f);
+    command_list->clear_depth_stencil(textures.shadow_ds, 1.0f);
 
     //command_list->bind_constant_arguments(&light_view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("light_matrix"));
     Descriptor_Handle light_matrix_handle = resource_manager.load_dyanamic_frame_data((void*)&light_view_projection_matrix, sizeof(DirectX::XMMATRIX), 256);
@@ -738,7 +762,7 @@ void D_Renderer::render_shadow_map(Command_List* command_list){
     bind_and_draw_model(command_list, &renderer.models.ptr[0]);
     
     // Transition shadow ds to Pixel Resource State
-    command_list->transition_texture(shadow_ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    command_list->transition_texture(textures.shadow_ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
 }
 
@@ -748,15 +772,15 @@ void D_Renderer::forward_render_pass(Command_List* command_list){
     //////////////////////////////////////
     // Forward Shading!
     //////////////////////////////////////
-    command_list->set_render_targets(1, &rt[current_backbuffer_index], ds);
+    command_list->set_render_targets(1, &textures.main_render_target, textures.ds);
 
-    command_list->set_shader(pbr_shader);
+    command_list->set_shader(shaders.pbr_shader);
     command_list->set_viewport(display.viewport);
     command_list->set_scissor_rect(display.scissor_rect);
 
     // Bind Shadow Map
     Shadow_Texture_Index shadow_texture_index = {};
-    shadow_texture_index.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
+    shadow_texture_index.shadow_texture_index = command_list->bind_texture(textures.shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
 
     // Upload Shadow_Map_Index - Constant Buffer requires 256 byte alignment
     Descriptor_Handle shadow_map_index_handle = resource_manager.load_dyanamic_frame_data((void*)&shadow_texture_index, sizeof(Shadow_Texture_Index), 256);
@@ -780,25 +804,25 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     ///////////////////////
 
     // Transition Albedo Buffer
-    if(g_buffer_albedo->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
-        command_list->transition_texture(g_buffer_albedo, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    if(textures.g_buffer_albedo->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(textures.g_buffer_albedo, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
     // Transition Position Buffer
-    if(g_buffer_position->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
-        command_list->transition_texture(g_buffer_position, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    if(textures.g_buffer_position->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(textures.g_buffer_position, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    if(g_buffer_normal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
-        command_list->transition_texture(g_buffer_normal, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    if(textures.g_buffer_normal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(textures.g_buffer_normal, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    if(g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
-        command_list->transition_texture(g_buffer_rough_metal, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    if(textures.g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(textures.g_buffer_rough_metal, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    command_list->clear_render_target(g_buffer_albedo);
+    command_list->clear_render_target(textures.g_buffer_albedo);
 
-    Texture* render_targets[] = {g_buffer_albedo, g_buffer_position, g_buffer_normal, g_buffer_rough_metal};
+    Texture* render_targets[] = {textures.g_buffer_albedo, textures.g_buffer_position, textures.g_buffer_normal, textures.g_buffer_rough_metal};
 
-    command_list->set_render_targets(4, render_targets, ds);
-    command_list->set_shader        (deferred_g_buffer_shader);
+    command_list->set_render_targets(4, render_targets, textures.ds);
+    command_list->set_shader        (shaders.deferred_g_buffer_shader);
     command_list->set_viewport      (display.viewport);
     command_list->set_scissor_rect  (display.scissor_rect);
 
@@ -814,40 +838,40 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     // Shading Pass
     ///////////////////////
 
-    command_list->set_render_targets(1, &rt[current_backbuffer_index], NULL);
+    command_list->set_render_targets(1, &textures.main_render_target, NULL);
     command_list->set_viewport      (display.viewport);
     command_list->set_scissor_rect  (display.scissor_rect);
-    command_list->set_shader        (deferred_shading_shader);
+    command_list->set_shader        (shaders.deferred_shading_shader);
 
     // Bind Buffers
-    if(g_buffer_albedo->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-        command_list->transition_texture(g_buffer_albedo, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    if(textures.g_buffer_albedo->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(textures.g_buffer_albedo, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    if(g_buffer_position->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-        command_list->transition_texture(g_buffer_position, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    if(textures.g_buffer_position->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(textures.g_buffer_position, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    if(g_buffer_normal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-        command_list->transition_texture(g_buffer_normal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    if(textures.g_buffer_normal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(textures.g_buffer_normal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    if(g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-        command_list->transition_texture(g_buffer_rough_metal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    if(textures.g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(textures.g_buffer_rough_metal, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-    if(ds->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
-        command_list->transition_texture(ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    if(textures.ds->state != D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
+        command_list->transition_texture(textures.ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // Bind GBuffer Textures (and indices)
     Gbuffer_Indices gbuffer_indices          = {};
-    gbuffer_indices.albedo_index             = command_list->bind_texture (g_buffer_albedo,       &resource_manager, binding_point_string_lookup("Albedo Gbuffer"));
-    gbuffer_indices.position_index           = command_list->bind_texture (g_buffer_position,     &resource_manager, binding_point_string_lookup("Position Gbuffer"));
-    gbuffer_indices.normal_index             = command_list->bind_texture (g_buffer_normal,       &resource_manager, binding_point_string_lookup("Normal Gbuffer"));
-    gbuffer_indices.roughness_metallic_index = command_list->bind_texture (g_buffer_rough_metal,  &resource_manager, binding_point_string_lookup("Roughness and Metallic Gbuffer"));
+    gbuffer_indices.albedo_index             = command_list->bind_texture (textures.g_buffer_albedo,       &resource_manager, binding_point_string_lookup("Albedo Gbuffer"));
+    gbuffer_indices.position_index           = command_list->bind_texture (textures.g_buffer_position,     &resource_manager, binding_point_string_lookup("Position Gbuffer"));
+    gbuffer_indices.normal_index             = command_list->bind_texture (textures.g_buffer_normal,       &resource_manager, binding_point_string_lookup("Normal Gbuffer"));
+    gbuffer_indices.roughness_metallic_index = command_list->bind_texture (textures.g_buffer_rough_metal,  &resource_manager, binding_point_string_lookup("Roughness and Metallic Gbuffer"));
 
     Descriptor_Handle gbuffer_indices_handle = resource_manager.load_dyanamic_frame_data((void*)&gbuffer_indices, sizeof(Gbuffer_Indices), 256);
     command_list->bind_handle(gbuffer_indices_handle, binding_point_string_lookup("gbuffer_indices"));
     
     // Bind SSAO Texture (and index)
     SSAO_Texture_Index ssao_texture_index          = {};
-    ssao_texture_index.ssao_rotation_texture_index = command_list->bind_texture (ssao_rotation_texture, &resource_manager, 0);
+    ssao_texture_index.ssao_rotation_texture_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
 
     Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(SSAO_Texture_Index), 256);
     command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
@@ -858,11 +882,11 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
 
     // Bind SSAO Kernel
-    command_list->bind_buffer(ssao_sample_kernel, &resource_manager, binding_point_string_lookup("ssao_sample"));
+    command_list->bind_buffer(buffers.ssao_sample_kernel, &resource_manager, binding_point_string_lookup("ssao_sample"));
 
     // Bind Shadow Map and upload Shadow_Map_Index - Constant Buffer requires 256 byte alignment
     Shadow_Texture_Index shadow_texture_index = {};
-    shadow_texture_index.shadow_texture_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
+    shadow_texture_index.shadow_texture_index = command_list->bind_texture(textures.shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
 
     Descriptor_Handle shadow_map_index_handle = resource_manager.load_dyanamic_frame_data((void*)&shadow_texture_index, sizeof(Shadow_Texture_Index), 256);
     command_list->bind_handle(shadow_map_index_handle, binding_point_string_lookup("shadow_texture_index"));
@@ -873,8 +897,8 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     // Now be bind the texture table to the root signature. 
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
 
-    command_list->bind_vertex_buffer(full_screen_quad_vertex_buffer, 0);
-    command_list->bind_index_buffer (full_screen_quad_index_buffer);
+    command_list->bind_vertex_buffer(buffers.full_screen_quad_vertex_buffer, 0);
+    command_list->bind_index_buffer (buffers.full_screen_quad_index_buffer);
     command_list->draw(6);
 }
 
@@ -936,18 +960,19 @@ void D_Renderer::render(){
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     // Transition the RT and DS
-    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_RENDER_TARGET);
+    if(textures.main_render_target->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(textures.main_render_target, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    if(ds->state != D3D12_RESOURCE_STATE_DEPTH_WRITE)
-        command_list->transition_texture(ds, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    if(textures.ds->state != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+        command_list->transition_texture(textures.ds, D3D12_RESOURCE_STATE_DEPTH_WRITE);
         
     // Clear the render target and depth stencil
     FLOAT rt_clear_color[] = {0.3f, 0.6, 1.0f, 1.0f};
-    command_list->clear_render_target(rt[current_backbuffer_index], rt_clear_color);
-    command_list->clear_depth_stencil(ds, 1.0f);
+    command_list->clear_render_target(textures.main_render_target);
+    command_list->clear_depth_stencil(textures.ds, 1.0f);
 
     // Either forward rendering or deferred rendering
-    if(deferred_rendering == false) {
+    if(config.deferred_rendering == false) {
 
         forward_render_pass(command_list);
 
@@ -957,26 +982,55 @@ void D_Renderer::render(){
 
     }
 
+    command_list->set_shader(shaders.post_processing_shader);
+    
+    // Bind GBuffer Textures (and indices)
+    Shadow_Texture_Index output_texture_index = {};
+    output_texture_index.shadow_texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+
+    Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Shadow_Texture_Index), 256);
+    command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+    // Now be bind the texture table to the root signature. 
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+    command_list->d3d12_command_list->Dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
+
+    command_list->transition_texture(textures.main_render_target,           D3D12_RESOURCE_STATE_RENDER_TARGET);
+
     // Create IMGUI window
     ImGui::Begin("Info");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
     ImGui::SliderFloat3("Light Position", &this->per_frame_data.light_position.x, -10., 10);
     ImGui::DragFloat3("Light Color", &this->per_frame_data.light_color.x);
-    ImGui::Checkbox("Deferred Shading?", &deferred_rendering);
+    ImGui::SliderFloat("Camera FOV", &this->camera.fov, 35., 120.);
+    ImGui::Checkbox("Deferred Shading?", &config.deferred_rendering);
     // Render a texture
     //u16 shadow_map_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
-    u32 ssao_rotation_index = command_list->bind_texture (ssao_rotation_texture, &resource_manager, 0);
-    float render_ratio = 1920. / 1080.;
-    ImGui::Image((ImTextureID)resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(ssao_rotation_index).gpu_descriptor_handle.ptr, ImVec2(200.*render_ratio, 200.));
+    // u32 ssao_rotation_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
+    // float render_ratio = 1920. / 1080.;
+    // ImGui::Image((ImTextureID)resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(ssao_rotation_index).gpu_descriptor_handle.ptr, ImVec2(200.*render_ratio, 200.));
     ImGui::End();
     ImGui::Render();
 
     // Render ImGui on top of everything
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
 
+    // Prepare screen buffer for copy destination
+    command_list->transition_texture(textures.rt[current_backbuffer_index], D3D12_RESOURCE_STATE_COPY_DEST);
+    command_list->transition_texture(textures.main_render_target,           D3D12_RESOURCE_STATE_COPY_SOURCE);
+
+    // Copy main render target to screen buffer
+    command_list->d3d12_command_list->CopyTextureRegion(
+        &CD3DX12_TEXTURE_COPY_LOCATION(textures.rt[current_backbuffer_index]->d3d12_resource.Get()),
+        0,
+        0,
+        0,
+        &CD3DX12_TEXTURE_COPY_LOCATION(textures.main_render_target->d3d12_resource.Get()),
+        nullptr
+    );
+
     // Transition RT to presentation state
-    command_list->transition_texture(rt[current_backbuffer_index], D3D12_RESOURCE_STATE_PRESENT);
+    command_list->transition_texture(textures.rt[current_backbuffer_index], D3D12_RESOURCE_STATE_PRESENT);
 
     // Execute Command List
     command_list->close();
@@ -1006,9 +1060,9 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
             {
                 if ((wParam == VK_RETURN) && (lParam & (1 << 29))) {
                     if (application_is_initialized && CheckTearingSupport()) {
-                        Span<Texture*> rts_to_resize = { renderer.rt, 2 };
+                        Span<Texture*> rts_to_resize = { renderer.textures.rt, 2 };
                         toggle_fullscreen(rts_to_resize);
-                        renderer.ds->resize(renderer.rt[0]->width, renderer.rt[0]->height);
+                        renderer.textures.ds->resize(renderer.textures.rt[0]->width, renderer.textures.rt[0]->height);
                     }
                 } else {
                     result = DefWindowProc(hWnd, msg, wParam, lParam);

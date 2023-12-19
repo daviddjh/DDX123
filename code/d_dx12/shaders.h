@@ -14,6 +14,9 @@ const enum Binding_Point_Index : u32 {
     SHADOW_TEXTURE_INDEX,
     MODEL_MATRIX,
     LIGHT_MATRIX,
+    OUTPUT_TEXTURE,
+    INPUT_TEXTURE,
+    OUTPUT_TEXTURE_INDEX,
     BINDING_POINT_INDEX_COUNT,
 };
 
@@ -34,6 +37,9 @@ constexpr const Binding_Point_String_Map binding_point_map[] = {
     {"shadow_texture_index", SHADOW_TEXTURE_INDEX},
     {"model_matrix", MODEL_MATRIX},
     {"light_matrix", LIGHT_MATRIX},
+    {"outputTexture", OUTPUT_TEXTURE},
+    {"inputTexture", INPUT_TEXTURE},
+    {"output_texture_index", OUTPUT_TEXTURE_INDEX},
 };
 
 // Got from: https://stackoverflow.com/questions/27490858/how-can-you-compare-two-character-strings-statically-at-compile-time
@@ -49,5 +55,6 @@ constexpr u32 binding_point_string_lookup(const char string[]){
     }
 
     //DEBUG_ERROR("Cant find the binding point string! Make sure you've included the binding point into 'binding_point_map'.");
+    //static_assert(false);
     return (u32)0 - (u32)1; // If we cant find the string, return the max u32 number
 }

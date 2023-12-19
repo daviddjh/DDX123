@@ -1,4 +1,30 @@
-11/8/23
+12/18/23
+
+Got Compute Shaders working!
+
+Using one now as a "Post Processing" shader. Currently just shades half the screen yellow.
+
+Found some issues with my binding system (caused by needing to use a texture as a Unordered access resource)
+
+The "main render texture" (which we are rendering to now, instead of the actual swap chain screen buffer)
+is now bound to the online descriptor heap as both a render target view, and an Unordered Access view.
+
+One problem I will need to solve is out texture_2d_table. The entire table has to be of type "Texture2D" (read only),
+or "RWTexture2D<float4>", which is read and write.
+    - I would like to have all the textures in one "bindless" table, but I may need to make multiple.
+    - Currently, I'm binding the whole table as a "RW" UAV table, just for the compute shader.
+    - Maybe I can make 2 "different" binding points (Texture2D and RWTexture2D) then bind them to the same table? Errors would be user consequence.
+
+TODO:
+- Come up with solution to texture binding / UAV issue
+- Measure performance difference of recent changes:
+    - "Main render texture" + copy instead of rendering to swap chain
+    - Compute shader pass
+
+- Add d_dx12 function for copy one texture to another
+- Add d_dx12 function for compute dispatch
+
+12/15/23
 
 Many updates! Been writing in obsidian noteboot.
 
