@@ -1594,6 +1594,24 @@ namespace d_dx12 {
 
     }
 
+    void Command_List::copy_texture(Texture* src_texture, Texture* dst_texture){
+
+        // Prepare textures for copy
+        transition_texture(dst_texture, D3D12_RESOURCE_STATE_COPY_DEST);
+        transition_texture(src_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
+
+        // Copy main render target to screen buffer
+        d3d12_command_list->CopyTextureRegion(
+            &CD3DX12_TEXTURE_COPY_LOCATION(dst_texture->d3d12_resource.Get()),
+            0,
+            0,
+            0,
+            &CD3DX12_TEXTURE_COPY_LOCATION(src_texture->d3d12_resource.Get()),
+            nullptr
+        );
+
+    }
+
     // Clears the render target with the specified color
     void Command_List::clear_render_target(Texture* rt, const float* clear_color){
 
@@ -2666,7 +2684,11 @@ namespace d_dx12 {
                 // Need to copy offline descriptor to online descriptor
                 d3d12_device->CopyDescriptorsSimple(1, buffer->online_descriptor_handle.cpu_descriptor_handle, buffer->offline_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-                d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
+                if(current_bound_shader->type == Shader::Shader_Type::TYPE_GRAPHICS){
+                    d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
+                } else if (current_bound_shader->type == Shader::Shader_Type::TYPE_COMPUTE){
+                    d3d12_command_list->SetComputeRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, buffer->online_descriptor_handle.gpu_descriptor_handle);
+                }
 
                 // Don't need to save the index into the descriptor heap because these aren't bindless buffers
                 resource_manager->is_bound_online[buffer->is_bound_index].cbv_index = 1;
@@ -2960,29 +2982,33 @@ namespace d_dx12 {
 
     }
 
-    void Command_List::set_viewport(float top_left_x, float top_left_y, float width, float height){
+    void inline Command_List::set_viewport(float top_left_x, float top_left_y, float width, float height){
 
         d3d12_command_list->RSSetViewports(1, &CD3DX12_VIEWPORT(top_left_x, top_left_y, width, height));
     }
-    void Command_List::set_viewport(D3D12_VIEWPORT viewport){
+    void inline Command_List::set_viewport(D3D12_VIEWPORT viewport){
 
         d3d12_command_list->RSSetViewports(1, &viewport);
     }
-    void Command_List::set_scissor_rect(float left, float top, float right, float bottom){
+    void inline Command_List::set_scissor_rect(float left, float top, float right, float bottom){
 
         d3d12_command_list->RSSetScissorRects(1, &CD3DX12_RECT(left, top, right, bottom));
     }
-    void Command_List::set_scissor_rect(D3D12_RECT scissor_rect){
+    void inline Command_List::set_scissor_rect(D3D12_RECT scissor_rect){
 
         d3d12_command_list->RSSetScissorRects(1, &scissor_rect);
     }
 
-    void Command_List::draw(u32 number_of_indicies){
+    void inline Command_List::draw(u32 number_of_indicies){
         d3d12_command_list->DrawIndexedInstanced(number_of_indicies, 1, 0, 0, 0); 
     }
 
-    void Command_List::draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset){
+    void inline Command_List::draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset){
         d3d12_command_list->DrawIndexedInstanced(index_count, 1, index_offset, vertex_offset, 0); 
+    }
+
+    void inline Command_List::dispatch(u32 threadgroup_count_x, u32 threadgroup_count_y, u32 threadgroup_count_z){
+        d3d12_command_list->Dispatch(threadgroup_count_x, threadgroup_count_y, threadgroup_count_z); 
     }
 
     void present(bool using_v_sync){

@@ -5,6 +5,7 @@
 #define CommonSpace space0
 #define VertexSpace space1
 #define PixelSpace  space2
+#define ComputeSpace  space2
 #define Tex2DSpace  space100
 
 #define MATERIAL_FLAG_NONE                     0x0

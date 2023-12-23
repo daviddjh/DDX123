@@ -1,3 +1,19 @@
+12/22/23
+
+Merry Christmas!!
+
+Got SSAO working in a seperate compute shader!! :D
+
+Also messed around with tone mapping, don't really like how washed out my Reinhard curve looks.
+The "filmic" look I tried looks totally wack.
+
+Now onto SSR!! And maybe a list of TODOs....
+
+TODO:
+    - Measure performance difference between SSAO in compute shader or not.
+    - Make SSAO more efficient using MIP MAPS (I think?)
+    - Tune in tonecurve
+
 12/18/23
 
 Got Compute Shaders working!

@@ -223,38 +223,38 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     // Calculate SSAO
     
-    // Scales the noise to our screen size, so the noise can wrap an repeat
-    float2 noise_scale = float2(output_dimensions.width / 4., output_dimensions.height / 4.0);
-    float3 random_vector = texture_2d_table[ssao_texture_index.ssao_rotation_texture_index].Sample(sampler_1, UV * noise_scale);
+    // // Scales the noise to our screen size, so the noise can wrap an repeat
+    // float2 noise_scale = float2(output_dimensions.width / 4., output_dimensions.height / 4.0);
+    // float3 random_vector = texture_2d_table[ssao_texture_index.ssao_rotation_texture_index].Sample(sampler_1, UV * noise_scale);
 
-    // create our TBN matrix from our random vector an our normal
-    float3 tangent = normalize(random_vector - N * dot(random_vector, N));
-    float3 bitangent = cross(N, tangent);
-    float3x3 TBN = float3x3(tangent, bitangent, N);
-    TBN = transpose(TBN);
+    // // create our TBN matrix from our random vector an our normal
+    // float3 tangent = normalize(random_vector - N * dot(random_vector, N));
+    // float3 bitangent = cross(N, tangent);
+    // float3x3 TBN = float3x3(tangent, bitangent, N);
+    // TBN = transpose(TBN);
 
 
-    // Sample points with SSAO_RADIUS hemisphere and check if they're occluded. If so, add to occlusion variable3
-    float occlusion = 0;
-    float3 sample_position = float3(0, 0, 0);
-    float4 offset = float4(1,1,1,1.0);
-    float sample_depth = 0;
-    for(int k = 0; k < SSAO_KERNEL_SIZE; k++){
-        sample_position = mul(TBN, ssao_sample.ssao_sample[k].xyz);
-        sample_position = w_position.xyz + sample_position * SSAO_RADIUS;
-        offset = float4(sample_position, 1.0);
-        offset = mul(per_frame_data.view_projection_matrix, offset);
-        offset.xyz /= offset.w;
-        offset.xyz = offset.xyz * 0.5 + 0.5;
-        sample_depth = distance(per_frame_data.camera_pos, texture_2d_table[gbuffer_indices.position_index].Sample(sampler_1, float2(offset.x, 1-offset.y)).xyz);
-        float range_check = smoothstep(0.0, 1.0, SSAO_RADIUS / abs(distance(per_frame_data.camera_pos, w_position.xyz) - sample_depth));
-        //float range_check = 1.0;
-        occlusion += (sample_depth <= (distance(per_frame_data.camera_pos, sample_position.xyz) + SSAO_BIAS) ? 1.0 : 0.0) * range_check;
-    }
+    // // Sample points with SSAO_RADIUS hemisphere and check if they're occluded. If so, add to occlusion variable3
+    // float occlusion = 0;
+    // float3 sample_position = float3(0, 0, 0);
+    // float4 offset = float4(1,1,1,1.0);
+    // float sample_depth = 0;
+    // for(int k = 0; k < SSAO_KERNEL_SIZE; k++){
+    //     sample_position = mul(TBN, ssao_sample.ssao_sample[k].xyz);
+    //     sample_position = w_position.xyz + sample_position * SSAO_RADIUS;
+    //     offset = float4(sample_position, 1.0);
+    //     offset = mul(per_frame_data.view_projection_matrix, offset);
+    //     offset.xyz /= offset.w;
+    //     offset.xyz = offset.xyz * 0.5 + 0.5;
+    //     sample_depth = distance(per_frame_data.camera_pos, texture_2d_table[gbuffer_indices.position_index].Sample(sampler_1, float2(offset.x, 1-offset.y)).xyz);
+    //     float range_check = smoothstep(0.0, 1.0, SSAO_RADIUS / abs(distance(per_frame_data.camera_pos, w_position.xyz) - sample_depth));
+    //     //float range_check = 1.0;
+    //     occlusion += (sample_depth <= (distance(per_frame_data.camera_pos, sample_position.xyz) + SSAO_BIAS) ? 1.0 : 0.0) * range_check;
+    // }
 
-    occlusion = pow(1 - (occlusion / SSAO_KERNEL_SIZE),2);
-    float3 ambient = float3(0.06, 0.06, 0.06);
-    ambient += (occlusion/10.);
+    // occlusion = pow(1 - (occlusion / SSAO_KERNEL_SIZE),2);
+    float3 ambient = float3(0.014, 0.014, 0.014);
+    // ambient += (occlusion/10.);
 
     ambient = ambient * albedo_texture_color.rgb;
     matrix light_space_matrix = per_frame_data.light_space_matrix;
@@ -262,8 +262,8 @@ float4 main(PixelShaderInput IN) : SV_Target {
     float shadow = calc_shadow_value(frag_pos_light_space, float2(w_position.x * w_normal.z, albedo_texture_color.g * w_normal.x));
     float3 color = ambient + (1.0 - shadow) * Lo;
 	
-    color = color / (color + float3(1.0, 1.0, 1.0));
-    color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  
+    // color = color / (color + float3(1.0, 1.0, 1.0));
+    // color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  
    
     return float4(color, 1.0);
     

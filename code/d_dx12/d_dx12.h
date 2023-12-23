@@ -259,6 +259,7 @@ namespace d_dx12 {
 
         void transition_texture(Texture* texture, D3D12_RESOURCE_STATES new_state);
         void transition_buffer(Buffer* buffer, D3D12_RESOURCE_STATES new_state);
+        void copy_texture(Texture* src_texture, Texture* dst_texture);
         void clear_render_target(Texture* rt, const float* clear_color);
         void clear_render_target(Texture* rt);
         void clear_depth_stencil(Texture* ds, const float depth);
@@ -282,6 +283,7 @@ namespace d_dx12 {
         void set_scissor_rect(float left, float top, float right, float bottom);
         void set_scissor_rect(D3D12_RECT scissor_rect);
         void draw(u32 number_of_verticies);
+        void dispatch(u32 threadgroup_count_x, u32 threadgroup_count_y, u32 threadgroup_count_z);
         void draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset);
         void d_dx12_release();
 

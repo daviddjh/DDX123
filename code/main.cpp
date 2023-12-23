@@ -31,7 +31,7 @@ struct D_Camera {
     DirectX::XMVECTOR up_direction;
     float speed = 1.8;
     //float fov   = 100.;
-    float fov   = 40.;
+    float fov   = 120.;
 };
 
 struct D_Shaders {
@@ -39,6 +39,7 @@ struct D_Shaders {
     Shader*           deferred_g_buffer_shader;
     Shader*           deferred_shading_shader;
     Shader*           shadow_map_shader;
+    Shader*           ssao_shader;
     Shader*           post_processing_shader;
 };
 
@@ -52,6 +53,7 @@ struct D_Textures {
     Texture*          g_buffer_rough_metal;
     Texture*          sampled_texture;
     Texture*          ssao_rotation_texture;
+    Texture*          ssao_output_texture;
     Texture*          main_render_target;
 };
 
@@ -463,6 +465,13 @@ int D_Renderer::init(){
     main_rt_desc.clear_color[3] = 1.0f;
     textures.main_render_target = resource_manager.create_texture(L"Main Render Target", main_rt_desc);
 
+    Texture_Desc ssao_output_desc;
+    ssao_output_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
+    ssao_output_desc.format = DXGI_FORMAT_R16_FLOAT;
+    ssao_output_desc.width  = display.display_width;
+    ssao_output_desc.height = display.display_height;
+    textures.ssao_output_texture = resource_manager.create_texture(L"SSAO Render Target", ssao_output_desc);
+
     Texture_Desc ds_desc;
     ds_desc.usage = Texture::USAGE::USAGE_DEPTH_STENCIL;
     ds_desc.width = display_width;
@@ -529,6 +538,7 @@ int D_Renderer::init(){
     shaders.deferred_g_buffer_shader = create_deferred_render_gbuffer_shader();
     shaders.deferred_shading_shader  = create_deferred_render_shading_shader();
     shaders.shadow_map_shader        = create_shadow_mapping_shader();
+    shaders.ssao_shader              = create_ssao_shader();
     shaders.post_processing_shader   = create_post_processing_shader();
 
     ////////////////////////////
@@ -900,6 +910,81 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     command_list->bind_vertex_buffer(buffers.full_screen_quad_vertex_buffer, 0);
     command_list->bind_index_buffer (buffers.full_screen_quad_index_buffer);
     command_list->draw(6);
+
+    //////////////////////////////////////////////////////////
+    // SSAO
+    //////////////////////////////////////////////////////////
+    {
+        command_list->set_shader(shaders.ssao_shader);
+        
+        // Bind GBuffer Textures (and indices)
+        Gbuffer_Indices gbuffer_indices          = {};
+        gbuffer_indices.albedo_index             = command_list->bind_texture (textures.g_buffer_albedo,       &resource_manager, binding_point_string_lookup("Albedo Gbuffer"));
+        gbuffer_indices.position_index           = command_list->bind_texture (textures.g_buffer_position,     &resource_manager, binding_point_string_lookup("Position Gbuffer"));
+        gbuffer_indices.normal_index             = command_list->bind_texture (textures.g_buffer_normal,       &resource_manager, binding_point_string_lookup("Normal Gbuffer"));
+        gbuffer_indices.roughness_metallic_index = command_list->bind_texture (textures.g_buffer_rough_metal,  &resource_manager, binding_point_string_lookup("Roughness and Metallic Gbuffer"));
+
+        Descriptor_Handle gbuffer_indices_handle = resource_manager.load_dyanamic_frame_data((void*)&gbuffer_indices, sizeof(Gbuffer_Indices), 256);
+        command_list->bind_handle(gbuffer_indices_handle, binding_point_string_lookup("gbuffer_indices"));
+
+        Shadow_Texture_Index output_texture_index = {};
+        output_texture_index.shadow_texture_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Shadow_Texture_Index), 256);
+        command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+        // Bind SSAO Texture (and index)
+        SSAO_Texture_Index ssao_texture_index          = {};
+        ssao_texture_index.ssao_rotation_texture_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
+
+        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(SSAO_Texture_Index), 256);
+        command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
+
+        // Bind SSAO Kernel
+        command_list->bind_buffer(buffers.ssao_sample_kernel, &resource_manager, binding_point_string_lookup("ssao_sample"));
+
+        // Bind output texture dimensions
+        Output_Dimensions output_dimensions = {textures.ssao_output_texture->width, textures.ssao_output_texture->height};
+        Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+        command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
+
+        // Bind per_frame_data - Constant Buffer requires 256 byte alignment
+        command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
+
+        // Now be bind the texture table to the root signature. 
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+        command_list->dispatch((int)(textures.ssao_output_texture->width / 8), (int)(textures.ssao_output_texture->height / 4), 1);
+
+        // command_list->transition_texture(textures.main_render_target,           D3D12_RESOURCE_STATE_RENDER_TARGET);
+    }
+
+    //////////////////////////////////////////////////////////
+    // Post Processing
+    //////////////////////////////////////////////////////////
+    {
+        command_list->set_shader(shaders.post_processing_shader);
+        
+        // Bind GBuffer Textures (and indices)
+        Shadow_Texture_Index output_texture_index = {};
+        output_texture_index.shadow_texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+
+        Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Shadow_Texture_Index), 256);
+        command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+        Shadow_Texture_Index ssao_texture_index = {};
+        ssao_texture_index.shadow_texture_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("ssao_texture"), true);
+
+        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(Shadow_Texture_Index), 256);
+        command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
+
+        // Now be bind the texture table to the root signature. 
+        //command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+        command_list->dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
+
+        command_list->transition_texture(textures.main_render_target,           D3D12_RESOURCE_STATE_RENDER_TARGET);
+    }
+
 }
 
 
@@ -982,19 +1067,22 @@ void D_Renderer::render(){
 
     }
 
-    command_list->set_shader(shaders.post_processing_shader);
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Compute Shader!!
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // command_list->set_shader(shaders.post_processing_shader);
     
-    // Bind GBuffer Textures (and indices)
-    Shadow_Texture_Index output_texture_index = {};
-    output_texture_index.shadow_texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+    // // Bind GBuffer Textures (and indices)
+    // Shadow_Texture_Index output_texture_index = {};
+    // output_texture_index.shadow_texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
 
-    Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Shadow_Texture_Index), 256);
-    command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
-    // Now be bind the texture table to the root signature. 
-    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
-    command_list->d3d12_command_list->Dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
+    // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Shadow_Texture_Index), 256);
+    // command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+    // // Now be bind the texture table to the root signature. 
+    // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+    // command_list->dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
 
-    command_list->transition_texture(textures.main_render_target,           D3D12_RESOURCE_STATE_RENDER_TARGET);
+    // command_list->transition_texture(textures.main_render_target,           D3D12_RESOURCE_STATE_RENDER_TARGET);
 
     // Create IMGUI window
     ImGui::Begin("Info");
@@ -1004,11 +1092,13 @@ void D_Renderer::render(){
     ImGui::DragFloat3("Light Color", &this->per_frame_data.light_color.x);
     ImGui::SliderFloat("Camera FOV", &this->camera.fov, 35., 120.);
     ImGui::Checkbox("Deferred Shading?", &config.deferred_rendering);
+
     // Render a texture
-    //u16 shadow_map_index = command_list->bind_texture(shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
-    // u32 ssao_rotation_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
-    // float render_ratio = 1920. / 1080.;
-    // ImGui::Image((ImTextureID)resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(ssao_rotation_index).gpu_descriptor_handle.ptr, ImVec2(200.*render_ratio, 200.));
+    u16 ssao_output_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("ssao_output"));
+    //u32 ssao_rotation_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
+    float render_ratio = 1920. / 1080.;
+    ImGui::Image((ImTextureID)resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(ssao_output_index).gpu_descriptor_handle.ptr, ImVec2(200.*render_ratio, 200.));
+
     ImGui::End();
     ImGui::Render();
 
@@ -1016,18 +1106,7 @@ void D_Renderer::render(){
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
 
     // Prepare screen buffer for copy destination
-    command_list->transition_texture(textures.rt[current_backbuffer_index], D3D12_RESOURCE_STATE_COPY_DEST);
-    command_list->transition_texture(textures.main_render_target,           D3D12_RESOURCE_STATE_COPY_SOURCE);
-
-    // Copy main render target to screen buffer
-    command_list->d3d12_command_list->CopyTextureRegion(
-        &CD3DX12_TEXTURE_COPY_LOCATION(textures.rt[current_backbuffer_index]->d3d12_resource.Get()),
-        0,
-        0,
-        0,
-        &CD3DX12_TEXTURE_COPY_LOCATION(textures.main_render_target->d3d12_resource.Get()),
-        nullptr
-    );
+    command_list->copy_texture(textures.main_render_target, textures.rt[current_backbuffer_index]);
 
     // Transition RT to presentation state
     command_list->transition_texture(textures.rt[current_backbuffer_index], D3D12_RESOURCE_STATE_PRESENT);
