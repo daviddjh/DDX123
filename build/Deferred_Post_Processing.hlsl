@@ -23,6 +23,31 @@ float3 Uncharted2Tonemap(float3 x)
 {
    return ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F;
 }
+// From: https://github.com/Microsoft/DirectX-Graphics-Samples/blob/master/MiniEngine/Core/Shaders/ColorSpaceUtility.hlsli
+// This is the new HDR transfer function, also called "PQ" for perceptual quantizer.  Note that REC2084
+// does not also refer to a color space.  REC2084 is typically used with the REC2020 color space.
+float3 ApplyREC2084Curve(float3 L)
+{
+    float m1 = 2610.0 / 4096.0 / 4;
+    float m2 = 2523.0 / 4096.0 * 128;
+    float c1 = 3424.0 / 4096.0;
+    float c2 = 2413.0 / 4096.0 * 32;
+    float c3 = 2392.0 / 4096.0 * 32;
+    float3 Lp = pow(L, m1);
+    return pow((c1 + c2 * Lp) / (1 + c3 * Lp), m2);
+}
+
+float3 RemoveREC2084Curve(float3 N)
+{
+    float m1 = 2610.0 / 4096.0 / 4;
+    float m2 = 2523.0 / 4096.0 * 128;
+    float c1 = 3424.0 / 4096.0;
+    float c2 = 2413.0 / 4096.0 * 32;
+    float c3 = 2392.0 / 4096.0 * 32;
+    float3 Np = pow(N, 1 / m2);
+    return pow(max(Np - c1, 0) / (c2 - c3 * Np), 1 / m1);
+}
+
 
 // The compute shader
 [numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, 1)]
@@ -54,8 +79,10 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // float3 whiteScale = 1.0f/Uncharted2Tonemap(W);
     // color = curr*whiteScale;
 
-    // Gamma Correction
-    color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  
+    // Gamma Correction - (Inverse Electrical Optical Transfer Function)
+    color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  // - Gamma, for sRGB. REC709. SDR
+    
+    // color = ApplyREC2084Curve(color);  // perceptual quantizer transfer function, for REC2020, HDR10
 
     // Write to output texture
     texture_2d_uav_table[output_texture_index.ssao_rotation_texture_index][DTid.xy] = float4(color, 1.0);

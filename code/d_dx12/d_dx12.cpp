@@ -122,6 +122,14 @@ namespace d_dx12 {
                 DEBUG_BREAK;
             }
 
+            // Get Info about Display (HDR?, size, name, MaxLuminance)
+            // Microsoft::WRL::ComPtr<IDXGIOutput> idxgi_output;
+            // Microsoft::WRL::ComPtr<IDXGIOutput6> idxgi_output6;
+            // temp_adapter4->EnumOutputs(0, idxgi_output.GetAddressOf());
+            // idxgi_output.As(&idxgi_output6);
+            // DXGI_OUTPUT_DESC1 output_desc = {0};
+            // idxgi_output6->GetDesc1(&output_desc);
+            // DEBUG_BREAK;
             
             d3d12_device = temp_device.Get();
             temp_device.Reset();
@@ -1680,6 +1688,7 @@ namespace d_dx12 {
         swapChainDesc.Width       = width;                  // DISPLAY SIZE
         swapChainDesc.Height      = height;
         swapChainDesc.Format      = DXGI_FORMAT_R8G8B8A8_UNORM;
+        // swapChainDesc.Format      = DXGI_FORMAT_R10G10B10A2_UNORM; // HDR
         swapChainDesc.Stereo      = FALSE;
         swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         swapChainDesc.BufferCount = NUM_BACK_BUFFERS;               // Number of back buffers
@@ -1714,6 +1723,9 @@ namespace d_dx12 {
 
         // Gets the current back buffer index
         current_backbuffer_index = display.d3d12_swap_chain->GetCurrentBackBufferIndex();
+        
+        // Set HDR color space:
+        // display.d3d12_swap_chain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);
 
         // These are currently being created with display width and display height.
         // Don't know if they should in the future - detach display size from render target size

@@ -456,6 +456,7 @@ int D_Renderer::init(){
 
     Texture_Desc main_rt_desc;
     main_rt_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
+    //main_rt_desc.format = DXGI_FORMAT_R10G10B10A2_UNORM; // HDR
     main_rt_desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
     main_rt_desc.width  = display.display_width;
     main_rt_desc.height = display.display_height;
@@ -828,6 +829,8 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
         command_list->transition_texture(textures.g_buffer_rough_metal, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
     command_list->clear_render_target(textures.g_buffer_albedo);
+    command_list->clear_render_target(textures.g_buffer_position);
+    command_list->clear_render_target(textures.g_buffer_normal);
 
     Texture* render_targets[] = {textures.g_buffer_albedo, textures.g_buffer_position, textures.g_buffer_normal, textures.g_buffer_rough_metal};
 
@@ -915,7 +918,20 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     // SSAO
     //////////////////////////////////////////////////////////
     {
+
         command_list->set_shader(shaders.ssao_shader);
+
+        if(textures.g_buffer_albedo->state != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+            command_list->transition_texture(textures.g_buffer_albedo, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        if(textures.g_buffer_position->state != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+            command_list->transition_texture(textures.g_buffer_position, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        if(textures.g_buffer_normal->state != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+            command_list->transition_texture(textures.g_buffer_normal, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        if(textures.g_buffer_rough_metal->state != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+            command_list->transition_texture(textures.g_buffer_rough_metal, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         
         // Bind GBuffer Textures (and indices)
         Gbuffer_Indices gbuffer_indices          = {};
