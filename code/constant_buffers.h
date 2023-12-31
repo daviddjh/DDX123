@@ -51,16 +51,10 @@ ALIGN_STRUCT struct SSAO_Sample
     float4 ssao_sample[64];
 };
 
-// Dynamic SSAO Texture Index
-ALIGN_STRUCT struct SSAO_Texture_Index
+// Texture Index - used to send indexes of textures in texture table
+ALIGN_STRUCT struct Texture_Index
 {
-    uint ssao_rotation_texture_index;
-};
-
-// Texture Index of our shadow texture
-ALIGN_STRUCT struct Shadow_Texture_Index
-{
-    uint shadow_texture_index;
+    uint texture_index;
 };
 
 // Model Matrix

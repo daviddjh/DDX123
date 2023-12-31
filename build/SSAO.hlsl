@@ -10,11 +10,11 @@ static const float SSAO_BIAS = 0.25;
 
 // Output texture
 // RWTexture2D<float4> outputTexture : register(u0);
-RWTexture2D<float4>                texture_2d_uav_table[] : register(u0, space99);
-ConstantBuffer<SSAO_Sample>        ssao_sample            : register(b1, ComputeSpace);
-ConstantBuffer<SSAO_Texture_Index> ssao_texture_index     : register(b2, ComputeSpace);
-ConstantBuffer<Output_Dimensions>  output_dimensions      : register(b3, ComputeSpace);
-ConstantBuffer<Gbuffer_Indices>    gbuffer_indices        : register(b4, ComputeSpace);
+RWTexture2D<float4>               texture_2d_uav_table[] : register(u0, space99);
+ConstantBuffer<SSAO_Sample>       ssao_sample            : register(b1, ComputeSpace);
+ConstantBuffer<Texture_Index>     ssao_texture_index     : register(b2, ComputeSpace);
+ConstantBuffer<Output_Dimensions> output_dimensions      : register(b3, ComputeSpace);
+ConstantBuffer<Gbuffer_Indices>   gbuffer_indices        : register(b4, ComputeSpace);
 
 cbuffer output_texture_index : register(b0, ComputeSpace){
     uint output_texture_index;
@@ -45,7 +45,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     
     // Scales the noise to our screen size, so the noise can wrap an repeat
     float2 noise_scale = float2(output_dimensions.width / 4., output_dimensions.height / 4.0);
-    float3 random_vector = texture_2d_table[ssao_texture_index.ssao_rotation_texture_index].SampleLevel(sampler_1, UV * noise_scale, 0);
+    float3 random_vector = texture_2d_table[ssao_texture_index.texture_index].SampleLevel(sampler_1, UV * noise_scale, 0);
 
     // create our TBN matrix from our random vector an our normal
     float3 tangent = normalize(random_vector - N * dot(random_vector, N));

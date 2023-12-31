@@ -8,8 +8,8 @@
 // RWTexture2D<float4> outputTexture : register(u0);
 RWTexture2D<float4> texture_2d_uav_table[] : register(u0, space99);
 
-ConstantBuffer<SSAO_Texture_Index> output_texture_index : register(b0, ComputeSpace);
-ConstantBuffer<SSAO_Texture_Index> ssao_texture_index   : register(b1, ComputeSpace);
+ConstantBuffer<Texture_Index> output_texture_index : register(b0, ComputeSpace);
+ConstantBuffer<Texture_Index> ssao_texture_index   : register(b1, ComputeSpace);
 
 static const float A = 0.15;
 static const float B = 0.50;
@@ -54,9 +54,9 @@ float3 RemoveREC2084Curve(float3 N)
 void main(uint3 DTid : SV_DispatchThreadID)
 {
     // Read linear color from input texture
-    float3 color = texture_2d_uav_table[output_texture_index.ssao_rotation_texture_index][DTid.xy].xyz;
+    float3 color = texture_2d_uav_table[output_texture_index.texture_index][DTid.xy].xyz;
 
-    float ssao_occlusion = texture_2d_table[ssao_texture_index.ssao_rotation_texture_index][DTid.xy].x;
+    float ssao_occlusion = texture_2d_table[ssao_texture_index.texture_index][DTid.xy].x;
     
     // Tone Map and Gamma Correct
     color *= ssao_occlusion;
@@ -85,5 +85,5 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // color = ApplyREC2084Curve(color);  // perceptual quantizer transfer function, for REC2020, HDR10
 
     // Write to output texture
-    texture_2d_uav_table[output_texture_index.ssao_rotation_texture_index][DTid.xy] = float4(color, 1.0);
+    texture_2d_uav_table[output_texture_index.texture_index][DTid.xy] = float4(color, 1.0);
 }

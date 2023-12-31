@@ -23,8 +23,8 @@ Roughness
 
 static const float SHADOW_BIAS = 0.002;
 
-ConstantBuffer<Material_Data>        material_data        : register(b0, PixelSpace);
-ConstantBuffer<Shadow_Texture_Index> shadow_texture_index : register(b1, PixelSpace);
+ConstantBuffer<Material_Data> material_data        : register(b0, PixelSpace);
+ConstantBuffer<Texture_Index> shadow_texture_index : register(b1, PixelSpace);
 
 struct PixelShaderInput
 {
@@ -134,7 +134,7 @@ float calc_shadow_value(float4 frag_pos_light_space, float2 tex_coords){
             random_number = rand_xorshift(random_number);
             uv += (poissonDisk[random_number % 9] - 0.5) / 800.0;
 
-            float closest_depth = texture_2d_table[shadow_texture_index.shadow_texture_index].Sample(sampler_1, uv).r;
+            float closest_depth = texture_2d_table[shadow_texture_index.texture_index].Sample(sampler_1, uv).r;
             shadow += (current_depth - SHADOW_BIAS > closest_depth ? 1.0 : 0.0);
         }
     }

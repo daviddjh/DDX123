@@ -790,11 +790,11 @@ void D_Renderer::forward_render_pass(Command_List* command_list){
     command_list->set_scissor_rect(display.scissor_rect);
 
     // Bind Shadow Map
-    Shadow_Texture_Index shadow_texture_index = {};
-    shadow_texture_index.shadow_texture_index = command_list->bind_texture(textures.shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
+    Texture_Index shadow_texture_index = {};
+    shadow_texture_index.texture_index = command_list->bind_texture(textures.shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
 
     // Upload Shadow_Map_Index - Constant Buffer requires 256 byte alignment
-    Descriptor_Handle shadow_map_index_handle = resource_manager.load_dyanamic_frame_data((void*)&shadow_texture_index, sizeof(Shadow_Texture_Index), 256);
+    Descriptor_Handle shadow_map_index_handle = resource_manager.load_dyanamic_frame_data((void*)&shadow_texture_index, sizeof(Texture_Index), 256);
     command_list->bind_handle(shadow_map_index_handle, binding_point_string_lookup("shadow_texture_index"));
 
     // Upload per_frame_data - Constant Buffer requires 256 byte alignment
@@ -883,10 +883,10 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     command_list->bind_handle(gbuffer_indices_handle, binding_point_string_lookup("gbuffer_indices"));
     
     // Bind SSAO Texture (and index)
-    SSAO_Texture_Index ssao_texture_index          = {};
-    ssao_texture_index.ssao_rotation_texture_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
+    Texture_Index ssao_rotation_texture_index          = {};
+    ssao_rotation_texture_index.texture_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
 
-    Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(SSAO_Texture_Index), 256);
+    Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_rotation_texture_index, sizeof(Texture_Index), 256);
     command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
 
     // Bind output texture dimensions
@@ -898,10 +898,10 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     command_list->bind_buffer(buffers.ssao_sample_kernel, &resource_manager, binding_point_string_lookup("ssao_sample"));
 
     // Bind Shadow Map and upload Shadow_Map_Index - Constant Buffer requires 256 byte alignment
-    Shadow_Texture_Index shadow_texture_index = {};
-    shadow_texture_index.shadow_texture_index = command_list->bind_texture(textures.shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
+    Texture_Index shadow_texture_index = {};
+    shadow_texture_index.texture_index = command_list->bind_texture(textures.shadow_ds, &resource_manager, binding_point_string_lookup("Shadow_Map"));
 
-    Descriptor_Handle shadow_map_index_handle = resource_manager.load_dyanamic_frame_data((void*)&shadow_texture_index, sizeof(Shadow_Texture_Index), 256);
+    Descriptor_Handle shadow_map_index_handle = resource_manager.load_dyanamic_frame_data((void*)&shadow_texture_index, sizeof(Texture_Index), 256);
     command_list->bind_handle(shadow_map_index_handle, binding_point_string_lookup("shadow_texture_index"));
 
     // Bind per_frame_data - Constant Buffer requires 256 byte alignment
@@ -943,16 +943,16 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
         Descriptor_Handle gbuffer_indices_handle = resource_manager.load_dyanamic_frame_data((void*)&gbuffer_indices, sizeof(Gbuffer_Indices), 256);
         command_list->bind_handle(gbuffer_indices_handle, binding_point_string_lookup("gbuffer_indices"));
 
-        Shadow_Texture_Index output_texture_index = {};
-        output_texture_index.shadow_texture_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("outputTexture"), true);
-        Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Shadow_Texture_Index), 256);
+        Texture_Index ssao_output_texture_index = {};
+        ssao_output_texture_index.texture_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_output_texture_index, sizeof(Texture_Index), 256);
         command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
 
         // Bind SSAO Texture (and index)
-        SSAO_Texture_Index ssao_texture_index          = {};
-        ssao_texture_index.ssao_rotation_texture_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
+        Texture_Index ssao_rotation_texture_index = {};
+        ssao_rotation_texture_index.texture_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
 
-        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(SSAO_Texture_Index), 256);
+        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(Texture_Index), 256);
         command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
 
         // Bind SSAO Kernel
@@ -981,16 +981,16 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
         command_list->set_shader(shaders.post_processing_shader);
         
         // Bind GBuffer Textures (and indices)
-        Shadow_Texture_Index output_texture_index = {};
-        output_texture_index.shadow_texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        Texture_Index output_texture_index = {};
+        output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
 
-        Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Shadow_Texture_Index), 256);
+        Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
         command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
 
-        Shadow_Texture_Index ssao_texture_index = {};
-        ssao_texture_index.shadow_texture_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("ssao_texture"), true);
+        Texture_Index ssao_texture_index = {};
+        ssao_texture_index.texture_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("ssao_texture"), true);
 
-        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(Shadow_Texture_Index), 256);
+        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(Texture_Index), 256);
         command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
 
         // Now be bind the texture table to the root signature. 
@@ -1089,10 +1089,10 @@ void D_Renderer::render(){
     // command_list->set_shader(shaders.post_processing_shader);
     
     // // Bind GBuffer Textures (and indices)
-    // Shadow_Texture_Index output_texture_index = {};
+    // Texture_Index output_texture_index = {};
     // output_texture_index.shadow_texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
 
-    // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Shadow_Texture_Index), 256);
+    // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
     // command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
     // // Now be bind the texture table to the root signature. 
     // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));

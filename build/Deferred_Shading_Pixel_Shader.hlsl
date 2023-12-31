@@ -14,11 +14,11 @@ static const float SSAO_RADIUS = 2.5;
 static const float SSAO_BIAS = 0.25;
 
 // Constant buffer contianing the texture indicies for the GBuffer
-ConstantBuffer<Gbuffer_Indices>      gbuffer_indices      : register(b0, PixelSpace);
-ConstantBuffer<SSAO_Sample>          ssao_sample          : register(b1, PixelSpace);
-ConstantBuffer<SSAO_Texture_Index>   ssao_texture_index   : register(b2, PixelSpace);
-ConstantBuffer<Shadow_Texture_Index> shadow_texture_index : register(b3, PixelSpace);
-ConstantBuffer<Output_Dimensions>    output_dimensions    : register(b4, PixelSpace);
+ConstantBuffer<Gbuffer_Indices>   gbuffer_indices      : register(b0, PixelSpace);
+ConstantBuffer<SSAO_Sample>       ssao_sample          : register(b1, PixelSpace);
+ConstantBuffer<Texture_Index>     ssao_texture_index   : register(b2, PixelSpace);
+ConstantBuffer<Texture_Index>     shadow_texture_index : register(b3, PixelSpace);
+ConstantBuffer<Output_Dimensions> output_dimensions    : register(b4, PixelSpace);
 
 struct PixelShaderInput
 {
@@ -126,7 +126,7 @@ float calc_shadow_value(float4 frag_pos_light_space, float2 tex_coords){
             uv += (ssao_sample.ssao_sample[random_number % 64].rg - 0.5) / 1000.0;
             // uv += (poissonDisk[random_number % 9] - 0.5) / 800.0;
 
-            float closest_depth = texture_2d_table[shadow_texture_index.shadow_texture_index].Sample(sampler_1, uv).r;
+            float closest_depth = texture_2d_table[shadow_texture_index.texture_index].Sample(sampler_1, uv).r;
             shadow += (current_depth - SHADOW_BIAS > closest_depth ? (1/(abs(y)+1))+(1/(abs(x)+1)) : 0.);
         }
     }
