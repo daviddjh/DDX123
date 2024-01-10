@@ -3115,10 +3115,11 @@ namespace d_dx12 {
                 d3d12_device->CreateRenderTargetView(rts_to_resize.ptr[i]->d3d12_resource.Get(), nullptr, rts_to_resize.ptr[i]->offline_descriptor_handle.cpu_descriptor_handle);
                 rts_to_resize.ptr[i]->width  = display.window_rect.right - display.window_rect.left;
                 rts_to_resize.ptr[i]->height = display.window_rect.bottom - display.window_rect.top;
-                rts_to_resize.ptr[i]->d3d12_resource->SetName(rts_to_resize.ptr[i]->name);
+                // rts_to_resize.ptr[i]->d3d12_resource->SetName(rts_to_resize.ptr[i]->name);
             }
 
             ShowWindow(display.win32_hwnd, SW_NORMAL);
+            SetCursorPos((display.window_rect.left + display.window_rect.right) / 2, (display.window_rect.top + display.window_rect.bottom) / 2);
 
         } else {
 
@@ -3169,15 +3170,18 @@ namespace d_dx12 {
                 d3d12_device->CreateRenderTargetView(rts_to_resize.ptr[i]->d3d12_resource.Get(), nullptr, rts_to_resize.ptr[i]->offline_descriptor_handle.cpu_descriptor_handle);
                 rts_to_resize.ptr[i]->width  = fullscreen_rect.right - fullscreen_rect.left;
                 rts_to_resize.ptr[i]->height = fullscreen_rect.bottom - fullscreen_rect.top;
-                rts_to_resize.ptr[i]->d3d12_resource->SetName(rts_to_resize.ptr[i]->name);
+                // rts_to_resize.ptr[i]->d3d12_resource->SetName(rts_to_resize.ptr[i]->name);
             }
 
             ShowWindow(display.win32_hwnd, SW_MAXIMIZE);
+
+            SetCursorPos((fullscreen_rect.left + fullscreen_rect.right) / 2, (fullscreen_rect.top + fullscreen_rect.bottom) / 2);
 
         }
         
         current_backbuffer_index = display.d3d12_swap_chain->GetCurrentBackBufferIndex();
         display.fullscreen_mode = !display.fullscreen_mode;
+
 
     }
 

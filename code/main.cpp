@@ -1279,6 +1279,21 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                     case 'V':
                         using_v_sync = !using_v_sync;
                     break;
+
+                    // Full Screen when space bar
+                    case(VK_SPACE):
+                    {
+                        if (application_is_initialized && CheckTearingSupport()) {
+                            DEBUG_LOG("Toggling full screen!!");
+                            Span<Texture*> rts_to_resize = { renderer.textures.rt, 2 };
+                            DEBUG_LOG("Toggling full screen!!");
+                            toggle_fullscreen(rts_to_resize);
+                            DEBUG_LOG("Resizing Depth Stencil!!");
+                            renderer.textures.ds->resize(renderer.textures.rt[0]->width, renderer.textures.rt[0]->height);
+                        }
+                    }
+                    break;
+
                 }
             }
 			break;
