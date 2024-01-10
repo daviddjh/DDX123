@@ -9,7 +9,8 @@
 RWTexture2D<float4> texture_2d_uav_table[] : register(u0, space99);
 
 ConstantBuffer<Texture_Index> output_texture_index : register(b0, ComputeSpace);
-ConstantBuffer<Texture_Index> ssao_texture_index   : register(b1, ComputeSpace);
+ConstantBuffer<Texture_Index> input_texture_index  : register(b1, ComputeSpace);
+ConstantBuffer<Texture_Index> ssao_texture_index   : register(b2, ComputeSpace);
 
 static const float A = 0.15;
 static const float B = 0.50;
@@ -54,7 +55,7 @@ float3 RemoveREC2084Curve(float3 N)
 void main(uint3 DTid : SV_DispatchThreadID)
 {
     // Read linear color from input texture
-    float3 color = texture_2d_uav_table[output_texture_index.texture_index][DTid.xy].xyz;
+    float3 color = texture_2d_uav_table[input_texture_index.texture_index][DTid.xy].xyz;
 
     float ssao_occlusion = texture_2d_table[ssao_texture_index.texture_index][DTid.xy].x;
     
@@ -85,5 +86,18 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // color = ApplyREC2084Curve(color);  // perceptual quantizer transfer function, for REC2020, HDR10
 
     // Write to output texture
-    texture_2d_uav_table[output_texture_index.texture_index][DTid.xy] = float4(color, 1.0);
+    //   
+    // x, y   |  x+1, y
+    // ___________________
+    // 
+    // x, y+1 |  x+1, y+1
+    
+    uint2 xy   = DTid.xy * 2;
+    uint2 x1y  = uint2(xy.x + 1, xy.y);
+    uint2 xy1  = uint2(xy.x, xy.y + 1);
+    uint2 x1y1 = uint2(xy.x + 1, xy.y + 1);
+    texture_2d_uav_table[output_texture_index.texture_index][xy] = float4(color, 1.0);
+    texture_2d_uav_table[output_texture_index.texture_index][x1y] = float4(color, 1.0);
+    texture_2d_uav_table[output_texture_index.texture_index][xy1] = float4(color, 1.0);
+    texture_2d_uav_table[output_texture_index.texture_index][x1y1] = float4(color, 1.0);
 }

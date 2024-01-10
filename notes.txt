@@ -1,5 +1,22 @@
 12/22/23
 
+Progress on fullscreen...
+
+Created new "main_output_texture" texture, this is what the post processing shader writes to.
+
+Deferred post processing shader can render 1920x1080 "main_render_texture" to 3840x2160 "main_output_texture"
+
+This is hard coded though... need to make this adjustable
+
+TODO:
+- measure the performance impact of this additional "main_render_texture" 
+- make output size adjustable. Currently renders the 1080p render texture to a 4k output texture (whether it's 4k or not..)
+    Baulders Gate 3 display settings:
+    - Windowed mode: Render Resolution == window resolution
+    - Windowed fullscreen mode:  window resolution == display resoulution. Render resolution can vary.
+
+12/22/23
+
 Merry Christmas!!
 
 Got SSAO working in a seperate compute shader!! :D

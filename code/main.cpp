@@ -54,7 +54,8 @@ struct D_Textures {
     Texture*          sampled_texture;
     Texture*          ssao_rotation_texture;
     Texture*          ssao_output_texture;
-    Texture*          main_render_target;
+    Texture*          main_render_target;    // Size of render resolution - input to post processing
+    Texture*          main_output_target;    // Size of output resolution - output of post processing
 };
 
 struct D_Buffers{
@@ -466,6 +467,18 @@ int D_Renderer::init(){
     main_rt_desc.clear_color[3] = 1.0f;
     textures.main_render_target = resource_manager.create_texture(L"Main Render Target", main_rt_desc);
 
+    Texture_Desc main_output_rt_desc;
+    main_output_rt_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
+    //main_rt_desc.format = DXGI_FORMAT_R10G10B10A2_UNORM; // HDR
+    main_output_rt_desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    main_output_rt_desc.width  = display.display_width;
+    main_output_rt_desc.height = display.display_height;
+    main_output_rt_desc.clear_color[0] = 0.3f; 
+    main_output_rt_desc.clear_color[1] = 0.6f; 
+    main_output_rt_desc.clear_color[2] = 1.0f; 
+    main_output_rt_desc.clear_color[3] = 1.0f;
+    textures.main_output_target = resource_manager.create_texture(L"Main Output Target", main_output_rt_desc);
+
     Texture_Desc ssao_output_desc;
     ssao_output_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
     ssao_output_desc.format = DXGI_FORMAT_R16_FLOAT;
@@ -783,7 +796,7 @@ void D_Renderer::forward_render_pass(Command_List* command_list){
     //////////////////////////////////////
     // Forward Shading!
     //////////////////////////////////////
-    command_list->set_render_targets(1, &textures.main_render_target, textures.ds);
+    command_list->set_render_targets(1, &textures.main_output_target, textures.ds);
 
     command_list->set_shader(shaders.pbr_shader);
     command_list->set_viewport(display.viewport);
@@ -952,7 +965,7 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
         Texture_Index ssao_rotation_texture_index = {};
         ssao_rotation_texture_index.texture_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
 
-        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(Texture_Index), 256);
+        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_rotation_texture_index, sizeof(Texture_Index), 256);
         command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
 
         // Bind SSAO Kernel
@@ -980,9 +993,14 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     {
         command_list->set_shader(shaders.post_processing_shader);
         
-        // Bind GBuffer Textures (and indices)
+        Texture_Index input_texture_index = {};
+        input_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("input_texture"), true);
+
+        Descriptor_Handle input_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&input_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(input_texture_index_handle, binding_point_string_lookup("input_texture_index"));
+
         Texture_Index output_texture_index = {};
-        output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
 
         Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
         command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
@@ -997,8 +1015,6 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
         //command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
         command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
         command_list->dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
-
-        command_list->transition_texture(textures.main_render_target,           D3D12_RESOURCE_STATE_RENDER_TARGET);
     }
 
 }
@@ -1066,10 +1082,14 @@ void D_Renderer::render(){
 
     if(textures.ds->state != D3D12_RESOURCE_STATE_DEPTH_WRITE)
         command_list->transition_texture(textures.ds, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+
+    if(textures.main_output_target->state != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        command_list->transition_texture(textures.main_output_target, D3D12_RESOURCE_STATE_RENDER_TARGET);
         
     // Clear the render target and depth stencil
     FLOAT rt_clear_color[] = {0.3f, 0.6, 1.0f, 1.0f};
     command_list->clear_render_target(textures.main_render_target);
+    command_list->clear_render_target(textures.main_output_target);
     command_list->clear_depth_stencil(textures.ds, 1.0f);
 
     // Either forward rendering or deferred rendering
@@ -1122,7 +1142,7 @@ void D_Renderer::render(){
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
 
     // Prepare screen buffer for copy destination
-    command_list->copy_texture(textures.main_render_target, textures.rt[current_backbuffer_index]);
+    command_list->copy_texture(textures.main_output_target, textures.rt[current_backbuffer_index]);
 
     // Transition RT to presentation state
     command_list->transition_texture(textures.rt[current_backbuffer_index], D3D12_RESOURCE_STATE_PRESENT);
@@ -1289,7 +1309,10 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                             DEBUG_LOG("Toggling full screen!!");
                             toggle_fullscreen(rts_to_resize);
                             DEBUG_LOG("Resizing Depth Stencil!!");
+
+                            // Resize size dependent resources
                             renderer.textures.ds->resize(renderer.textures.rt[0]->width, renderer.textures.rt[0]->height);
+                            renderer.textures.main_output_target->resize(renderer.textures.rt[0]->width, renderer.textures.rt[0]->height);
                         }
                     }
                     break;

@@ -202,6 +202,43 @@ namespace d_dx12 {
         this->d3d12_resource.Reset();
 
         switch(this->usage){
+            case(Texture::USAGE::USAGE_RENDER_TARGET):
+            {
+
+                D3D12_CLEAR_VALUE clear_value = {};
+                clear_value.Format   = this->format;
+                clear_value.Color[0] = this->clear_color[0];
+                clear_value.Color[1] = this->clear_color[1];
+                clear_value.Color[2] = this->clear_color[2];
+                clear_value.Color[3] = this->clear_color[3];
+
+                D3D12_HEAP_PROPERTIES render_target_heap_properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+                D3D12_RESOURCE_DESC render_target_resource_description = CD3DX12_RESOURCE_DESC::Tex2D(this->format, width, height,
+                    1, 0, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+                ThrowIfFailed(d3d12_device->CreateCommittedResource(
+                    &render_target_heap_properties,
+                    D3D12_HEAP_FLAG_NONE,
+                    &render_target_resource_description,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    &clear_value,
+                    IID_PPV_ARGS(&this->d3d12_resource)
+                ));
+
+                if(this->name)
+                    this->d3d12_resource->SetName(name);
+
+                this->width  = width;
+                this->height = height;
+
+                if(this->name)
+                    this->d3d12_resource->SetName(name);
+
+                d3d12_device->CreateRenderTargetView(this->d3d12_resource.Get(), nullptr, this->offline_descriptor_handle.cpu_descriptor_handle);
+
+            }
+            break;
             case(Texture::USAGE::USAGE_DEPTH_STENCIL):
             {
 
