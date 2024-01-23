@@ -1059,7 +1059,7 @@ void D_Renderer::render(){
     ////////////////////////////
 
     DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
-    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), display_width / display_height, 0.1f, 2500000000.0f);
+    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), (f32) display_width / (f32) display_height, 0.01f, 2500000000.0f);
     per_frame_data.view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
     DirectX::XMStoreFloat4(&per_frame_data.camera_pos, camera.eye_position);
 
