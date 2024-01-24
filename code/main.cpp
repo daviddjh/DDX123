@@ -65,8 +65,9 @@ struct D_Buffers{
 };
 
 struct D_Renderer_Config {
-    bool              fullscreen_mode = false;
-    bool              deferred_rendering = false;
+    bool fullscreen_mode = false;
+    bool deferred_rendering = false;
+    bool imgui_demo = false;         
 };
 
 // Global Vars, In order of creation
@@ -1054,6 +1055,10 @@ void D_Renderer::render(){
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
+    if(config.imgui_demo)
+        ImGui::ShowDemoWindow();
+
+
     ////////////////////////////
     /// Update Camera Matricies
     ////////////////////////////
@@ -1128,6 +1133,7 @@ void D_Renderer::render(){
     ImGui::DragFloat3("Light Color", &this->per_frame_data.light_color.x);
     ImGui::SliderFloat("Camera FOV", &this->camera.fov, 35., 120.);
     ImGui::Checkbox("Deferred Shading?", &config.deferred_rendering);
+    ImGui::Checkbox("Demo Window?", &config.imgui_demo);
 
     // Render a texture
     u16 ssao_output_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("ssao_output"));
@@ -1140,6 +1146,7 @@ void D_Renderer::render(){
 
     // Render ImGui on top of everything
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
+
 
     // Prepare screen buffer for copy destination
     command_list->copy_texture(textures.main_output_target, textures.rt[current_backbuffer_index]);

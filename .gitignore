@@ -1,5 +1,6 @@
 # Editor and Debugger files
 *.rdbg
+*.raddbg
 *.code-workspace
 *.cap
 *.10x
