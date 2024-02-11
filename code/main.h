@@ -6,9 +6,9 @@ extern d_std::Memory_Arena *per_frame_arena;
 struct Vertex_Position_Normal_Tangent_Color_Texturecoord {
     DirectX::XMFLOAT3 position;
     DirectX::XMFLOAT3 normal;
-    DirectX::XMFLOAT3 tangent;
     DirectX::XMFLOAT3 color;
     DirectX::XMFLOAT2 texture_coordinates;
+    DirectX::XMFLOAT4 tangent;
 };
 
 struct Vertex_Position {

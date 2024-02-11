@@ -34,6 +34,7 @@ struct PixelShaderInput
     float3 t                   : TEXCOORD2;
     float3 n                   : TEXCOORD3;
     float2 TextureCoordinate   : TEXCOORD;
+    float  tangent_handidness   : TEXCOORD6;
 };
 
 static float2 poissonDisk[9] = {
@@ -151,8 +152,22 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     // Create Tangent-Bitangent-Normal matrix to convert Tangent Space normal to world space normal
     // https://stackoverflow.com/questions/16555669/hlsl-normal-mapping-matrix-multiplication
-    float3 b = normalize(cross(IN.n, IN.t) * 1.).xyz;
-    float3x3 TBN = float3x3( normalize(IN.t), normalize(b), normalize(IN.n) );
+    float3 w_Per_Vertex_Normal  = normalize(IN.n);
+    float3 w_Per_Vertex_Tangent = normalize(IN.t);
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Gram - Schmidt process
+    // Re Orthoganalizes the tangent vector ( ensures 90* between Normal and Tangent)
+    // Vectors could be slightly off of 90*
+    // Might be more useful in the pixel shader if we built a TBN matrix there, after interpolating tangent and normal through rasterization
+    // 
+    // Scale Normal by cos(theta), then line between scaled normal and tangent is orthoganal to original normal. Subtract tangent to get new tangent
+    w_Per_Vertex_Tangent = normalize(w_Per_Vertex_Tangent - dot(w_Per_Vertex_Tangent, w_Per_Vertex_Normal) * w_Per_Vertex_Normal );
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    float3 w_Per_Vertex_Bitangent = cross(w_Per_Vertex_Normal, w_Per_Vertex_Tangent) * -IN.tangent_handidness;  // Need to multiplay by (negative) tangent handidness to correct for handidness of textures tangent space and DirectX UV space
+
+    float3x3 TBN = float3x3( normalize(w_Per_Vertex_Tangent), normalize(w_Per_Vertex_Bitangent), normalize(w_Per_Vertex_Normal) );
     TBN = transpose( TBN );
 
     float2 UV;
@@ -240,7 +255,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
 
     }
 
-    float3 ambient = float3(0.06, 0.06, 0.06) * albedo_texture_color;
+    float3 ambient = float3(0.04, 0.04, 0.04) * albedo_texture_color;
     float shadow = calc_shadow_value(IN.Light_Space_Position, IN.TextureCoordinate);
     float3 color = ambient + (1.0 - shadow) * Lo;
     #if 0
@@ -256,7 +271,9 @@ float4 main(PixelShaderInput IN) : SV_Target {
     }
     #endif
 	
+    // Reinhert
     color = color / (color + float3(1.0, 1.0, 1.0));
+    // Apply the SRBG Curve
     color = pow(color, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));  
    
     return float4(color, 1.0);

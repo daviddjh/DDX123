@@ -126,12 +126,15 @@ float calc_shadow_value(float4 frag_pos_light_space, float2 tex_coords){
             uv += (ssao_sample.ssao_sample[random_number % 64].rg - 0.5) / 1000.0;
             // uv += (poissonDisk[random_number % 9] - 0.5) / 800.0;
 
-            float closest_depth = texture_2d_table[shadow_texture_index.texture_index].Sample(sampler_1, uv).r;
+            //float closest_depth = texture_2d_table[shadow_texture_index.texture_index].Sample(sampler_1, uv).r;
+            float closest_depth = texture_2d_table[shadow_texture_index.texture_index].Sample(sampler_1, uv, 0).r;
             shadow += (current_depth - SHADOW_BIAS > closest_depth ? (1/(abs(y)+1))+(1/(abs(x)+1)) : 0.);
         }
     }
     shadow /= 44.333;
     //shadow /= 25;
+    // float closest_depth = texture_2d_table[shadow_texture_index.texture_index].Sample(sampler_1, float2(proj_coords.x, 1. - proj_coords.y)).r;
+    // shadow += (current_depth - SHADOW_BIAS > closest_depth ? 1. : 0.);
 
     // float2 uv = float2(proj_coords.x, 1 - proj_coords.y);
     // float closest_depth = texture_2d_table[shadow_texture_index.shadow_texture_index].Sample(sampler_1, uv).r;
@@ -253,7 +256,7 @@ float4 main(PixelShaderInput IN) : SV_Target {
     // }
 
     // occlusion = pow(1 - (occlusion / SSAO_KERNEL_SIZE),2);
-    float3 ambient = float3(0.014, 0.014, 0.014);
+    float3 ambient = float3(0.04, 0.04, 0.04);
     // ambient += (occlusion/10.);
 
     ambient = ambient * albedo_texture_color.rgb;

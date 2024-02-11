@@ -18,6 +18,7 @@ ALIGN_STRUCT struct Per_Frame_Data {
     float4 camera_pos;
     matrix light_space_matrix;
     matrix view_projection_matrix;
+    uint   render_to_display_scale;
 };
 
 // Gbuffer Texture Indicies

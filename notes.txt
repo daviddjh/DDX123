@@ -1,4 +1,9 @@
-12/22/23
+2/4/24
+
+Write up on why I needed the -tangent.w to correct bitangent in vertex shader.
+Clean up code and commit.
+
+1/15/24
 
 Progress on fullscreen...
 

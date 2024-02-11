@@ -814,7 +814,7 @@ namespace d_dx12 {
                 // and for PIX shader source view.  
                 pixel_shader_name.c_str(),
                 L"-Fo", pixel_shader_name_bin.c_str(),     // The file name of the bin.
-                L"-Fd", L".\\", // pixel_shader_name_pdb.c_str(),     // The file name of the pdb.
+                // L"-Fd", L"C:\\dev\\DDX123\\build\\", // pixel_shader_name_pdb.c_str(),     // The file name of the pdb.
 
                 // Entry point.
                 L"-E", L"main",              

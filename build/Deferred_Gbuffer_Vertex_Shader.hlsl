@@ -10,15 +10,16 @@ struct VertexShaderOutput
     float3 t                    : TEXCOORD2;
     float3 n                    : TEXCOORD3;
     float2 TextureCoordinate    : TEXCOORD;
+    float  tangent_handidness   : TEXCOORD5;
 };
 
 struct Vertex_Position_Normal_Tangent_Color_Texturecoord
 {
     float3 Position  : POSITION;
     float3 Normal    : NORMAL;
-    float3 Tangent   : TANGENT;
     float3 Color     : COLOR;
     float2 texCoord  : TEXCOORD;
+    float4 Tangent   : TANGENT;
 };
 
 VertexShaderOutput main(Vertex_Position_Normal_Tangent_Color_Texturecoord IN)
@@ -26,16 +27,19 @@ VertexShaderOutput main(Vertex_Position_Normal_Tangent_Color_Texturecoord IN)
     VertexShaderOutput OUT;
 
     // Convert Tangent, Normal vectors to world space:
-    float3 n = normalize((mul(model_matrix._matrix, float4(IN.Normal.xyz, 0.0))).xyz);
-    float3 t = normalize((mul(model_matrix._matrix, float4(IN.Tangent.xyz, 0.0))).xyz);
+    float3 normal    = normalize(IN.Normal.xyz);
+    float3 w_normal  = normalize((mul(model_matrix._matrix, float4(normal, 0.0))).xyz);
+    float3 tangent   = normalize(IN.Tangent.xyz);
+    float3 w_tangent = normalize((mul(model_matrix._matrix, float4(tangent, 0.0))).xyz);
     
     matrix mvp_matrix        = mul(per_frame_data.view_projection_matrix, model_matrix._matrix);
 
     OUT.Position             = mul(mvp_matrix, float4(IN.Position, 1.0));
     OUT.Frag_Position        = mul(model_matrix._matrix, float4(IN.Position, 1.0));
     OUT.TextureCoordinate    = IN.texCoord;
-    OUT.t = t;
-    OUT.n = n;
+    OUT.t = w_tangent;
+    OUT.n = w_normal;
+    OUT.tangent_handidness = IN.Tangent.w;
 
     return OUT;
 }

@@ -132,14 +132,15 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
                         }
                     } else if(attribute.first.compare("TANGENT") == 0){
                         for(int i = 0; i < primative_group->verticies.nitems; i++){
-                            primative_group->verticies.ptr[i].tangent = ((DirectX::XMFLOAT3*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
+                            primative_group->verticies.ptr[i].tangent = ((DirectX::XMFLOAT4*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
                             primative_group->verticies.ptr[i].tangent.z = -primative_group->verticies.ptr[i].tangent.z;
+                            // primative_group->verticies.ptr[i].tangent.y = -primative_group->verticies.ptr[i].tangent.y;
                         }
                     } else if(attribute.first.compare("TEXCOORD_0") == 0){
                         for(int i = 0; i < primative_group->verticies.nitems; i++){
                             primative_group->verticies.ptr[i].texture_coordinates = ((DirectX::XMFLOAT2*)(&buffer.data.at(0) + buffer_view.byteOffset))[i];
                             // Dx12 UV is different than OpenGL / GLTF
-                            //primative_group->verticies.ptr[i].texture_coordinates.y = 1 - primative_group->verticies.ptr[i].texture_coordinates.y;
+                            // primative_group->verticies.ptr[i].texture_coordinates.y = 1 - primative_group->verticies.ptr[i].texture_coordinates.y;
                         }
                     } else if(attribute.first.compare("COLOR_0") == 0){
                         for(int i = 0; i < primative_group->verticies.nitems; i++){

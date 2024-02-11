@@ -35,9 +35,9 @@ Shader* create_forward_render_pbr_shader()
 
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "NORMAL")     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TANGENT")    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "COLOR")      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TEXCOORD")   , DXGI_FORMAT_R32G32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TANGENT")    , DXGI_FORMAT_R32G32B32A32_FLOAT, 0});
 
     /////////////////////////////////////////
     //  Create PSO using shader reflection
@@ -74,9 +74,9 @@ Shader* create_deferred_render_gbuffer_shader()
 
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "NORMAL")     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
-    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TANGENT")    , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "COLOR")      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TEXCOORD")   , DXGI_FORMAT_R32G32_FLOAT, 0});
+    shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TANGENT")    , DXGI_FORMAT_R32G32B32A32_FLOAT, 0});
 
     /////////////////////
     //  Render Targets
@@ -135,7 +135,7 @@ Shader* create_deferred_render_shading_shader()
 
     DXGI_FORMAT rt_formats[] = {
 
-        DXGI_FORMAT_R8G8B8A8_UNORM
+        DXGI_FORMAT_R16G16B16A16_FLOAT
 
     };
     shader_desc.render_target_formats = rt_formats;

@@ -4,6 +4,7 @@
 *.code-workspace
 *.cap
 *.10x
+*.wpix
 
 # Build Extras
 *.asm

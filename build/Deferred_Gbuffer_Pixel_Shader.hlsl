@@ -21,6 +21,7 @@ struct PixelShaderInput
     float3 t                   : TEXCOORD2;
     float3 n                   : TEXCOORD3;
     float2 TextureCoordinate   : TEXCOORD;
+    float  tangent_handidness   : TEXCOORD5;
 };
 
 struct PixelShaderOutput
@@ -39,8 +40,22 @@ PixelShaderOutput main(PixelShaderInput IN) {
 
     // Create Tangent-Bitangent-Normal matrix to convert Tangent Space normal to world space normal
     // https://stackoverflow.com/questions/16555669/hlsl-normal-mapping-matrix-multiplication
-    float3 b = normalize(cross(IN.n, IN.t) * 1.).xyz;
-    float3x3 TBN = float3x3( normalize(IN.t), normalize(b), normalize(IN.n) );
+    float3 w_Per_Vertex_Normal  = normalize(IN.n);
+    float3 w_Per_Vertex_Tangent = normalize(IN.t);
+    
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Gram - Schmidt process
+    // Re Orthoganalizes the tangent vector ( ensures 90* between Normal and Tangent)
+    // Vectors could be slightly off of 90*
+    // Might be more useful in the pixel shader if we built a TBN matrix there, after interpolating tangent and normal through rasterization
+    // 
+    // Scale Normal by cos(theta), then line between scaled normal and tangent is orthoganal to original normal. Subtract tangent to get new tangent
+    w_Per_Vertex_Tangent = normalize(w_Per_Vertex_Tangent - dot(w_Per_Vertex_Tangent, w_Per_Vertex_Normal) * w_Per_Vertex_Normal );
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    float3 w_Per_Vertex_Bitangent = cross(w_Per_Vertex_Normal, w_Per_Vertex_Tangent) * -IN.tangent_handidness;  // Need to multiplay by (negative) tangent handidness to correct for handidness of textures tangent space and DirectX UV space
+
+    float3x3 TBN = float3x3( normalize(w_Per_Vertex_Tangent), normalize(w_Per_Vertex_Bitangent), normalize(w_Per_Vertex_Normal) );
     TBN = transpose( TBN );
 
     float2 UV;
@@ -54,16 +69,16 @@ PixelShaderOutput main(PixelShaderInput IN) {
         discard;
     }
 
-    float3 wNormal;
+    float4 wNormal;
     if((material_data.flags & MATERIAL_FLAG_NORMAL_TEXTURE)){
 
         float3 normal_texture_color = texture_2d_table[material_data.normal_index].Sample(sampler_1, UV).xyz;
-        float3 tNormal = (normal_texture_color * 2.) - 1.;
-        wNormal = normalize(mul(TBN, tNormal));
+        float3 tNormal = normalize((normal_texture_color * 2.) - 1.);
+        wNormal = float4(normalize(mul(TBN, tNormal)), 1.0);
 
     } else {
 
-        wNormal = normalize(IN.n);
+        wNormal = float4(normalize(IN.n), 1.0);
 
     }
 
@@ -89,7 +104,7 @@ PixelShaderOutput main(PixelShaderInput IN) {
     output.color       = float4(0, 0, 0, 1);
     output.color.rgb   = ambient;
     output.wposition   = IN.Frag_World_Position;
-    output.wnormal     = float4(wNormal, 1);
+    output.wnormal     = wNormal;
     output.rough_metal = float4(metallic, roughness, 0, 1);
 
     return output;

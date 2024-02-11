@@ -23,7 +23,7 @@ using namespace DirectX;
 #define BUFFER_OFFSET(i) ((char *)0 + (i))
 
 // Sets window, rendertargets to 4k resolution
-// #define d_4k
+ #define d_4k
 
 struct D_Camera {
     DirectX::XMVECTOR eye_position;
@@ -31,7 +31,7 @@ struct D_Camera {
     DirectX::XMVECTOR up_direction;
     float speed = 1.8;
     //float fov   = 100.;
-    float fov   = 120.;
+    float fov   = 75.;
 };
 
 struct D_Shaders {
@@ -66,8 +66,21 @@ struct D_Buffers{
 
 struct D_Renderer_Config {
     bool fullscreen_mode = false;
-    bool deferred_rendering = false;
+    bool deferred_rendering = true;
     bool imgui_demo = false;         
+
+    #ifdef d_4k
+    u16 display_width  = 3840;
+    u16 display_height = 2160;
+    u16 render_width   = 3840;
+    u16 render_height  = 2160;
+    #else
+    u16 display_width  = 1920;
+    u16 display_height = 1080;
+    u16 render_width   = 1920;
+    u16 render_height  = 1080;
+    #endif
+
 };
 
 // Global Vars, In order of creation
@@ -110,14 +123,6 @@ double tick_sum = 0.;
 double *tick_list = NULL;
 
 /*******************/
-
-#ifdef d_4k
-u16 display_width  = 3840;
-u16 display_height = 2160;
-#else
-u16 display_width  = 1920;
-u16 display_height = 1080;
-#endif
 
 bool using_v_sync = false;
 bool capturing_mouse = false;
@@ -432,7 +437,7 @@ int D_Renderer::init(){
     ////////////////////////////////
     //   Initialize d_dx12 library
     ////////////////////////////////
-    window_rect = { 0, 0, display_width, display_height };
+    window_rect = { 0, 0, config.display_width, config.display_height };
 
     // Need to call this before doing much else!
     d_dx12_init(hWnd, window_rect.right - window_rect.left, window_rect.bottom - window_rect.top);
@@ -458,10 +463,9 @@ int D_Renderer::init(){
 
     Texture_Desc main_rt_desc;
     main_rt_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
-    //main_rt_desc.format = DXGI_FORMAT_R10G10B10A2_UNORM; // HDR
-    main_rt_desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    main_rt_desc.width  = display.display_width;
-    main_rt_desc.height = display.display_height;
+    main_rt_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT; // Because we're outputing float lighting values, not RGB to be displayed
+    main_rt_desc.width  = config.render_width;
+    main_rt_desc.height = config.render_height;
     main_rt_desc.clear_color[0] = 0.3f; 
     main_rt_desc.clear_color[1] = 0.6f; 
     main_rt_desc.clear_color[2] = 1.0f; 
@@ -472,8 +476,8 @@ int D_Renderer::init(){
     main_output_rt_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
     //main_rt_desc.format = DXGI_FORMAT_R10G10B10A2_UNORM; // HDR
     main_output_rt_desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    main_output_rt_desc.width  = display.display_width;
-    main_output_rt_desc.height = display.display_height;
+    main_output_rt_desc.width  = config.display_width;
+    main_output_rt_desc.height = config.display_height;
     main_output_rt_desc.clear_color[0] = 0.3f; 
     main_output_rt_desc.clear_color[1] = 0.6f; 
     main_output_rt_desc.clear_color[2] = 1.0f; 
@@ -483,27 +487,27 @@ int D_Renderer::init(){
     Texture_Desc ssao_output_desc;
     ssao_output_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
     ssao_output_desc.format = DXGI_FORMAT_R16_FLOAT;
-    ssao_output_desc.width  = display.display_width;
-    ssao_output_desc.height = display.display_height;
+    ssao_output_desc.width  = config.render_width;
+    ssao_output_desc.height = config.render_height;
     textures.ssao_output_texture = resource_manager.create_texture(L"SSAO Render Target", ssao_output_desc);
 
     Texture_Desc ds_desc;
     ds_desc.usage = Texture::USAGE::USAGE_DEPTH_STENCIL;
-    ds_desc.width = display_width;
-    ds_desc.height = display_height;
+    ds_desc.width = config.render_width;
+    ds_desc.height = config.render_height;
 
     textures.ds = resource_manager.create_texture(L"Depth Stencil", ds_desc);
 
     Texture_Desc shadow_ds_desc;
     shadow_ds_desc.usage = Texture::USAGE::USAGE_DEPTH_STENCIL;
-    shadow_ds_desc.width = display_width;
-    shadow_ds_desc.height = display_height;
+    shadow_ds_desc.width = config.render_width;
+    shadow_ds_desc.height = config.render_height;
 
     textures.shadow_ds = resource_manager.create_texture(L"Shadow Depth Stencil", shadow_ds_desc);
 
     Texture_Desc g_buffer_albedo_desc;
-    g_buffer_albedo_desc.width  = display_width;
-    g_buffer_albedo_desc.height = display_height;
+    g_buffer_albedo_desc.width  = config.render_width;
+    g_buffer_albedo_desc.height = config.render_height;
     g_buffer_albedo_desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
     g_buffer_albedo_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
     g_buffer_albedo_desc.clear_color[0] = 0.3;
@@ -514,24 +518,24 @@ int D_Renderer::init(){
     textures.g_buffer_albedo = resource_manager.create_texture(L"Gbuffer Albedo", g_buffer_albedo_desc);
 
     Texture_Desc g_buffer_position_desc;
-    g_buffer_position_desc.width  = display_width;
-    g_buffer_position_desc.height = display_height;
+    g_buffer_position_desc.width  = config.render_width;
+    g_buffer_position_desc.height = config.render_height;
     g_buffer_position_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     g_buffer_position_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
 
     textures.g_buffer_position = resource_manager.create_texture(L"Gbuffer Position", g_buffer_position_desc);
 
     Texture_Desc g_buffer_normal_desc;
-    g_buffer_normal_desc.width  = display_width;
-    g_buffer_normal_desc.height = display_height;
+    g_buffer_normal_desc.width  = config.render_width;
+    g_buffer_normal_desc.height = config.render_height;
     g_buffer_normal_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     g_buffer_normal_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
 
     textures.g_buffer_normal = resource_manager.create_texture(L"Gbuffer Normal", g_buffer_normal_desc);
 
     Texture_Desc g_buffer_rough_metal_desc;
-    g_buffer_rough_metal_desc.width  = display_width;
-    g_buffer_rough_metal_desc.height = display_height;
+    g_buffer_rough_metal_desc.width  = config.render_width;
+    g_buffer_rough_metal_desc.height = config.render_height;
     g_buffer_rough_metal_desc.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     g_buffer_rough_metal_desc.usage  = Texture::USAGE::USAGE_RENDER_TARGET;
 
@@ -904,7 +908,7 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
 
     // Bind output texture dimensions
-    Output_Dimensions output_dimensions = {display_width, display_height};
+    Output_Dimensions output_dimensions = {config.render_width, config.render_height};
     Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
     command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
 
@@ -993,6 +997,8 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     //////////////////////////////////////////////////////////
     {
         command_list->set_shader(shaders.post_processing_shader);
+
+        command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
         
         Texture_Index input_texture_index = {};
         input_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("input_texture"), true);
@@ -1013,7 +1019,7 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
         command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
 
         // Now be bind the texture table to the root signature. 
-        //command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
         command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
         command_list->dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
     }
@@ -1064,9 +1070,15 @@ void D_Renderer::render(){
     ////////////////////////////
 
     DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
-    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), (f32) display_width / (f32) display_height, 0.01f, 2500000000.0f);
+    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), (f32) config.render_width / (f32) config.render_height, 0.01f, 2500000000.0f);
     per_frame_data.view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
     DirectX::XMStoreFloat4(&per_frame_data.camera_pos, camera.eye_position);
+    
+    ////////////////////////////////////
+    /// Update Render To Display Scale
+    ////////////////////////////////////
+
+    per_frame_data.render_to_display_scale = config.display_width / config.render_width;
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Shadow Map
@@ -1105,6 +1117,7 @@ void D_Renderer::render(){
     } else {
 
         deferred_render_pass(command_list);
+        command_list->set_render_targets(1, &textures.main_output_target, nullptr);
 
     }
 
@@ -1127,6 +1140,11 @@ void D_Renderer::render(){
 
     // Create IMGUI window
     ImGui::Begin("Info");
+    ImGui::Text("Controls:");
+    ImGui::Text("Mouse - Look");
+    ImGui::Text("W, A, S, D - Move");
+    ImGui::Text("V - VSync on / off");
+    ImGui::Text("Space Bar - Full Screen Toggle");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
     ImGui::SliderFloat3("Light Position", &this->per_frame_data.light_position.x, -10., 10);
@@ -1136,7 +1154,7 @@ void D_Renderer::render(){
     ImGui::Checkbox("Demo Window?", &config.imgui_demo);
 
     // Render a texture
-    u16 ssao_output_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("ssao_output"));
+    u16 ssao_output_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("ssao_output"));
     //u32 ssao_rotation_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
     float render_ratio = 1920. / 1080.;
     ImGui::Image((ImTextureID)resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(ssao_output_index).gpu_descriptor_handle.ptr, ImVec2(200.*render_ratio, 200.));
@@ -1220,7 +1238,6 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                 }
             }
             break;
-
 			case WM_MOUSEMOVE:
 			{
 
@@ -1311,11 +1328,10 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                     case(VK_SPACE):
                     {
                         if (application_is_initialized && CheckTearingSupport()) {
-                            DEBUG_LOG("Toggling full screen!!");
                             Span<Texture*> rts_to_resize = { renderer.textures.rt, 2 };
-                            DEBUG_LOG("Toggling full screen!!");
                             toggle_fullscreen(rts_to_resize);
-                            DEBUG_LOG("Resizing Depth Stencil!!");
+                            renderer.config.display_width = renderer.textures.rt[0]->width;
+                            renderer.config.display_height = renderer.textures.rt[0]->height;
 
                             // Resize size dependent resources
                             renderer.textures.ds->resize(renderer.textures.rt[0]->width, renderer.textures.rt[0]->height);
@@ -1414,17 +1430,17 @@ WinMain(HINSTANCE hInstance,
         renderer.hWnd = CreateWindowEx(
                 WS_EX_TOPMOST,
                 "David Window Class",		// Defined previously
-                "David's DirectX Window",  // Name at the top of the window	
+                "DDX123",                   // Name at the top of the window	
                 //WS_OVERLAPPEDWINDOW ^ WS_THICKFRAME,		// A few attributes for the window like minimize, border, ect..
-                WS_OVERLAPPEDWINDOW,		// A few attributes for the window like minimize, border, ect..
-                CW_USEDEFAULT,				// DefaultPos X
-                CW_USEDEFAULT,				// DefaultPos Y
-                display_width,	            // Display(!!) Width
-                display_height,             // Display(!!) Height
-                nullptr,					// Parent Window
-                nullptr,					// Menu (Dont want one)
-                hInstance,					// HINSTANCE
-                nullptr						// Additional Data
+                WS_OVERLAPPEDWINDOW,		     // A few attributes for the window like minimize, border, ect..
+                CW_USEDEFAULT,				     // DefaultPos X
+                CW_USEDEFAULT,				     // DefaultPos Y
+                renderer.config.display_width,	 // Display(!!) Width
+                renderer.config.display_height,  // Display(!!) Height
+                nullptr,					     // Parent Window
+                nullptr,					     // Menu (Dont want one)
+                hInstance,                       // HINSTANCE
+                nullptr						     // Additional Data
             );
 
         // Checks that it worked
@@ -1442,7 +1458,7 @@ WinMain(HINSTANCE hInstance,
         // Show the window
         ShowWindow(renderer.hWnd, nCmdShow);
 
-        SetWindowPos(renderer.hWnd, HWND_NOTOPMOST, 0, 0, display_width, display_height, 0);
+        SetWindowPos(renderer.hWnd, HWND_NOTOPMOST, 0, 0, renderer.config.display_width, renderer.config.display_height, 0);
         // Message loop
         MSG msg = {};
         while (true) {

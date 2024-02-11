@@ -37,13 +37,14 @@ struct VertexShaderOutput
     float3 t                    : TEXCOORD2;
     float3 n                    : TEXCOORD3;
     float2 TextureCoordinate    : TEXCOORD;
+    float  tangent_handidness   : TEXCOORD6;
 };
 
 struct Vertex_Position_Normal_Tangent_Color_Texturecoord
 {
     float3 Position  : POSITION;
     float3 Normal    : NORMAL;
-    float3 Tangent   : TANGENT;
+    float4 Tangent   : TANGENT;
     float3 Color     : COLOR;
     float2 texCoord  : TEXCOORD;
 };
@@ -67,6 +68,7 @@ VertexShaderOutput main(Vertex_Position_Normal_Tangent_Color_Texturecoord IN)
     OUT.TextureCoordinate = IN.texCoord;
     OUT.t = t;
     OUT.n = n;
+    OUT.tangent_handidness = IN.Tangent.w;
 
     return OUT;
 }
