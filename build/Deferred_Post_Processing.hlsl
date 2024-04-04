@@ -31,6 +31,8 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     // ACES
     color = apply_aces_film_curve(color);
+    
+    // color = ssao_occlusion;
 
     // Gamma Correction - (Inverse Electrical Optical Transfer Function)
     color = apply_srgb_curve(color);  // - Gamma, for sRGB. REC709. SDR

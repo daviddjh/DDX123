@@ -1,3 +1,8 @@
+4/3/24
+
+Made a ray tracing pass with compute shader. Just displays a color.
+Next steps: generate rays. display triangle.
+
 2/4/24
 
 Write up on why I needed the -tangent.w to correct bitangent in vertex shader.
