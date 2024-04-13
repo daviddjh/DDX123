@@ -41,6 +41,7 @@ struct D_Shaders {
     Shader*           shadow_map_shader;
     Shader*           ssao_shader;
     Shader*           post_processing_shader;
+    Shader*           compute_rayt_shader;
 };
 
 struct D_Textures {
@@ -64,10 +65,23 @@ struct D_Buffers{
     Buffer*           ssao_sample_kernel;
 };
 
+enum D_Render_Passes : u8 {
+    FORWARD_SHADING,
+    DEFERRED_SHADING,
+    RAY_TRACING,
+    NUM_RENDER_PASSES
+};
+
+static const char* render_pass_names[NUM_RENDER_PASSES] = {
+    "Forward_Shading",
+    "Deffered_Shading",
+    "Ray_Tracing",
+};
+
 struct D_Renderer_Config {
     bool fullscreen_mode = false;
-    bool deferred_rendering = true;
-    bool imgui_demo = false;         
+    bool imgui_demo      = false;         
+    u8   render_pass     = RAY_TRACING;
 
     #ifdef d_4k
     u16 display_width  = 3840;
@@ -106,6 +120,7 @@ struct D_Renderer {
     void render_shadow_map(Command_List* command_list);
     void forward_render_pass(Command_List* command_list);
     void deferred_render_pass(Command_List* command_list);
+    void compute_rayt_pass(Command_List* command_list);
     void shutdown();
     void toggle_fullscreen();
     void upload_model_to_gpu(Command_List* command_list, D_Model& test_model);
@@ -559,6 +574,7 @@ int D_Renderer::init(){
     shaders.shadow_map_shader        = create_shadow_mapping_shader();
     shaders.ssao_shader              = create_ssao_shader();
     shaders.post_processing_shader   = create_post_processing_shader();
+    shaders.compute_rayt_shader      = create_compute_rayt_shader();
 
     ////////////////////////////
     //  Create our command list
@@ -1026,6 +1042,39 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
 
 }
 
+void D_Renderer::compute_rayt_pass(Command_List* command_list){
+
+    //////////////////////////////////////
+    // Compute Ray Tracing!
+    //////////////////////////////////////
+
+    //////////////////////////////////////////////////////////
+    // SSAO
+    //////////////////////////////////////////////////////////
+
+    command_list->set_shader(shaders.compute_rayt_shader);
+
+    Descriptor_Handle per_frame_data_handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+    command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
+    
+    // Texture_Index input_texture_index = {};
+    // input_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("input_texture"), true);
+
+    // Descriptor_Handle input_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&input_texture_index, sizeof(Texture_Index), 256);
+    // command_list->bind_handle(input_texture_index_handle, binding_point_string_lookup("input_texture_index"));
+
+    Texture_Index output_texture_index = {};
+    output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+
+    Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+    // Now be bind the texture table to the root signature. 
+    // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+    command_list->dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
+
+}
 
 void D_Renderer::render(){
     {
@@ -1109,16 +1158,19 @@ void D_Renderer::render(){
     command_list->clear_render_target(textures.main_output_target);
     command_list->clear_depth_stencil(textures.ds, 1.0f);
 
-    // Either forward rendering or deferred rendering
-    if(config.deferred_rendering == false) {
-
-        forward_render_pass(command_list);
-
-    } else {
-
-        deferred_render_pass(command_list);
-        command_list->set_render_targets(1, &textures.main_output_target, nullptr);
-
+    // Choose render passed based on config. Set by IMGUI below
+    switch(config.render_pass){
+        case D_Render_Passes::FORWARD_SHADING:
+            forward_render_pass(command_list);
+            break;
+        case D_Render_Passes::DEFERRED_SHADING:
+            deferred_render_pass(command_list);
+            command_list->set_render_targets(1, &textures.main_output_target, nullptr);
+            break;
+        case D_Render_Passes::RAY_TRACING:
+            compute_rayt_pass(command_list);
+            command_list->set_render_targets(1, &textures.main_output_target, nullptr);
+            break;
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1150,7 +1202,22 @@ void D_Renderer::render(){
     ImGui::SliderFloat3("Light Position", &this->per_frame_data.light_position.x, -10., 10);
     ImGui::DragFloat3("Light Color", &this->per_frame_data.light_color.x);
     ImGui::SliderFloat("Camera FOV", &this->camera.fov, 35., 120.);
-    ImGui::Checkbox("Deferred Shading?", &config.deferred_rendering);
+    // Combo box for choosing which render pass to use
+    // Copied from imgui_demo.cpp
+    if (ImGui::BeginCombo("Render Pass", render_pass_names[config.render_pass], /*flags*/ 0))
+    {
+        for (int n = 0; n < NUM_RENDER_PASSES; n++)
+        {
+            const bool is_selected = (config.render_pass == n);
+            if (ImGui::Selectable(render_pass_names[n], is_selected))
+                config.render_pass = n;
+
+            // Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
+            if (is_selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
     ImGui::Checkbox("Demo Window?", &config.imgui_demo);
 
     // Render a texture
