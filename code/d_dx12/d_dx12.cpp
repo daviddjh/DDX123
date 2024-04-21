@@ -4,6 +4,8 @@
 #include "DirectXTex.h"
 #include "dxcapi.h"
 #include "d3d12shader.h"
+#include "Raytracing.h"
+
 
 // Are we using WARP ?
 #define USING_WARP 0
@@ -13,7 +15,7 @@ using namespace DirectX;
 
 namespace d_dx12 {
 
-    Microsoft::WRL::ComPtr<ID3D12Device2>  d3d12_device;
+    Microsoft::WRL::ComPtr<ID3D12Device5>  d3d12_device;
     Command_Queue                          direct_command_queue;
     Command_Queue                          copy_command_queue;
     u64                                    frame_fence_values[NUM_BACK_BUFFERS];
@@ -89,7 +91,7 @@ namespace d_dx12 {
 #endif // _DEBUG
 
         Microsoft::WRL::ComPtr<IDXGIFactory6> dxgi_factory;
-        Microsoft::WRL::ComPtr<ID3D12Device2> temp_device;
+        Microsoft::WRL::ComPtr<ID3D12Device5> temp_device;
 
         // Get DXGIFactory
         if (FAILED(CreateDXGIFactory2(dxgi_factory_flags, IID_PPV_ARGS(dxgi_factory.GetAddressOf())))) {
@@ -299,7 +301,85 @@ namespace d_dx12 {
      *   Shader!
      */
 
-    void create_binding_points_from_d3d12_reflection(Shader* ddx12_shader,  Microsoft::WRL::ComPtr<ID3D12ShaderReflection> d3d12_shader_reflection){
+    void create_binding_points_from_d3d12_library_reflection(Shader* ddx12_shader,  Microsoft::WRL::ComPtr<ID3D12LibraryReflection> d3d12_library_reflection){
+
+        // Use reflection interface here.
+        D3D12_LIBRARY_DESC d3d12_library_desc;
+        if(d3d12_library_reflection){
+            d3d12_library_reflection->GetDesc(&d3d12_library_desc);
+        }
+
+        // D3D12 Library reflection doesn't contain much interesting data, need to loop through the library functions to collect interesting data
+        for (int j = 0; j < d3d12_library_desc.FunctionCount; j++){
+
+            D3D12_FUNCTION_DESC d3d12_function_desc;
+            ID3D12FunctionReflection* d3d12_function_reflection = d3d12_library_reflection->GetFunctionByIndex(j);
+            if (d3d12_function_reflection){
+                d3d12_function_reflection->GetDesc(&d3d12_function_desc);
+            }
+
+            for (int i = 0; i < d3d12_function_desc.BoundResources; i++){
+
+                // Get shader input reflection data, find binding point index for shader->binding_points
+                D3D12_SHADER_INPUT_BIND_DESC d3d12_shader_input_binding_point_desc;
+                d3d12_function_reflection->GetResourceBindingDesc(i, &(d3d12_shader_input_binding_point_desc));
+                const u32 binding_point_index = binding_point_string_lookup(d3d12_shader_input_binding_point_desc.Name);                    
+
+                Shader::Binding_Point& ddx12_binding_point = ddx12_shader->binding_points[binding_point_index];
+
+                // Default shader binding point visibility is "ALL"
+                ddx12_binding_point.shader_visibility = D3D12_SHADER_VISIBILITY_ALL;
+
+                // Shader input type:
+                switch(d3d12_shader_input_binding_point_desc.Type){
+                    case(D3D_SIT_CBUFFER):
+                        ddx12_binding_point.input_type = Shader::Input_Type::TYPE_CONSTANT_BUFFER;
+                    break;
+                    case(D3D_SIT_TBUFFER):
+                    case(D3D_SIT_TEXTURE):
+                    case(D3D_SIT_STRUCTURED):
+                    case(D3D_SIT_BYTEADDRESS):
+                    case(D3D_SIT_RTACCELERATIONSTRUCTURE):
+                        ddx12_binding_point.input_type = Shader::Input_Type::TYPE_SHADER_RESOURCE;
+                    break;
+                    case(D3D_SIT_UAV_RWTYPED):
+                    case(D3D_SIT_UAV_RWSTRUCTURED):
+                    case(D3D_SIT_UAV_RWBYTEADDRESS):
+                    case(D3D_SIT_UAV_APPEND_STRUCTURED):
+                    case(D3D_SIT_UAV_CONSUME_STRUCTURED):
+                    case(D3D_SIT_UAV_RWSTRUCTURED_WITH_COUNTER):
+                    case(D3D_SIT_UAV_FEEDBACKTEXTURE):
+                        ddx12_binding_point.input_type = Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE;
+                    break;
+                    case(D3D_SIT_SAMPLER):
+                        ddx12_binding_point.input_type = Shader::Input_Type::TYPE_SAMPLER;
+                    break;
+                }
+
+                // If it's a Constant Buffer, get the size:
+                if (ddx12_binding_point.input_type == Shader::Input_Type::TYPE_CONSTANT_BUFFER){
+                    ID3D12ShaderReflectionConstantBuffer* cb = d3d12_function_reflection->GetConstantBufferByName(d3d12_shader_input_binding_point_desc.Name);
+                    
+                    D3D12_SHADER_BUFFER_DESC shader_buffer_desc;
+                    cb->GetDesc(&shader_buffer_desc);
+
+                    ddx12_binding_point.cb_size = shader_buffer_desc.Size;
+
+                }
+
+                // Binding point (space, number, count)
+                ddx12_binding_point.bind_point = d3d12_shader_input_binding_point_desc.BindPoint;
+                ddx12_binding_point.bind_count = d3d12_shader_input_binding_point_desc.BindCount;
+                ddx12_binding_point.bind_space = d3d12_shader_input_binding_point_desc.Space;
+
+                // String name
+                ddx12_binding_point.name = string_from_lit_string(d_dx12_arena, (char *)d3d12_shader_input_binding_point_desc.Name);
+
+            }
+        }
+    }
+
+    void create_binding_points_from_d3d12_shader_reflection(Shader* ddx12_shader,  Microsoft::WRL::ComPtr<ID3D12ShaderReflection> d3d12_shader_reflection){
 
         // Use reflection interface here.
         D3D12_SHADER_DESC d3d12_shader_desc;
@@ -367,6 +447,168 @@ namespace d_dx12 {
         }
     }
 
+    void compile_and_reflect_ray_trace_shader(Shader_Desc& desc, Shader* shader, Microsoft::WRL::ComPtr<ID3DBlob>& d3d12_ray_trace_shader_blob){
+
+        u16 shader_binding_array_index = 0;
+
+        Microsoft::WRL::ComPtr<IDxcUtils> pUtils;
+        Microsoft::WRL::ComPtr<IDxcCompiler3> pCompiler;
+        DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&pUtils));
+        DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&pCompiler));
+
+        //
+        // Default include handler
+        //
+        Microsoft::WRL::ComPtr<IDxcIncludeHandler> pIncludeHandler;
+        pUtils->CreateDefaultIncludeHandler(&pIncludeHandler);
+
+        ////////////////////////////////////////////////////////////////////////////////////
+        /// Ray Trace Shader!
+        ////////////////////////////////////////////////////////////////////////////////////
+
+        {
+            std::wstring ray_trace_shader_name(desc.ray_trace_shader);
+            size_t last_dot_pos = ray_trace_shader_name.find_last_of(L".");
+            if(last_dot_pos != std::wstring::npos)
+                ray_trace_shader_name = ray_trace_shader_name.substr(0, last_dot_pos);
+
+            std::wstring ray_trace_shader_name_bin = ray_trace_shader_name + L".bin";    // The file name of the bin.
+            std::wstring ray_trace_shader_name_pdb = ray_trace_shader_name + L".pdb";    // The file name of the pdb.
+
+            LPCWSTR ray_trace_shader_arguments[] =
+            {
+                // Optional shader source file name for error reporting
+                // and for PIX shader source view.  
+                ray_trace_shader_name.c_str(),
+                L"-Fo", ray_trace_shader_name_bin.c_str(),     // The file name of the bin.
+                L"-Fd", L".\\",                                // The file name of the pdb.
+
+                // Entry point.
+                // L"-E", L"main",              
+
+                // Target.
+                L"-T", L"lib_6_3",            
+
+                // Enable debug information (slim format)
+                //#ifdef _DEBUG
+                L"-Zi",                      
+                L"-Od",
+                L"-Qembed_debug",
+                //#endif
+
+                // Strip reflection into a separate blob. 
+                L"-Qstrip_reflect",          
+            };
+
+            //
+            // Open source file.  
+            //
+            Microsoft::WRL::ComPtr<IDxcBlobEncoding> pSource = nullptr;
+            pUtils->LoadFile(desc.ray_trace_shader, nullptr, &pSource);
+            DxcBuffer Source;
+            Source.Ptr = pSource->GetBufferPointer();
+            Source.Size = pSource->GetBufferSize();
+            Source.Encoding = DXC_CP_ACP; // Assume BOM says UTF8 or UTF16 or this is ANSI text.
+
+
+            //
+            // Compile it with specified arguments.
+            //
+            Microsoft::WRL::ComPtr<IDxcResult> pResults;
+            pCompiler->Compile(
+                &Source,                              // Source buffer.
+                ray_trace_shader_arguments,           // Array of pointers to arguments.
+                _countof(ray_trace_shader_arguments), // Number of arguments.
+                pIncludeHandler.Get(),                // User-provided interface to handle #include directives (optional).
+                IID_PPV_ARGS(&pResults)               // Compiler output status, buffer, and errors.
+            );
+
+            //
+            // Print errors if present.
+            //
+            Microsoft::WRL::ComPtr<IDxcBlobUtf8> pErrors = nullptr;
+            pResults->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&pErrors), nullptr);
+            // Note that d3dcompiler would return null if no errors or warnings are present.
+            // IDxcCompiler3::Compile will always return an error buffer, but its length
+            // will be zero if there are no warnings or errors.
+            if (pErrors != nullptr && pErrors->GetStringLength() != 0)
+                OutputDebugString(pErrors->GetStringPointer());
+
+            //
+            // Quit if the compilation failed.
+            //
+            HRESULT hrStatus;
+            pResults->GetStatus(&hrStatus);
+            if (FAILED(hrStatus))
+            {
+                wprintf(L"Compilation Failed\n");
+                DEBUG_BREAK;
+            }
+
+            //
+            // Save shader binary.
+            //
+            IDxcBlobUtf16* pShaderName = nullptr;
+            HRESULT hr = pResults->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&d3d12_ray_trace_shader_blob), &pShaderName);
+            if (d3d12_ray_trace_shader_blob != nullptr)
+            {
+                FILE* fp = NULL;
+
+                LPCWSTR shader_name = pShaderName->GetStringPointer();
+                int error_num = _wfopen_s(&fp, shader_name, L"wb");
+                fwrite(d3d12_ray_trace_shader_blob->GetBufferPointer(), d3d12_ray_trace_shader_blob->GetBufferSize(), 1, fp);
+                fclose(fp);
+            }
+
+            //
+            // Save pdb.
+            //
+            Microsoft::WRL::ComPtr<IDxcBlob> pPDB = nullptr;
+            Microsoft::WRL::ComPtr<IDxcBlobUtf16> pPDBName = nullptr;
+            pResults->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&pPDB), &pPDBName);
+            {
+                FILE* fp = NULL;
+
+                // Note that if you don't specify -Fd, a pdb name will be automatically generated.
+                // Use this file name to save the pdb so that PIX can find it quickly.
+                _wfopen_s(&fp, pPDBName->GetStringPointer(), L"wb");
+                fwrite(pPDB->GetBufferPointer(), pPDB->GetBufferSize(), 1, fp);
+                fclose(fp);
+            }
+
+            //
+            // Get separate reflection.
+            //
+            Microsoft::WRL::ComPtr<IDxcBlob> pReflectionData;
+            // pResults->GetOutput(DXC_OUT_REFLECTION, IID_PPV_ARGS(&pReflectionData), nullptr);
+
+            // Microsoft::WRL::ComPtr<IDxcContainerReflection> pReflectionI;
+            // DxcCreateInstance(CLSID_DxcContainerReflection, IID_PPV_ARGS(&pReflectionI));
+            // pReflectionI->Load(pReflectionData.Get());
+            // Microsoft::WRL::ComPtr< ID3D12ShaderReflection > pReflection;
+            // pReflectionI->GetPartReflection(0, IID_PPV_ARGS(&pReflection));
+
+
+            pResults->GetOutput(DXC_OUT_REFLECTION, IID_PPV_ARGS(&pReflectionData), nullptr);
+            if (pReflectionData != nullptr)
+            {
+                // Optionally, save reflection blob for later here.
+
+                // Create reflection interface.
+                DxcBuffer ReflectionData;
+                ReflectionData.Encoding = DXC_CP_ACP;
+                ReflectionData.Ptr = pReflectionData->GetBufferPointer();
+                ReflectionData.Size = pReflectionData->GetBufferSize();
+
+                Microsoft::WRL::ComPtr< ID3D12LibraryReflection > pReflection;
+                HRESULT hr = pUtils->CreateReflection(&ReflectionData, IID_PPV_ARGS(&pReflection));
+
+                create_binding_points_from_d3d12_library_reflection(shader, pReflection);
+                
+            }
+
+        }
+    }
     void compile_and_reflect_compute_shader(Shader_Desc& desc, Shader* shader, Microsoft::WRL::ComPtr<ID3DBlob>& d3d12_compute_shader_blob){
 
         u16 shader_binding_array_index = 0;
@@ -555,7 +797,7 @@ namespace d_dx12 {
                 Microsoft::WRL::ComPtr< ID3D12ShaderReflection > pReflection;
                 pUtils->CreateReflection(&ReflectionData, IID_PPV_ARGS(&pReflection));
 
-                create_binding_points_from_d3d12_reflection(shader, pReflection);
+                create_binding_points_from_d3d12_shader_reflection(shader, pReflection);
                 
             }
 
@@ -770,7 +1012,7 @@ namespace d_dx12 {
                 Microsoft::WRL::ComPtr< ID3D12ShaderReflection > pReflection;
                 pUtils->CreateReflection(&ReflectionData, IID_PPV_ARGS(&pReflection));
 
-                create_binding_points_from_d3d12_reflection(shader, pReflection);
+                create_binding_points_from_d3d12_shader_reflection(shader, pReflection);
                 
             }
 
@@ -975,7 +1217,7 @@ namespace d_dx12 {
                     pReflection->GetDesc(&shader_reflection_desc);
                 }
 
-                create_binding_points_from_d3d12_reflection(shader, pReflection);
+                create_binding_points_from_d3d12_shader_reflection(shader, pReflection);
                 
             }
         }
@@ -995,7 +1237,6 @@ namespace d_dx12 {
 
             Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_vertex_shader_blob;
             Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_pixel_shader_blob;
-
 
             /*
             *   Compiles the shader with dxcompiler.dll, reflection data stored in "shader" struct
@@ -1248,7 +1489,7 @@ namespace d_dx12 {
 
             ThrowIfFailed(d3d12_device->CreatePipelineState(&pipelineStateStreamDesc, IID_PPV_ARGS(&(shader->d3d12_pipeline_state))));
 
-        } else {
+        } else if(shader->type == Shader::Shader_Type::TYPE_COMPUTE) {
 
             Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_compute_shader_blob;
 
@@ -1434,7 +1675,222 @@ namespace d_dx12 {
             ThrowIfFailed(d3d12_device->CreatePipelineState(&pipelineStateStreamDesc, IID_PPV_ARGS(&(shader->d3d12_pipeline_state))));
 
 
-        }
+        } else if (desc.type == Shader::Shader_Type::TYPE_RAY_TRACE){
+            
+            Microsoft::WRL::ComPtr<ID3DBlob>                d3d12_ray_trace_shader_blob;
+
+            /*
+            *   Compiles the shader with dxcompiler.dll, reflection data stored in "shader" struct
+            */
+
+            compile_and_reflect_ray_trace_shader(desc, shader, d3d12_ray_trace_shader_blob);
+
+            /*
+            *   Set up Root Signiture
+            */
+
+            // Create the root signature
+            D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { };
+            featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+            if (FAILED(d3d12_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData)))) {
+                featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+            }
+
+            // Default Flags
+            D3D12_ROOT_SIGNATURE_FLAGS root_signature_flags =
+                D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+                D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+                D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+                D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+
+
+            CD3DX12_ROOT_PARAMETER1 root_parameters[64];
+            u8 num_root_paramters = 0;
+
+            CD3DX12_STATIC_SAMPLER_DESC static_samplers[64];
+            u8 num_static_samplers = 0;
+                
+            // Iterate through the parameter_list provided by user.
+            for(int j = 0; j < BINDING_POINT_INDEX_COUNT; j++){
+                
+                // Get shader_binding_point from shader reflection with same name as jth parameter in user provided parameter list
+                Shader::Binding_Point * shader_binding_point = &(shader->binding_points[j]);
+
+                switch(shader_binding_point->input_type){
+
+                    // Skip if the current shader doesn't use this binding point
+                    case(Shader::Input_Type::TYPE_INVALID):
+                    case(Shader::Input_Type::TYPE_INLINE_CONSTANT):
+                    break;
+
+                    case(Shader::Input_Type::TYPE_SAMPLER):
+                        //DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Static Sampler, Shader Register: %u, Shader Space: %u\n\n", desc.parameter_list[j].name, shader_binding_point->d3d12_binding_desc.BindPoint, shader_binding_point->d3d12_binding_desc.Space);
+                        {
+
+                            DEBUG_LOG("Static Sampler!");
+
+                            CD3DX12_STATIC_SAMPLER_DESC * static_sampler_desc = &(static_samplers[num_static_samplers]);
+
+                            //static_sampler_desc->Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+                            static_sampler_desc->Filter = D3D12_FILTER_ANISOTROPIC;
+                            static_sampler_desc->AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                            static_sampler_desc->AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                            static_sampler_desc->AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+                            static_sampler_desc->MipLODBias = 0;
+                            static_sampler_desc->MaxAnisotropy = 8;
+                            static_sampler_desc->ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+                            static_sampler_desc->BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+                            static_sampler_desc->MinLOD = 0;
+                            static_sampler_desc->MaxLOD = D3D12_FLOAT32_MAX;
+                            static_sampler_desc->ShaderRegister = shader_binding_point->bind_point;
+                            static_sampler_desc->RegisterSpace = shader_binding_point->bind_space;
+                            static_sampler_desc->ShaderVisibility = shader_binding_point->shader_visibility;
+
+                            num_static_samplers++;
+
+                        }
+                    break;
+
+                    #if 0  // Not using root constants.. for now
+                    case(Shader_Desc::Parameter::Usage_Type::TYPE_INLINE_CONSTANT):
+
+                        {
+                            
+                        // DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Inline Constant, Shader Register: %u", desc.parameter_list[j].name, shader_binding_point->d3d12_binding_desc.BindPoint);
+                        // os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->d3d12_binding_desc.Space, num_root_paramters);
+
+                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Inline Constant, Shader Register: %u, Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->name, shader_binding_point->bind_point, shader_binding_point->bind_space, num_root_paramters);
+
+                        root_parameters[num_root_paramters].InitAsConstants(
+                            shader_binding_point->cb_size,
+                            shader_binding_point->bind_point,
+                            shader_binding_point->bind_space,
+                            shader_binding_point->shader_visibility
+                        );
+                        shader_binding_point->root_signature_index = num_root_paramters;
+                        num_root_paramters++;
+
+                        }
+
+                    break;
+                    #endif
+
+                    case(Shader::Input_Type::TYPE_CONSTANT_BUFFER):
+                        // TODO: Add Root Constant Support
+                    case(Shader::Input_Type::TYPE_SHADER_RESOURCE):
+                    case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
+
+                    {
+                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
+                        os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
+
+                        // Our RT acceleration structures need to use root SRVs
+                        if(j == SCENE){
+                            root_parameters[num_root_paramters].InitAsShaderResourceView(shader_binding_point->bind_point, shader_binding_point->bind_space, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_ALL);
+                            shader_binding_point->root_signature_index = num_root_paramters;
+                            num_root_paramters++;
+                            break;
+                        }
+
+                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
+                        os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
+
+                        //Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
+                        D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
+
+                        descriptor_range->BaseShaderRegister                = shader_binding_point->bind_point,
+                        descriptor_range->RegisterSpace                     = shader_binding_point->bind_space;
+                        descriptor_range->OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+                        descriptor_range->Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+
+                        descriptor_range->NumDescriptors                    = shader_binding_point->bind_count;
+                        // If the number of descriptors is 0, then we assume it's an unbound descriptor array
+                        if(descriptor_range->NumDescriptors == 0){
+                            descriptor_range->NumDescriptors = DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE;
+                            descriptor_range->Flags |= D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE;
+                        }
+
+
+                        switch(shader_binding_point->input_type){
+                            case(Shader::Input_Type::TYPE_CONSTANT_BUFFER):
+                                descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+                                break;
+                            case(Shader::Input_Type::TYPE_SHADER_RESOURCE):
+                                descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+                                break;
+                            case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
+                                descriptor_range->RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+                                break;
+                        }
+
+                        root_parameters[num_root_paramters].InitAsDescriptorTable(1, descriptor_range, shader_binding_point->shader_visibility);
+                        shader_binding_point->root_signature_index = num_root_paramters;
+                        num_root_paramters++;
+                    }
+
+                    break;
+                }
+
+            }
+
+            CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDescription;
+            rootSignatureDescription.Init_1_1(num_root_paramters, root_parameters, num_static_samplers, static_samplers, root_signature_flags);
+
+            // Serialize the root sig
+            Microsoft::WRL::ComPtr<ID3DBlob> rootSigitureBlob;
+            Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+            HRESULT hr  = D3DX12SerializeVersionedRootSignature(&rootSignatureDescription, featureData.HighestVersion, &rootSigitureBlob, &errorBlob);
+            if (FAILED(hr)) {
+                OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+                throw std::exception();
+            }
+            // Create root sig
+            // This can be pre compiled
+            ThrowIfFailed(d3d12_device->CreateRootSignature(0, rootSigitureBlob->GetBufferPointer(), rootSigitureBlob->GetBufferSize(), IID_PPV_ARGS(&(shader->d3d12_root_signature))));
+
+            /*
+            *   Set pipeline state object
+            */
+            CD3DX12_STATE_OBJECT_DESC raytracing_pipeline { D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE };
+
+            // DXIL Library sub object
+            // Contains shaders used by pipeline
+            CD3DX12_DXIL_LIBRARY_SUBOBJECT* dxil_lib_subobject = raytracing_pipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+            D3D12_SHADER_BYTECODE dxil_lib_bytecode = CD3DX12_SHADER_BYTECODE(d3d12_ray_trace_shader_blob.Get());
+            // D3D12_SHADER_BYTECODE dxil_lib_bytecode = CD3DX12_SHADER_BYTECODE((void*)g_pRaytracing, ARRAYSIZE(g_pRaytracing));
+            dxil_lib_subobject->SetDXILLibrary(&dxil_lib_bytecode);
+
+            // Optional?
+            // dxil_lib_subobject->DefineExport(L"MyRaygenShader");
+            // dxil_lib_subobject->DefineExport(L"MyClosestHitShader");
+            // dxil_lib_subobject->DefineExport(L"MyMissShader");
+
+            // Specifies shaders to use wwhen a triangle intersects geo
+            // Different geo can have different hit groups
+            CD3DX12_HIT_GROUP_SUBOBJECT* hit_group_subobject = raytracing_pipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+            hit_group_subobject->SetClosestHitShaderImport(L"MyClosestHitShader");
+            hit_group_subobject->SetHitGroupExport(L"MyHitGroup");
+            hit_group_subobject->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
+
+            // Defines maximum payload and attribute size in bytes for RT shaders
+            CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT* shader_config_subobject = raytracing_pipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
+            u32 payload_size = sizeof(float) * 4;   // color
+            u32 attribute_size = sizeof(float) * 2; // barycentrics
+            shader_config_subobject->Config(payload_size, attribute_size);
+
+            CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT* global_root_signature = raytracing_pipeline.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+            global_root_signature->SetRootSignature(shader->d3d12_root_signature.Get());
+
+            // Configures Maximum TraceRay() recursion depth
+            CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT* pipeline_config = raytracing_pipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
+            u32 max_recursion_depth = 1;
+            pipeline_config->Config(max_recursion_depth);
+
+            ThrowIfFailed(d3d12_device->CreateStateObject(raytracing_pipeline, IID_PPV_ARGS(&shader->d3d12_rt_state_object)));
+
+        } else {
+            DEBUG_ERROR("Invalid Shader type!");
+       }
 
         return shader;
     }
@@ -1465,7 +1921,12 @@ namespace d_dx12 {
         D3D12_COMMAND_QUEUE_DESC direct_queue_desc = {};
         direct_queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
         direct_queue_desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
-        direct_queue_desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+        # ifdef DEBUG
+        direct_queue_desc.Flags = D3D12_COMMAND_QUEUE_FLAG_DISABLE_GPU_TIMEOUT;
+        # else
+        direct_queue_desc.Flags = D3D12_COMMAND_QUEUE_FLAG_DISABLE_GPU_TIMEOUT;
+        // direct_queue_desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+        # endif
         direct_queue_desc.NodeMask = 0;
         ThrowIfFailed(d3d12_device->CreateCommandQueue(&direct_queue_desc, IID_PPV_ARGS(dcq->d3d12_command_queue.GetAddressOf())));
 
@@ -2137,15 +2598,15 @@ namespace d_dx12 {
         Buffer* buffer = new Buffer;
         buffer->name   = name;
         buffer->usage  = desc.usage;
+        buffer->state  = desc.state;
         buffer->number_of_elements = desc.number_of_elements;
         buffer->size_of_each_element = desc.size_of_each_element;
+        buffer->alignment = desc.alignment;
         u32 total_size = desc.number_of_elements * desc.size_of_each_element;
 
         // Reserve an index into the "is_bound_online" table - used to check if already in the online descriptor table
         buffer->is_bound_index = is_bound_online_index;
         is_bound_online_index++;
-
-        buffer->state = D3D12_RESOURCE_STATE_COPY_DEST;
 
         switch(buffer->usage){
             case(Buffer::USAGE::USAGE_VERTEX_BUFFER):
@@ -2153,13 +2614,13 @@ namespace d_dx12 {
 
                 // Create the resource in the buffer
                 D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size);
+                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size, D3D12_RESOURCE_FLAG_NONE, buffer->alignment);
 
                 d3d12_device->CreateCommittedResource(
                     &heap_prop,
                     D3D12_HEAP_FLAG_NONE,
                     &resource_desc,
-                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    buffer->state,
                     nullptr,
                     IID_PPV_ARGS(buffer->d3d12_resource.GetAddressOf())
                 );
@@ -2181,7 +2642,7 @@ namespace d_dx12 {
                     &heap_prop,
                     D3D12_HEAP_FLAG_NONE,
                     &resource_desc,
-                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    buffer->state,
                     nullptr,
                     IID_PPV_ARGS(buffer->d3d12_resource.GetAddressOf())
                 );
@@ -2211,27 +2672,32 @@ namespace d_dx12 {
                 D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
                 //D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(aligned_total_size);
                 D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC( D3D12_RESOURCE_DIMENSION_BUFFER, 0, aligned_total_size,
-                                                        1, 1, 1, DXGI_FORMAT_UNKNOWN, 1, 0, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_RESOURCE_FLAG_NONE);
+                                                        1, 1, 1, DXGI_FORMAT_UNKNOWN, 1, 0, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, desc.flags);
 
                 d3d12_device->CreateCommittedResource(
                     &heap_prop,
                     D3D12_HEAP_FLAG_NONE,
                     &resource_desc,
-                    D3D12_RESOURCE_STATE_COPY_DEST,
+                    buffer->state,
                     nullptr,
                     IID_PPV_ARGS(buffer->d3d12_resource.GetAddressOf())
                 );
 
                 // Create CBV
                 // TODO: 
+                // TODO: RIP ALL THIS OUT AND KILL IT
                 // Dont know if this should be created here, or if the CommittedResource should be either,
                 // Shouldn't we make this durring a load when the user describes their data, then we create a
                 // CommittedResource large enough for their data??
-                D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc;
-                cbv_desc.BufferLocation = buffer->d3d12_resource->GetGPUVirtualAddress();
-                cbv_desc.SizeInBytes = aligned_total_size;
+                if (desc.create_cbv){
 
-                d3d12_device->CreateConstantBufferView(&cbv_desc, buffer->offline_descriptor_handle.cpu_descriptor_handle);
+                    D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc;
+                    cbv_desc.BufferLocation = buffer->d3d12_resource->GetGPUVirtualAddress();
+                    cbv_desc.SizeInBytes = aligned_total_size;
+
+                    d3d12_device->CreateConstantBufferView(&cbv_desc, buffer->offline_descriptor_handle.cpu_descriptor_handle);
+
+                }
             }
             break;
         }
@@ -2636,7 +3102,7 @@ namespace d_dx12 {
         return;
     }
 
-    void Command_List::load_buffer(Buffer* buffer, u8* data, u64 size, u64 alignment){
+    Upload_Buffer::Allocation Command_List::load_buffer(Buffer* buffer, u8* data, u64 size, u64 alignment){
 
         if(size > (buffer->number_of_elements * buffer->size_of_each_element)){
             OutputDebugString("Error (load_buffer): Trying to copy more data than is available");
@@ -2662,7 +3128,7 @@ namespace d_dx12 {
             size                                         // Copy size
         );
 
-        return;
+        return upload_allocation;
     }
 
     void Command_List::bind_vertex_buffer(Buffer* buffer, u32 slot){
@@ -2706,8 +3172,10 @@ namespace d_dx12 {
 
         if(current_bound_shader->type == Shader::Shader_Type::TYPE_GRAPHICS){
             d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
-        } else if(current_bound_shader->type == Shader::Shader_Type::TYPE_COMPUTE){
+        } else if(current_bound_shader->type == Shader::Shader_Type::TYPE_COMPUTE || current_bound_shader->type == Shader::Shader_Type::TYPE_RAY_TRACE){
             d3d12_command_list->SetComputeRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
+        } else {
+            DEBUG_ERROR("Unsupported Shader Type!");
         }
         return;
 
@@ -2943,8 +3411,10 @@ namespace d_dx12 {
             // Set descriptor in Root Signature
             if(current_bound_shader->type == Shader::Shader_Type::TYPE_GRAPHICS){
                 d3d12_command_list->SetGraphicsRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
-            } else if (current_bound_shader->type == Shader::Shader_Type::TYPE_COMPUTE){
+            } else if(current_bound_shader->type == Shader::Shader_Type::TYPE_COMPUTE || current_bound_shader->type == Shader::Shader_Type::TYPE_RAY_TRACE){
                 d3d12_command_list->SetComputeRootDescriptorTable(current_bound_shader->binding_points[binding_point_index].root_signature_index, handle.gpu_descriptor_handle);
+            } else {
+                DEBUG_ERROR("Unsupported Shader Type!");
             }
 
         //}
@@ -3003,10 +3473,14 @@ namespace d_dx12 {
         this->current_bound_shader = shader;
         if(shader->type == Shader::Shader_Type::TYPE_GRAPHICS){
             d3d12_command_list->SetGraphicsRootSignature(shader->d3d12_root_signature.Get());
-        } else {
+            d3d12_command_list->SetPipelineState(shader->d3d12_pipeline_state.Get());
+        } else if (shader->type == Shader::Shader_Type::TYPE_COMPUTE) {
             d3d12_command_list->SetComputeRootSignature(shader->d3d12_root_signature.Get());
+            d3d12_command_list->SetPipelineState(shader->d3d12_pipeline_state.Get());
+        } else if (shader->type == Shader::Shader_Type::TYPE_RAY_TRACE){
+            d3d12_command_list->SetComputeRootSignature(shader->d3d12_root_signature.Get());
+            d3d12_command_list->SetPipelineState1(shader->d3d12_rt_state_object.Get());
         }
-        d3d12_command_list->SetPipelineState(shader->d3d12_pipeline_state.Get());
     }
 
     void Command_List::set_render_targets(u8 num_render_targets, Texture** rt, Texture* ds){

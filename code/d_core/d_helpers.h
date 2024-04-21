@@ -16,6 +16,8 @@
 #define d_min(a, b) (a < b ? a : b)
 #define d_max(a, b) (a > b ? a : b)
 
+#define ARRAY_SIZE(array) (sizeof(array) / sizeof(array[0]))  // Doesn't work for pointers, must be array type 
+
 #if COMPILER_MSVC 
 #define abs_val_int32(x) { int y = x >> 31; x = (x ^ y) - y; }
 #endif // COMPILER_MSVC 

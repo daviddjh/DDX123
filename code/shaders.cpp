@@ -265,3 +265,28 @@ Shader* create_compute_rayt_shader()
 
     return create_shader(shader_desc);
 }
+
+Shader* create_dxr_rayt_shader()
+{
+
+    DEBUG_LOG("Creating DXR Ray Tracing Shader");
+
+    //////////////////////////////////
+    //  Create our shader / PSO
+    //////////////////////////////////
+
+    Shader_Desc shader_desc;
+
+    //////////////////////////////////
+    //  Set compiled shader code
+    //////////////////////////////////
+
+    shader_desc.type = Shader::Shader_Type::TYPE_RAY_TRACE;
+    shader_desc.ray_trace_shader = L"raytracing.hlsl";
+
+    /////////////////////////////////////////
+    //  Create PSO using shader reflection
+    /////////////////////////////////////////
+
+    return create_shader(shader_desc);
+}

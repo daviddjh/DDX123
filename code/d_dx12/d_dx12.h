@@ -17,12 +17,25 @@ namespace d_dx12 {
     struct Buffer_Desc;
     struct Shader;
     struct Shader_Desc;
+    struct Upload_Buffer;
+
+    // Copied to GPU memory in a table { Shader Record 1}, {Shader Record 2}
+    struct Shader_Record {
+        u8 shader_id[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES] = {NULL};       // Not using CBs yet. D3D12RaytracingSimpleLighting.cpp just placed the CB Pointer below the shader_id size in bytes.
+    };
+    
+    // Points to Shader table in GPU memory
+    struct Shader_Table {
+        D3D12_GPU_VIRTUAL_ADDRESS addr;
+        u32 size_in_bytes;
+    };
 
     struct Shader {
 
         enum Shader_Type {
             TYPE_GRAPHICS,
             TYPE_COMPUTE,
+            TYPE_RAY_TRACE,
         };
 
         enum Input_Type {
@@ -40,6 +53,9 @@ namespace d_dx12 {
         // Graphics Pipeline State
         Microsoft::WRL::ComPtr<ID3D12PipelineState> d3d12_pipeline_state;
 
+        // Shader Pipeline State
+        Microsoft::WRL::ComPtr<ID3D12StateObject> d3d12_rt_state_object;
+
         Shader::Shader_Type type = Shader::Shader_Type::TYPE_GRAPHICS; 
 
         // Binding points
@@ -56,6 +72,11 @@ namespace d_dx12 {
 
         Binding_Point binding_points[BINDING_POINT_INDEX_COUNT];
 
+        Buffer* ray_gen_shader_table;
+        ID3D12Resource* ray_gen_shader_table_resource;
+        Buffer* hit_group_shader_table;
+        Buffer* miss_shader_table;
+
         void d_dx12_release();
 
     };
@@ -69,6 +90,7 @@ namespace d_dx12 {
         union {
             wchar_t* pixel_shader = nullptr; 
             wchar_t* compute_shader; 
+            wchar_t* ray_trace_shader; 
         };
 
         u8           num_render_targets              = 1;
@@ -215,6 +237,7 @@ namespace d_dx12 {
         u64                                       size_of_each_element;
         wchar_t*                                  name;
         u16                                       is_bound_index;
+        u64                                       alignment;
         union{
 
             D3D12_VERTEX_BUFFER_VIEW              vertex_buffer_view;
@@ -231,61 +254,11 @@ namespace d_dx12 {
         Buffer::USAGE usage = Buffer::USAGE::USAGE_NONE; 
         u64 number_of_elements;
         u64 size_of_each_element;
-        DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
-
-    };
-
-    // Command Queue
-    struct Command_Queue {
-
-        Microsoft::WRL::ComPtr<ID3D12CommandQueue>  d3d12_command_queue;
-        Microsoft::WRL::ComPtr<ID3D12Fence>         d3d12_fence;
-        u64                                         fence_value;
-
-        void flush();
-        u64  signal();
-        void wait_for_fence_value(u64 fence_value_to_wait_for);
-        void d_dx12_release();
-    };
-
-    // Command List
-    struct Command_List {
-        
-        D3D12_COMMAND_LIST_TYPE                            type;
-        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList1> d3d12_command_list;
-        Microsoft::WRL::ComPtr<ID3D12CommandAllocator>     d3d12_command_allocator;
-        Resource_Manager*                                  resource_manager;
-        Shader*                                            current_bound_shader;
-
-        void transition_texture(Texture* texture, D3D12_RESOURCE_STATES new_state);
-        void transition_buffer(Buffer* buffer, D3D12_RESOURCE_STATES new_state);
-        void copy_texture(Texture* src_texture, Texture* dst_texture);
-        void clear_render_target(Texture* rt, const float* clear_color);
-        void clear_render_target(Texture* rt);
-        void clear_depth_stencil(Texture* ds, const float depth);
-        void load_buffer(Buffer* buffer, u8* data, u64 size, u64 alignment);
-        void load_texture_from_file(Texture* texture, const wchar_t* filename);
-        void load_decoded_texture_from_memory(Texture* texture, u_ptr data, bool create_mipchain);
-        void reset();
-        void close();
-        void bind_vertex_buffer(Buffer* buffer, u32 slot);
-        void bind_index_buffer(Buffer* buffer);
-        void bind_handle(Descriptor_Handle handle, u32 binding_point);
-        void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32  binding_point, bool write = false);
-        u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, u32  binding_point, bool write = false);
-        void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, u32  parameter_name);
-        void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, u32 binding_point);
-        Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
-        void set_shader(Shader* shader);
-        void set_render_targets(u8 num_render_targets, Texture** rt, Texture* ds);
-        void set_viewport(float top_left_x, float top_left_y, float width, float height);
-        void set_viewport(D3D12_VIEWPORT viewport);
-        void set_scissor_rect(float left, float top, float right, float bottom);
-        void set_scissor_rect(D3D12_RECT scissor_rect);
-        void draw(u32 number_of_verticies);
-        void dispatch(u32 threadgroup_count_x, u32 threadgroup_count_y, u32 threadgroup_count_z);
-        void draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset);
-        void d_dx12_release();
+        DXGI_FORMAT format          = DXGI_FORMAT_UNKNOWN;
+        D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COPY_DEST;
+        D3D12_RESOURCE_FLAGS flags  = D3D12_RESOURCE_FLAG_NONE;
+        bool create_cbv = true;
+        u64 alignment = 0;
 
     };
 
@@ -309,6 +282,60 @@ namespace d_dx12 {
 
         void init();
         Allocation allocate(u64 size, u64 alignment);
+        void d_dx12_release();
+
+    };
+
+    // Command Queue
+    struct Command_Queue {
+
+        Microsoft::WRL::ComPtr<ID3D12CommandQueue>  d3d12_command_queue;
+        Microsoft::WRL::ComPtr<ID3D12Fence>         d3d12_fence;
+        u64                                         fence_value;
+
+        void flush();
+        u64  signal();
+        void wait_for_fence_value(u64 fence_value_to_wait_for);
+        void d_dx12_release();
+    };
+
+    // Command List
+    struct Command_List {
+        
+        D3D12_COMMAND_LIST_TYPE                            type;
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> d3d12_command_list;
+        Microsoft::WRL::ComPtr<ID3D12CommandAllocator>     d3d12_command_allocator;
+        Resource_Manager*                                  resource_manager;
+        Shader*                                            current_bound_shader;
+
+        void transition_texture(Texture* texture, D3D12_RESOURCE_STATES new_state);
+        void transition_buffer(Buffer* buffer, D3D12_RESOURCE_STATES new_state);
+        void copy_texture(Texture* src_texture, Texture* dst_texture);
+        void clear_render_target(Texture* rt, const float* clear_color);
+        void clear_render_target(Texture* rt);
+        void clear_depth_stencil(Texture* ds, const float depth);
+        Upload_Buffer::Allocation load_buffer(Buffer* buffer, u8* data, u64 size, u64 alignment);
+        void load_texture_from_file(Texture* texture, const wchar_t* filename);
+        void load_decoded_texture_from_memory(Texture* texture, u_ptr data, bool create_mipchain);
+        void reset();
+        void close();
+        void bind_vertex_buffer(Buffer* buffer, u32 slot);
+        void bind_index_buffer(Buffer* buffer);
+        void bind_handle(Descriptor_Handle handle, u32 binding_point);
+        void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32  binding_point, bool write = false);
+        u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, u32  binding_point, bool write = false);
+        void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, u32  parameter_name);
+        void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, u32 binding_point);
+        Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
+        void set_shader(Shader* shader);
+        void set_render_targets(u8 num_render_targets, Texture** rt, Texture* ds);
+        void set_viewport(float top_left_x, float top_left_y, float width, float height);
+        void set_viewport(D3D12_VIEWPORT viewport);
+        void set_scissor_rect(float left, float top, float right, float bottom);
+        void set_scissor_rect(D3D12_RECT scissor_rect);
+        void draw(u32 number_of_verticies);
+        void dispatch(u32 threadgroup_count_x, u32 threadgroup_count_y, u32 threadgroup_count_z);
+        void draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset);
         void d_dx12_release();
 
     };
@@ -352,7 +379,7 @@ namespace d_dx12 {
         void d_dx12_release();
     };
 
-    extern Microsoft::WRL::ComPtr<ID3D12Device2>  d3d12_device;
+    extern Microsoft::WRL::ComPtr<ID3D12Device5>  d3d12_device;
     extern Display                                display;
     extern u8                                     current_backbuffer_index;
     extern d_std::Memory_Arena*                   d_dx12_arena;

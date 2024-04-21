@@ -28,15 +28,6 @@ struct D_Material {
 
 };
 
-struct D_Primitive_Group {
-
-    D3D_PRIMITIVE_TOPOLOGY primitive_topology;
-    d_std::Span<Vertex_Position_Normal_Tangent_Color_Texturecoord> verticies;
-    d_std::Span<u16> indicies;
-    u16 material_index = -1;
-
-};
-
 struct D_Draw_Call {
 
     u16 material_index;
@@ -46,12 +37,23 @@ struct D_Draw_Call {
 
 };
 
+struct D_Primitive_Group {
+
+    D3D_PRIMITIVE_TOPOLOGY primitive_topology;
+    d_std::Span<Vertex_Position_Normal_Tangent_Color_Texturecoord> verticies;
+    d_std::Span<u16> indicies;
+    u16 material_index = -1;
+
+};
+
 struct D_Mesh {
 
     d_std::Span<D_Primitive_Group> primitive_groups;
     d_std::Span<D_Draw_Call> draw_calls;
     d_dx12::Buffer* vertex_buffer;
     d_dx12::Buffer* index_buffer;
+    u32 primitive_count;
+    u32 index_count;
 
 };
 

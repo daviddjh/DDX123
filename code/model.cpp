@@ -59,8 +59,10 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
     d_model.meshes.alloc(tg_model.meshes.size());
     for(u64 mesh_index = 0; mesh_index < d_model.meshes.nitems; mesh_index++){
 
-        D_Mesh* mesh = d_model.meshes.ptr + mesh_index;
         tg::Mesh tg_mesh = tg_model.meshes[mesh_index];
+        D_Mesh* mesh     = d_model.meshes.ptr + mesh_index;
+        mesh->primitive_count = 0;
+        mesh->index_count     = 0;
 
         // Allocate and loop through array of primative groups
         mesh->primitive_groups.alloc(tg_mesh.primitives.size());
@@ -84,6 +86,7 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
                 // Alloc mem for indicies
                 int index_byte_stride = index_accessor.ByteStride(buffer_view);
                 primative_group->indicies.alloc(index_accessor.count);
+                mesh->index_count += index_accessor.count;
 
                 // copy over indicies
                 for(u64 i = 0; i < index_accessor.count; i++){
@@ -102,6 +105,7 @@ void load_mesh(D_Model& d_model, tg::Model& tg_model, tg::Mesh& mesh){
                     if(attribute.first.compare("POSITION") == 0){
                         tg::Accessor accessor = tg_model.accessors[attribute.second];
                         primative_group->verticies.alloc(accessor.count, sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord));
+                        mesh->primitive_count += accessor.count;
                     }
                 }
 
