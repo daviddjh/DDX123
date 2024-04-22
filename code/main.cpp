@@ -110,6 +110,12 @@ struct D_Renderer_Config {
 
 };
 
+struct Vertex {
+    XMFLOAT3 position;
+    XMFLOAT4 color;
+};
+
+
 // Global Vars, In order of creation
 struct D_Renderer {
     HWND              hWnd;
@@ -130,6 +136,9 @@ struct D_Renderer {
     nv_helpers_dx12::ShaderBindingTableGenerator m_sbtHelper;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_sbtStorage;
     Upload_Buffer::Allocation sbt_upload_storage;
+    float m_aspectRatio = 1920. / 1080.;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
+    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 
     std::vector<Buffer*> blases;
     Buffer* tlas;
@@ -154,7 +163,7 @@ struct D_Renderer {
     /// \param     vVertexBuffers : pair of buffer and vertex count
     /// \return    AccelerationStructureBuffers for TLAS
     AccelerationStructureBuffers CreateBottomLevelAS(
-        std::vector<std::pair<Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t>> vVertexBuffers, Command_List* command_list);
+        std::vector<std::tuple<Microsoft::WRL::ComPtr<ID3D12Resource>, Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t, uint32_t>> vVertexBuffers, Command_List* command_list);
 
     /// Create the main acceleration structure that holds
     /// all instances of the scene
@@ -261,6 +270,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
             // Update draw_call information
             mesh->draw_calls.ptr[j].index_count    = primitive_group->indicies.nitems;
             mesh->draw_calls.ptr[j].index_offset   = current_index_ptr - start_index_ptr;
+            mesh->draw_calls.ptr[j].vertex_count   = primitive_group->verticies.nitems;
             mesh->draw_calls.ptr[j].vertex_offset  = current_vertex_ptr - start_vertex_ptr;
             mesh->draw_calls.ptr[j].material_index = primitive_group->material_index;
 
@@ -275,6 +285,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
         vertex_buffer_desc.number_of_elements = verticies_buffer.nitems;
         vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
         vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
+        vertex_buffer_desc.alignment = 4;
 
         mesh->vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", vertex_buffer_desc);
 
@@ -285,6 +296,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
         index_buffer_desc.number_of_elements = indicies_buffer.nitems;
         index_buffer_desc.size_of_each_element = sizeof(u16);
         index_buffer_desc.usage = Buffer::USAGE::USAGE_INDEX_BUFFER;
+        index_buffer_desc.alignment = 2;
 
         mesh->index_buffer = resource_manager.create_buffer(L"Index Buffer", index_buffer_desc);
 
@@ -866,13 +878,12 @@ int D_Renderer::init(){
 // buffers, and building the actual AS
 //
 D_Renderer::AccelerationStructureBuffers D_Renderer::CreateBottomLevelAS(
-    std::vector<std::pair<Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t>> vVertexBuffers, Command_List* command_list) {
+    std::vector<std::tuple<Microsoft::WRL::ComPtr<ID3D12Resource>, Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t, uint32_t>> vVertexBuffers, Command_List* command_list) {
   nv_helpers_dx12::BottomLevelASGenerator bottomLevelAS;
 
   // Adding all vertex buffers and not transforming their position.
   for (const auto &buffer : vVertexBuffers) {
-    bottomLevelAS.AddVertexBuffer(buffer.first.Get(), 0, buffer.second,
-                                  sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord), 0, 0);
+    bottomLevelAS.AddVertexBuffer(std::get<0>(buffer).Get(), 0, std::get<2>(buffer), sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord), std::get<1>(buffer).Get(), 0, std::get<3>(buffer), 0, 0);
   }
 
   // The AS build requires some scratch space to store temporary information.
@@ -974,8 +985,6 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
     
     u32 num_blas = main_model->meshes.nitems;
 
-    #if 0
-
     // Prepare the BLAS create structs
     std::vector<UINT64> blas_size(num_blas);
     std::vector<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC> blas_descs(num_blas);
@@ -1008,30 +1017,40 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
 
     for(int i = 0; i < num_blas; i++ ){
 
-        // Create geometry descriptions for each primitive group
         D_Mesh* current_mesh = &main_model->meshes.ptr[i];
-        u16 num_geometry_desc = 1;
+        u16 num_geometry_desc = current_mesh->primitive_groups.nitems;
 
-        D3D12_RAYTRACING_GEOMETRY_DESC* desc = &geometry_descs.ptr[i];
-        desc->Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-        desc->Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+        for(int j = 0; j < num_geometry_desc; j++){
 
-        // Define where the vertex + index buffers are + their offsets
-        D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC& triangles_desc = desc->Triangles;
-        triangles_desc.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-        triangles_desc.VertexCount = 20;// current_mesh->primitive_count;
-        triangles_desc.VertexBuffer.StartAddress = current_mesh->vertex_buffer->d3d12_resource->GetGPUVirtualAddress();
-        triangles_desc.VertexBuffer.StrideInBytes = current_mesh->vertex_buffer->vertex_buffer_view.StrideInBytes; // sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
-        triangles_desc.IndexBuffer = current_mesh->index_buffer->d3d12_resource->GetGPUVirtualAddress();
-        triangles_desc.IndexCount = 6;// current_mesh->index_count;
-        triangles_desc.IndexFormat = DXGI_FORMAT_R16_UINT;
-        triangles_desc.Transform3x4 = 0;
+            D_Draw_Call* current_draw_call = &current_mesh->draw_calls.ptr[j];
+
+            // Create geometry descriptions for each primitive group
+
+            D3D12_RAYTRACING_GEOMETRY_DESC* desc = &geometry_descs.ptr[j];
+            desc->Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+            desc->Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+            // Define where the vertex + index buffers are + their offsets
+            D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC& triangles_desc = desc->Triangles;
+            triangles_desc.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+            triangles_desc.VertexCount = current_draw_call->vertex_count;
+            triangles_desc.VertexBuffer.StrideInBytes = current_mesh->vertex_buffer->vertex_buffer_view.StrideInBytes; // sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
+            triangles_desc.VertexBuffer.StartAddress = current_mesh->vertex_buffer->d3d12_resource->GetGPUVirtualAddress() + (current_draw_call->vertex_offset * current_mesh->vertex_buffer->vertex_buffer_view.StrideInBytes);
+            if(triangles_desc.VertexBuffer.StartAddress % 4 != 0){
+                DEBUG_BREAK;
+            }
+            triangles_desc.IndexBuffer = current_mesh->index_buffer->d3d12_resource->GetGPUVirtualAddress() + current_draw_call->index_offset;
+            triangles_desc.IndexCount = current_draw_call->index_count;
+            triangles_desc.IndexFormat = DXGI_FORMAT_R16_UINT;
+            triangles_desc.Transform3x4 = 0;
+
+        }
 
         // Fill BLAS create struct
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* blas_desc = &blas_descs[i];
         blas_desc->Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
         blas_desc->Inputs.NumDescs = num_geometry_desc;
-        blas_desc->Inputs.pGeometryDescs = desc;
+        blas_desc->Inputs.pGeometryDescs = geometry_descs.ptr;
         blas_desc->Inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE; // Perfered for static geo: https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_raytracing_acceleration_structure_build_flags
         blas_desc->Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
 
@@ -1057,7 +1076,7 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
     // scratchBuffer.Create(L"Acceleration Structure Scratch Buffer", static_cast<UINT>(scratch_buffer_size_needed), 1);
     Buffer_Desc scratch_buffer_desc;
     scratch_buffer_desc.number_of_elements = 1.;
-    scratch_buffer_desc.size_of_each_element = scratch_buffer_size_needed * 2;
+    scratch_buffer_desc.size_of_each_element = scratch_buffer_size_needed;
     scratch_buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
     scratch_buffer_desc.state = D3D12_RESOURCE_STATE_COMMON;
     scratch_buffer_desc.create_cbv = false;
@@ -1077,7 +1096,7 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
         // Create the BLAS
         Buffer_Desc blas_resource_desc;    
         blas_resource_desc.number_of_elements   = 1.;
-        blas_resource_desc.size_of_each_element = blas_size[i] * 2;
+        blas_resource_desc.size_of_each_element = blas_size[i];
         blas_resource_desc.usage                = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
         blas_resource_desc.state                = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
         blas_resource_desc.flags                = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
@@ -1165,10 +1184,60 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
 
     // Create the TLAS
     command_list->d3d12_command_list->BuildRaytracingAccelerationStructure(&tlas_desc, 0, nullptr);
-    #endif
 
-      // Build the bottom AS from the Triangle vertex buffer
-    AccelerationStructureBuffers bottomLevelBuffers = CreateBottomLevelAS({{main_model->meshes.ptr[0].vertex_buffer->d3d12_resource.Get(), main_model->meshes.ptr[0].vertex_buffer->number_of_elements}}, command_list);
+    #if 0  // NVIDIA
+    // Create the vertex buffer.
+    {
+        // Define the geometry for a triangle.
+        Vertex triangleVertices[] = {
+            {{0.0f, 2500.f * m_aspectRatio, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
+            {{2500.f, -2500.f * m_aspectRatio, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
+            {{-2500.f, -2500.f * m_aspectRatio, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}}};
+            // {{0.0f, 0.25f * m_aspectRatio, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
+            // {{0.25f, -0.25f * m_aspectRatio, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
+            // {{-0.25f, -0.25f * m_aspectRatio, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}}};
+
+        const UINT vertexBufferSize = sizeof(triangleVertices);
+
+        // Note: using upload heaps to transfer static data like vert buffers is not
+        // recommended. Every time the GPU needs it, the upload heap will be
+        // marshalled over. Please read up on Default Heap usage. An upload heap is
+        // used here for code simplicity and because there are very few verts to
+        // actually transfer.
+        ThrowIfFailed(d3d12_device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+            IID_PPV_ARGS(&m_vertexBuffer)));
+
+        // Copy the triangle data to the vertex buffer.
+        UINT8 *pVertexDataBegin;
+        CD3DX12_RANGE readRange(
+            0, 0); // We do not intend to read from this resource on the CPU.
+        ThrowIfFailed(m_vertexBuffer->Map(
+            0, &readRange, reinterpret_cast<void **>(&pVertexDataBegin)));
+        memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
+        m_vertexBuffer->Unmap(0, nullptr);
+
+        // Initialize the vertex buffer view.
+        m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
+        m_vertexBufferView.StrideInBytes = sizeof(Vertex);
+        m_vertexBufferView.SizeInBytes = vertexBufferSize;
+    }
+
+
+    //   Build the bottom AS from the Triangle vertex buffer
+    // AccelerationStructureBuffers bottomLevelBuffers = CreateBottomLevelAS({{m_vertexBuffer.Get(), 
+    //                                                                         nullptr, // main_model->meshes.ptr[0].index_buffer->d3d12_resource.Get(),
+    //                                                                         3, /*main_model->meshes.ptr[0].vertex_buffer->number_of_elements,*/
+    //                                                                         0 /*main_model->meshes.ptr[0].index_buffer->number_of_elements*/ }}
+    //                                                                         , command_list);
+
+    AccelerationStructureBuffers bottomLevelBuffers = CreateBottomLevelAS({{main_model->meshes.ptr[0].vertex_buffer->d3d12_resource.Get(), 
+                                                                            main_model->meshes.ptr[0].index_buffer->d3d12_resource.Get(),
+                                                                            main_model->meshes.ptr[0].vertex_buffer->number_of_elements,
+                                                                            main_model->meshes.ptr[0].index_buffer->number_of_elements }}
+                                                                            , command_list);
 
     // Just one instance for now
     m_instances = {{bottomLevelBuffers.pResult, XMMatrixIdentity()}};
@@ -1186,6 +1255,7 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
     // Store the AS buffers. The rest of the buffers will be released once we exit
     // the function
     m_bottomLevelAS = bottomLevelBuffers.pResult;
+    #endif
 
 }
 
@@ -1256,7 +1326,8 @@ void D_Renderer::build_shader_tables(Command_List* command_list, Shader* shader)
     // Miss Shader Table
     {
         Shader_Record miss_shader_record;
-        memcpy(&miss_shader_record.shader_id, null_ptr /* TODO: Set back */, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+        memcpy(&miss_shader_record.shader_id, miss_shader_itentifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+        // memcpy(&miss_shader_record.shader_id, null_ptr, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 
         shader_record_size = shader_ident_size;  // This will change if we add root constant buffers, then the size will increase to accound for them
         Buffer_Desc buffer_desc;
@@ -1264,15 +1335,16 @@ void D_Renderer::build_shader_tables(Command_List* command_list, Shader* shader)
         buffer_desc.number_of_elements = 1.;
         buffer_desc.size_of_each_element = shader_record_size;
         buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+        buffer_desc.alignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
         shader->miss_shader_table = resource_manager.create_buffer(L"Miss Shader Table", buffer_desc);
 
-        command_list->load_buffer(shader->miss_shader_table, (u8*)&miss_shader_record, shader_record_size, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+        command_list->load_buffer(shader->miss_shader_table, (u8*)&miss_shader_record, shader_record_size, 256);
     }
 
     // Hit Group Shader Table
     {
         Shader_Record hit_shader_record;
-        memcpy(&hit_shader_record.shader_id, null_ptr /* TODO: Set back */, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+        memcpy(&hit_shader_record.shader_id, hit_group_shader_itentifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 
         shader_record_size = shader_ident_size;  // This will change if we add root constant buffers, then the size will increase to accound for them
         Buffer_Desc buffer_desc;
@@ -1280,9 +1352,10 @@ void D_Renderer::build_shader_tables(Command_List* command_list, Shader* shader)
         buffer_desc.number_of_elements = 1.;
         buffer_desc.size_of_each_element = shader_record_size;
         buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+        buffer_desc.alignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
         shader->hit_group_shader_table = resource_manager.create_buffer(L"Hit Group Shader Table", buffer_desc);
 
-        command_list->load_buffer(shader->hit_group_shader_table, (u8*)&hit_shader_record, shader_record_size, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+        command_list->load_buffer(shader->hit_group_shader_table, (u8*)&hit_shader_record, shader_record_size, 256);
     }
     #endif
 }
@@ -1605,8 +1678,8 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
 
     // build_shader_tables(shaders.dxr_rayt_shader);  // Should be done before rendering. only reason it's here is because it's using dyanmic memory to store tables
 
-    // Descriptor_Handle per_frame_data_handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
-    // command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
+    Descriptor_Handle per_frame_data_handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+    command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
     
     // Texture_Index input_texture_index = {};
     // input_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("input_texture"), true);
@@ -1614,9 +1687,9 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     // Descriptor_Handle input_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&input_texture_index, sizeof(Texture_Index), 256);
     // command_list->bind_handle(input_texture_index_handle, binding_point_string_lookup("input_texture_index"));
 
-    // Output_Dimensions output_dimensions = {config.display_width, config.display_height};
-    // Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
-    // command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
+    Output_Dimensions output_dimensions = {config.display_width, config.display_height};
+    Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+    command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
 
     Texture_Index output_texture_index = {};
     output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
@@ -1638,7 +1711,7 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     // d3d12_device->CreateShaderResourceView(NULL, &srv_desc, rt_as_handle.cpu_descriptor_handle);
     // command_list->bind_handle(rt_as_handle, binding_point_string_lookup("scene"));
 
-    // command_list->d3d12_command_list->SetGraphicsRootShaderResourceView(command_list->current_bound_shader->binding_points[binding_point_string_lookup("scene")].root_signature_index, m_topLevelASBuffers.pResult->GetGPUVirtualAddress());
+    command_list->d3d12_command_list->SetComputeRootShaderResourceView(command_list->current_bound_shader->binding_points[binding_point_string_lookup("scene")].root_signature_index, tlas->d3d12_resource->GetGPUVirtualAddress());
 
 
     // Now be bind the texture table to the root signature. 
@@ -1708,16 +1781,16 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
 void D_Renderer::render(){
     {
 
-    // PROFILED_SCOPE("CPU_FRAME");
+    PROFILED_SCOPE("CPU_FRAME");
 
-    // // TODO: Rewrite all of this !!!
-    // static std::chrono::high_resolution_clock::time_point tp1;
-    // std::chrono::high_resolution_clock::time_point tp2 = std::chrono::high_resolution_clock::now();
-    // std::chrono::duration<double> frame_time = std::chrono::duration_cast<std::chrono::duration<double>>(tp2 - tp1);
-    // tp1 = tp2;
-    // double frame_ms = frame_time.count() * 1000.;
-    // double avg_frame_ms = avg_ms_per_tick(frame_ms);
-    // double fps = 1000. / avg_frame_ms;
+    // TODO: Rewrite all of this !!!
+    static std::chrono::high_resolution_clock::time_point tp1;
+    std::chrono::high_resolution_clock::time_point tp2 = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> frame_time = std::chrono::duration_cast<std::chrono::duration<double>>(tp2 - tp1);
+    tp1 = tp2;
+    double frame_ms = frame_time.count() * 1000.;
+    double avg_frame_ms = avg_ms_per_tick(frame_ms);
+    double fps = 1000. / avg_frame_ms;
 
     Command_List* command_list = direct_command_lists[current_backbuffer_index];
     
@@ -1729,27 +1802,27 @@ void D_Renderer::render(){
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     // Bind IMGUI Fonts
-    // Descriptor_Handle online_imgui_font_handle = command_list->bind_descriptor_handles_to_online_descriptor_heap(imgui_font_handle, 1);
-    // ImGuiIO& imgui_io = ImGui::GetIO();
-    // imgui_io.Fonts->SetTexID((ImTextureID) online_imgui_font_handle.gpu_descriptor_handle.ptr); 
+    Descriptor_Handle online_imgui_font_handle = command_list->bind_descriptor_handles_to_online_descriptor_heap(imgui_font_handle, 1);
+    ImGuiIO& imgui_io = ImGui::GetIO();
+    imgui_io.Fonts->SetTexID((ImTextureID) online_imgui_font_handle.gpu_descriptor_handle.ptr); 
 
-    // // Start IMGUI Frame
-    // ImGui_ImplDX12_NewFrame();
-    // ImGui_ImplWin32_NewFrame();
-    // ImGui::NewFrame();
+    // Start IMGUI Frame
+    ImGui_ImplDX12_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
 
-    // if(config.imgui_demo)
-    //     ImGui::ShowDemoWindow();
+    if(config.imgui_demo)
+        ImGui::ShowDemoWindow();
 
 
-    // ////////////////////////////
-    // /// Update Camera Matricies
-    // ////////////////////////////
+    ////////////////////////////
+    /// Update Camera Matricies
+    ////////////////////////////
 
-    // DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
-    // DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), (f32) config.render_width / (f32) config.render_height, 0.01f, 2500000000.0f);
-    // per_frame_data.view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
-    // DirectX::XMStoreFloat4(&per_frame_data.camera_pos, camera.eye_position);
+    DirectX::XMMATRIX view_matrix = DirectX::XMMatrixLookToRH(camera.eye_position, camera.eye_direction, camera.up_direction);
+    DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), (f32) config.render_width / (f32) config.render_height, 0.01f, 2500000000.0f);
+    per_frame_data.view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
+    DirectX::XMStoreFloat4(&per_frame_data.camera_pos, camera.eye_position);
     
     // ////////////////////////////////////
     // /// Update Render To Display Scale
@@ -1802,7 +1875,7 @@ void D_Renderer::render(){
             break;
         case D_Render_Passes::DXR_RAY_TRACING:
             dxr_ray_tracing_pass(command_list);
-            // command_list->set_render_targets(1, &textures.main_output_target, nullptr);
+            command_list->set_render_targets(1, &textures.main_output_target, nullptr);
             break;
     }
 
@@ -1823,47 +1896,47 @@ void D_Renderer::render(){
 
     // command_list->transition_texture(textures.main_render_target,           D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-    // // Create IMGUI window
-    // ImGui::Begin("Info");
-    // ImGui::Text("Controls:");
-    // ImGui::Text("Mouse - Look");
-    // ImGui::Text("W, A, S, D - Move");
-    // ImGui::Text("V - VSync on / off");
-    // ImGui::Text("Space Bar - Full Screen Toggle");
-    // ImGui::Text("FPS: %.3lf", fps);
-    // ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
-    // ImGui::SliderFloat3("Light Position", &this->per_frame_data.light_position.x, -10., 10);
-    // ImGui::DragFloat3("Light Color", &this->per_frame_data.light_color.x);
-    // ImGui::SliderFloat("Camera FOV", &this->camera.fov, 35., 120.);
-    // // Combo box for choosing which render pass to use
-    // // Copied from imgui_demo.cpp
-    // if (ImGui::BeginCombo("Render Pass", render_pass_names[config.render_pass], /*flags*/ 0))
-    // {
-    //     for (int n = 0; n < NUM_RENDER_PASSES; n++)
-    //     {
-    //         const bool is_selected = (config.render_pass == n);
-    //         if (ImGui::Selectable(render_pass_names[n], is_selected))
-    //             config.render_pass = n;
+    // Create IMGUI window
+    ImGui::Begin("Info");
+    ImGui::Text("Controls:");
+    ImGui::Text("Mouse - Look");
+    ImGui::Text("W, A, S, D - Move");
+    ImGui::Text("V - VSync on / off");
+    ImGui::Text("Space Bar - Full Screen Toggle");
+    ImGui::Text("FPS: %.3lf", fps);
+    ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
+    ImGui::SliderFloat3("Light Position", &this->per_frame_data.light_position.x, -10., 10);
+    ImGui::DragFloat3("Light Color", &this->per_frame_data.light_color.x);
+    ImGui::SliderFloat("Camera FOV", &this->camera.fov, 35., 120.);
+    // Combo box for choosing which render pass to use
+    // Copied from imgui_demo.cpp
+    if (ImGui::BeginCombo("Render Pass", render_pass_names[config.render_pass], /*flags*/ 0))
+    {
+        for (int n = 0; n < NUM_RENDER_PASSES; n++)
+        {
+            const bool is_selected = (config.render_pass == n);
+            if (ImGui::Selectable(render_pass_names[n], is_selected))
+                config.render_pass = n;
 
-    //         // Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
-    //         if (is_selected)
-    //             ImGui::SetItemDefaultFocus();
-    //     }
-    //     ImGui::EndCombo();
-    // }
-    // ImGui::Checkbox("Demo Window?", &config.imgui_demo);
+            // Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
+            if (is_selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::Checkbox("Demo Window?", &config.imgui_demo);
 
-    // // Render a texture
+    // Render a texture
     // u16 ssao_output_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("ssao_output"));
     // //u32 ssao_rotation_index = command_list->bind_texture (textures.ssao_rotation_texture, &resource_manager, 0);
     // float render_ratio = 1920. / 1080.;
     // ImGui::Image((ImTextureID)resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_handle_by_index(ssao_output_index).gpu_descriptor_handle.ptr, ImVec2(200.*render_ratio, 200.));
 
-    // ImGui::End();
-    // ImGui::Render();
+    ImGui::End();
+    ImGui::Render();
 
-    // // Render ImGui on top of everything
-    // ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
+    // Render ImGui on top of everything
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), command_list->d3d12_command_list.Get());
 
 
     // // Prepare screen buffer for copy destination

@@ -31,6 +31,7 @@ struct D_Material {
 struct D_Draw_Call {
 
     u16 material_index;
+    u32 vertex_count;
     u32 vertex_offset;
     u32 index_offset;
     u32 index_count;

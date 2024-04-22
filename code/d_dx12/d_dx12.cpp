@@ -4,7 +4,6 @@
 #include "DirectXTex.h"
 #include "dxcapi.h"
 #include "d3d12shader.h"
-#include "Raytracing.h"
 
 
 // Are we using WARP ?
@@ -15,7 +14,7 @@ using namespace DirectX;
 
 namespace d_dx12 {
 
-    Microsoft::WRL::ComPtr<ID3D12Device5>  d3d12_device;
+    Microsoft::WRL::ComPtr<ID3D12Device8>  d3d12_device;
     Command_Queue                          direct_command_queue;
     Command_Queue                          copy_command_queue;
     u64                                    frame_fence_values[NUM_BACK_BUFFERS];
@@ -88,10 +87,16 @@ namespace d_dx12 {
         filter.DenyList.pIDList = hide_ids;
         debugInfoQueue->AddStorageFilterEntries(DXGI_DEBUG_DXGI, &filter);
 
+        Microsoft::WRL::ComPtr<ID3D12DeviceRemovedExtendedDataSettings1> pDredSettings;
+        ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&pDredSettings)));
+        pDredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        pDredSettings->SetBreadcrumbContextEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        pDredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+
 #endif // _DEBUG
 
         Microsoft::WRL::ComPtr<IDXGIFactory6> dxgi_factory;
-        Microsoft::WRL::ComPtr<ID3D12Device5> temp_device;
+        Microsoft::WRL::ComPtr<ID3D12Device8> temp_device;
 
         // Get DXGIFactory
         if (FAILED(CreateDXGIFactory2(dxgi_factory_flags, IID_PPV_ARGS(dxgi_factory.GetAddressOf())))) {
@@ -453,14 +458,19 @@ namespace d_dx12 {
 
         Microsoft::WRL::ComPtr<IDxcUtils> pUtils;
         Microsoft::WRL::ComPtr<IDxcCompiler3> pCompiler;
-        DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&pUtils));
-        DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&pCompiler));
+        Microsoft::WRL::ComPtr<IDxcLibrary> pLibrary;
+        Microsoft::WRL::ComPtr<IDxcIncludeHandler> pIncludeHandler;
+        ThrowIfFailed(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&pUtils)));
+        ThrowIfFailed(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&pCompiler)));
+        ThrowIfFailed(DxcCreateInstance(CLSID_DxcLibrary, IID_PPV_ARGS(&pLibrary)));
+        ThrowIfFailed(pLibrary->CreateIncludeHandler(&pIncludeHandler));
 
         //
         // Default include handler
         //
-        Microsoft::WRL::ComPtr<IDxcIncludeHandler> pIncludeHandler;
-        pUtils->CreateDefaultIncludeHandler(&pIncludeHandler);
+        // Microsoft::WRL::ComPtr<IDxcIncludeHandler> pIncludeHandler;
+        // pUtils->CreateDefaultIncludeHandler(&pIncludeHandler);
+
 
         ////////////////////////////////////////////////////////////////////////////////////
         /// Ray Trace Shader!
@@ -497,23 +507,46 @@ namespace d_dx12 {
                 //#endif
 
                 // Strip reflection into a separate blob. 
-                L"-Qstrip_reflect",          
+                // L"-Qstrip_reflect",          
             };
 
             //
             // Open source file.  
             //
-            Microsoft::WRL::ComPtr<IDxcBlobEncoding> pSource = nullptr;
+            // Open and read the file
+            // std::ifstream shaderFile(ray_trace_shader_name);
+            // if (shaderFile.good() == false)
+            // {
+            //     throw std::logic_error("Cannot find shader file");
+            // }
+            // std::stringstream strStream;
+            // strStream << shaderFile.rdbuf();
+            // std::string sShader = strStream.str();
+            IDxcBlobEncoding* pSource = nullptr;
             pUtils->LoadFile(desc.ray_trace_shader, nullptr, &pSource);
             DxcBuffer Source;
             Source.Ptr = pSource->GetBufferPointer();
             Source.Size = pSource->GetBufferSize();
             Source.Encoding = DXC_CP_ACP; // Assume BOM says UTF8 or UTF16 or this is ANSI text.
 
+            // ThrowIfFailed(pLibrary->CreateBlobWithEncodingFromPinned((LPBYTE)sShader.c_str(), (uint32_t)sShader.size(), 0, &pSource));
+            // pLibrary
+
 
             //
             // Compile it with specified arguments.
             //
+            // IDxcOperationResult* pResult;
+            // pCompiler->Compile(
+            //     &Source,                              // Source buffer.
+            //     ray_trace_shader_name.data(),
+            //     L"",
+            //     L"lib_6_3",
+            //     nullptr, 0,
+            //     nullptr, 0,
+            //     pIncludeHandler.Get(),
+            //     &pResult
+            // );
             Microsoft::WRL::ComPtr<IDxcResult> pResults;
             pCompiler->Compile(
                 &Source,                              // Source buffer.
@@ -550,7 +583,7 @@ namespace d_dx12 {
             //
             IDxcBlobUtf16* pShaderName = nullptr;
             HRESULT hr = pResults->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&d3d12_ray_trace_shader_blob), &pShaderName);
-            if (d3d12_ray_trace_shader_blob != nullptr)
+            if (d3d12_ray_trace_shader_blob != nullptr && pShaderName != nullptr)
             {
                 FILE* fp = NULL;
 
@@ -558,6 +591,8 @@ namespace d_dx12 {
                 int error_num = _wfopen_s(&fp, shader_name, L"wb");
                 fwrite(d3d12_ray_trace_shader_blob->GetBufferPointer(), d3d12_ray_trace_shader_blob->GetBufferSize(), 1, fp);
                 fclose(fp);
+            } else {
+                DEBUG_LOG("Warning: Cannot save shader bin");
             }
 
             //
@@ -566,7 +601,7 @@ namespace d_dx12 {
             Microsoft::WRL::ComPtr<IDxcBlob> pPDB = nullptr;
             Microsoft::WRL::ComPtr<IDxcBlobUtf16> pPDBName = nullptr;
             pResults->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&pPDB), &pPDBName);
-            {
+            if(pPDBName != nullptr){
                 FILE* fp = NULL;
 
                 // Note that if you don't specify -Fd, a pdb name will be automatically generated.
@@ -574,6 +609,8 @@ namespace d_dx12 {
                 _wfopen_s(&fp, pPDBName->GetStringPointer(), L"wb");
                 fwrite(pPDB->GetBufferPointer(), pPDB->GetBufferSize(), 1, fp);
                 fclose(fp);
+            } else {
+                DEBUG_LOG("Warning: Cannot save shader PDB");
             }
 
             //
@@ -1861,9 +1898,9 @@ namespace d_dx12 {
             dxil_lib_subobject->SetDXILLibrary(&dxil_lib_bytecode);
 
             // Optional?
-            // dxil_lib_subobject->DefineExport(L"MyRaygenShader");
-            // dxil_lib_subobject->DefineExport(L"MyClosestHitShader");
-            // dxil_lib_subobject->DefineExport(L"MyMissShader");
+            dxil_lib_subobject->DefineExport(L"MyRaygenShader");
+            dxil_lib_subobject->DefineExport(L"MyClosestHitShader");
+            dxil_lib_subobject->DefineExport(L"MyMissShader");
 
             // Specifies shaders to use wwhen a triangle intersects geo
             // Different geo can have different hit groups
@@ -2614,7 +2651,7 @@ namespace d_dx12 {
 
                 // Create the resource in the buffer
                 D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size, D3D12_RESOURCE_FLAG_NONE, buffer->alignment);
+                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size + buffer->alignment, D3D12_RESOURCE_FLAG_NONE);
 
                 d3d12_device->CreateCommittedResource(
                     &heap_prop,
@@ -2627,7 +2664,7 @@ namespace d_dx12 {
 
                 buffer->vertex_buffer_view.SizeInBytes = desc.number_of_elements * desc.size_of_each_element;
                 buffer->vertex_buffer_view.StrideInBytes = desc.size_of_each_element;
-                buffer->vertex_buffer_view.BufferLocation = buffer->d3d12_resource->GetGPUVirtualAddress();
+                buffer->vertex_buffer_view.BufferLocation = AlignPow2Up(buffer->d3d12_resource->GetGPUVirtualAddress(), buffer->alignment);
             }
             break;
 
@@ -2682,6 +2719,10 @@ namespace d_dx12 {
                     nullptr,
                     IID_PPV_ARGS(buffer->d3d12_resource.GetAddressOf())
                 );
+
+                #ifdef DEBUG
+                buffer->d3d12_resource->SetName(name);
+                #endif
 
                 // Create CBV
                 // TODO: 
@@ -3540,7 +3581,23 @@ namespace d_dx12 {
         UINT present_flags = is_tearing_supported && !using_v_sync ? DXGI_PRESENT_ALLOW_TEARING : 0;
 
         dynamic_buffer.save_frame_ptr(current_backbuffer_index);
-        ThrowIfFailed(display.d3d12_swap_chain->Present(sync_interval, present_flags));
+
+        HRESULT hr = display.d3d12_swap_chain->Present(sync_interval, present_flags);
+        if(hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET){
+            Microsoft::WRL::ComPtr<ID3D12DeviceRemovedExtendedData1> pDred;
+            ThrowIfFailed(d3d12_device->QueryInterface(IID_PPV_ARGS(&pDred)));
+
+            D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 AutoBreadcrumbsOutput;
+            ThrowIfFailed(pDred->GetAutoBreadcrumbsOutput1(&AutoBreadcrumbsOutput));
+
+            D3D12_DRED_PAGE_FAULT_OUTPUT1 PageFaultOutput;
+            ThrowIfFailed(pDred->GetPageFaultAllocationOutput1(&PageFaultOutput));
+
+            DEBUG_ERROR("Device Hung / Removed / Reset.");
+
+        } else {
+            ThrowIfFailed(hr);
+        }
 
         frame_fence_values[current_backbuffer_index] = direct_command_queue.signal();
 

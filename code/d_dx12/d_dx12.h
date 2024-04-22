@@ -379,7 +379,7 @@ namespace d_dx12 {
         void d_dx12_release();
     };
 
-    extern Microsoft::WRL::ComPtr<ID3D12Device5>  d3d12_device;
+    extern Microsoft::WRL::ComPtr<ID3D12Device8>  d3d12_device;
     extern Display                                display;
     extern u8                                     current_backbuffer_index;
     extern d_std::Memory_Arena*                   d_dx12_arena;

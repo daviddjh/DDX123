@@ -7,7 +7,7 @@ ConstantBuffer<Texture_Index> output_texture_index  : register(b0, ComputeSpace)
 ConstantBuffer<Output_Dimensions> output_dimensions : register(b1, ComputeSpace);
 
 static float3 background_color = float3(0.4, 0.5, 0.3);
-static float3 camera_center = float3(0., 0., 0.);
+// static float3 camera_center = float3(0., 0., 0.);
 static float3 up_dir = float4(0., 1., 0., 0.);
 static float3 right_dir = float4(1., 0., 0., 0.);
 static float  focal_length = 1.;
@@ -34,6 +34,7 @@ bool IsInsideViewport(float2 p, Viewport viewport)
 [shader("raygeneration")]
 void MyRaygenShader()
 {
+    float3 camera_center = per_frame_data.camera_pos.xyz;
     float viewport_height = 2.0;
     float viewport_width  = viewport_height * ((float)output_dimensions.width / (float)output_dimensions.height) ;
     float3 viewport_u = float3(viewport_width, 0, 0);
@@ -49,24 +50,41 @@ void MyRaygenShader()
 
     float3 pixel_center = pixel00_loc + (xy.x * pixel_delta_u) + (xy.y * pixel_delta_v);
     float3 ray_direction = normalize(pixel_center - camera_center);
+    // ray_direction.z = ray_direction.z;
 
     // Trace the ray.
     RayDesc ray;
-    ray.Origin = float3(0., 0., 0);
+    ray.Origin = per_frame_data.camera_pos.xyz;
     ray.Direction = ray_direction;
     // Set the ray's extents.
     // Set TMin to a non-zero small value to avoid aliasing issues due to floating - point errors.
     // TMin should be kept small to prevent missing geometry at close contact areas.
-    ray.TMin = 0.001;
-    ray.TMax = 10000.0;
+    ray.TMin = 0.0;
+    ray.TMax = 100000.0;
     RayPayload payload = { float4(0.8, 0.4, 0.6, 0) };
-    // TraceRay(scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+    // RayPayload payload;
+    // payload.color = float4(0, 0, 0, 0);
+
+    // // Get the location within the dispatched 2D grid of work items
+    // // (often maps to pixels, so this could represent a pixel coordinate).
+    // uint2 launchIndex = DispatchRaysIndex().xy;
+    // float2 dims = float2(DispatchRaysDimensions().xy);
+    // float2 d = (((launchIndex.xy + 0.5f) / dims.xy) * 2.f - 1.f );
+    // // Define a ray, consisting of origin, direction, and the min-max distance
+    // // values
+    // RayDesc ray;
+    // ray.Origin = float3(d.x, -d.y, 10);
+    // ray.Direction = float3(0, 0, -1);
+    // ray.TMin = 0;
+    // ray.TMax = 10000;
+    // scene;
+    TraceRay(scene, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
 
     // payload.color *= 0.01;
     // payload.color += float4(0.8, 0.0, 0.0, 1.0);
 
     // Write the raytraced color to the output texture.
-    texture_2d_uav_table[output_texture_index.texture_index][xy] = payload.color;
+    texture_2d_uav_table[output_texture_index.texture_index][xy]= payload.color;
     return;
 }
 
@@ -74,11 +92,11 @@ void MyRaygenShader()
 void MyClosestHitShader(inout RayPayload payload, in MyAttributes attr)
 {
     float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
-    payload.color = float4(barycentrics, 1);
+    payload.color = float4(1, 0, 0, 1);
 }
 
 [shader("miss")]
 void MyMissShader(inout RayPayload payload)
 {
-    payload.color = float4(0, 0, 0, 1);
+    payload.color = normalize(float4(0.3, 0.4, 0.6, 1));
 }
