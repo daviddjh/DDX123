@@ -92,7 +92,8 @@ void MyRaygenShader()
 void MyClosestHitShader(inout RayPayload payload, in MyAttributes attr)
 {
     float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
-    payload.color = float4(1, 0, 0, 1);
+    float T = RayTCurrent() / 1000.;
+    payload.color = normalize(float4(T, 0.5, 0.5, 1));
 }
 
 [shader("miss")]

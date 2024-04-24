@@ -837,9 +837,9 @@ int D_Renderer::init(){
     // command_list->transition_buffer(shaders.dxr_rayt_shader->ray_gen_shader_table, D3D12_RESOURCE_STATE_GENERIC_READ);
     // command_list->transition_buffer(shaders.dxr_rayt_shader->miss_shader_table, D3D12_RESOURCE_STATE_GENERIC_READ);
     #endif
-    // command_list->close();
-    // execute_command_list(command_list);
-    // flush_gpu();
+    command_list->close();
+    execute_command_list(command_list);
+    flush_gpu();
 
 
     ////////////////
@@ -1039,7 +1039,10 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
             if(triangles_desc.VertexBuffer.StartAddress % 4 != 0){
                 DEBUG_BREAK;
             }
-            triangles_desc.IndexBuffer = current_mesh->index_buffer->d3d12_resource->GetGPUVirtualAddress() + current_draw_call->index_offset;
+            triangles_desc.IndexBuffer = current_mesh->index_buffer->d3d12_resource->GetGPUVirtualAddress() + current_draw_call->index_offset * sizeof(u16);
+            if(triangles_desc.IndexBuffer % sizeof(u16) != 0){
+                DEBUG_BREAK;
+            }
             triangles_desc.IndexCount = current_draw_call->index_count;
             triangles_desc.IndexFormat = DXGI_FORMAT_R16_UINT;
             triangles_desc.Transform3x4 = 0;
@@ -1867,14 +1870,17 @@ void D_Renderer::render(){
             render_shadow_map(command_list);
             // Lighting pass
             deferred_render_pass(command_list);
+            command_list->transition_texture(textures.main_output_target, D3D12_RESOURCE_STATE_RENDER_TARGET);
             command_list->set_render_targets(1, &textures.main_output_target, nullptr);
             break;
         case D_Render_Passes::RAY_TRACING_COMPUTE:
             compute_rayt_pass(command_list);
+            command_list->transition_texture(textures.main_output_target, D3D12_RESOURCE_STATE_RENDER_TARGET);
             command_list->set_render_targets(1, &textures.main_output_target, nullptr);
             break;
         case D_Render_Passes::DXR_RAY_TRACING:
             dxr_ray_tracing_pass(command_list);
+            command_list->transition_texture(textures.main_output_target, D3D12_RESOURCE_STATE_RENDER_TARGET);
             command_list->set_render_targets(1, &textures.main_output_target, nullptr);
             break;
     }

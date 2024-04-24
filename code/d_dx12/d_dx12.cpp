@@ -2673,7 +2673,7 @@ namespace d_dx12 {
             {
                 // Create the resource in the buffer
                 D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size);
+                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size + buffer->alignment);
 
                 d3d12_device->CreateCommittedResource(
                     &heap_prop,
@@ -2685,7 +2685,7 @@ namespace d_dx12 {
                 );
 
                 buffer->index_buffer_view.SizeInBytes = desc.number_of_elements * desc.size_of_each_element;
-                buffer->index_buffer_view.BufferLocation = buffer->d3d12_resource->GetGPUVirtualAddress();
+                buffer->index_buffer_view.BufferLocation = AlignPow2Up(buffer->d3d12_resource->GetGPUVirtualAddress(), buffer->alignment);
                 buffer->index_buffer_view.Format = DXGI_FORMAT_R16_UINT;
 
             }
