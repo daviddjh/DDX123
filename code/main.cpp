@@ -143,6 +143,17 @@ struct D_Renderer {
     std::vector<Buffer*> blases;
     Buffer* tlas;
     Buffer* instance_buffer;
+    
+    struct Geometry_Info {
+        u32               vertex_offset;
+        u32               index_byte_offset;
+        u32               material_id;
+        u32               material_flags;
+        // DirectX::XMMATRIX model_matrix;
+    };
+
+    Span<Geometry_Info> geometry_info;
+    Buffer*   geometry_info_gpu;
 
 
 
@@ -285,7 +296,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
         vertex_buffer_desc.number_of_elements = verticies_buffer.nitems;
         vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
         vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
-        vertex_buffer_desc.alignment = 4;
+        // vertex_buffer_desc.alignment = 4;
 
         mesh->vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", vertex_buffer_desc);
 
@@ -296,7 +307,7 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
         index_buffer_desc.number_of_elements = indicies_buffer.nitems;
         index_buffer_desc.size_of_each_element = sizeof(u16);
         index_buffer_desc.usage = Buffer::USAGE::USAGE_INDEX_BUFFER;
-        index_buffer_desc.alignment = 2;
+        // index_buffer_desc.alignment = 2;
 
         mesh->index_buffer = resource_manager.create_buffer(L"Index Buffer", index_buffer_desc);
 
@@ -1019,6 +1030,7 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
 
         D_Mesh* current_mesh = &main_model->meshes.ptr[i];
         u16 num_geometry_desc = current_mesh->primitive_groups.nitems;
+        geometry_info.alloc(num_geometry_desc);
 
         for(int j = 0; j < num_geometry_desc; j++){
 
@@ -1039,6 +1051,18 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
             if(triangles_desc.VertexBuffer.StartAddress % 4 != 0){
                 DEBUG_BREAK;
             }
+
+            // TODO: Compute prior. Goes for rasterization passes too..
+            DirectX::XMMATRIX model_matrix = DirectX::XMMatrixIdentity();
+            DirectX::XMMATRIX scale_matrix = DirectX::XMMatrixScaling(0.1, 0.1, 0.1);
+            model_matrix = DirectX::XMMatrixMultiply(scale_matrix, DirectX::XMMatrixIdentity());
+            DirectX::XMMATRIX translation_matrix = DirectX::XMMatrixTranslation(main_model->coords.x, main_model->coords.y, main_model->coords.z);
+            // geometry_info.ptr[j].model_matrix = DirectX::XMMatrixMultiply(translation_matrix, model_matrix);
+            geometry_info.ptr[j].vertex_offset = current_draw_call->vertex_offset;
+            geometry_info.ptr[j].index_byte_offset = current_draw_call->index_offset * sizeof(u16);
+            geometry_info.ptr[j].material_id    = current_draw_call->material_index;
+            geometry_info.ptr[j].material_flags = main_model->materials.ptr[current_draw_call->material_index].material_flags;
+
             triangles_desc.IndexBuffer = current_mesh->index_buffer->d3d12_resource->GetGPUVirtualAddress() + current_draw_call->index_offset * sizeof(u16);
             if(triangles_desc.IndexBuffer % sizeof(u16) != 0){
                 DEBUG_BREAK;
@@ -1048,6 +1072,13 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
             triangles_desc.Transform3x4 = 0;
 
         }
+
+        Buffer_Desc geometry_info_gpu_desc;
+        geometry_info_gpu_desc.number_of_elements = geometry_info.nitems;
+        geometry_info_gpu_desc.size_of_each_element = sizeof(geometry_info.ptr[0]);
+        geometry_info_gpu_desc.usage = Buffer::USAGE_CONSTANT_BUFFER;
+        geometry_info_gpu = resource_manager.create_buffer(L"Geometry Vertex Offsets", geometry_info_gpu_desc);
+        command_list->load_buffer(geometry_info_gpu, (u8*)geometry_info.ptr, geometry_info.nitems * sizeof(geometry_info.ptr[0]), sizeof(geometry_info.ptr[0]));
 
         // Fill BLAS create struct
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* blas_desc = &blas_descs[i];
@@ -1117,9 +1148,9 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
 
         // Identity matrix
         ZeroMemory(instanceDesc.Transform, sizeof(instanceDesc.Transform));
-        instanceDesc.Transform[0][0] = 1.0f;
-        instanceDesc.Transform[1][1] = 1.0f;
-        instanceDesc.Transform[2][2] = 1.0f;
+        instanceDesc.Transform[0][0] = 0.1f;
+        instanceDesc.Transform[1][1] = 0.1f;
+        instanceDesc.Transform[2][2] = 0.1f;
 
         instanceDesc.AccelerationStructure = blases[i]->d3d12_resource->GetGPUVirtualAddress();
         instanceDesc.Flags = 0;
@@ -1694,31 +1725,89 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
     command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
 
+    // Cant use Constant buffer for geometry vertex offsets because we don't know how many we have.
+    // Constant buffers need to be "Constant". Cant have variable size or anyting. I think the shader/compiler needs to know the size
+    // at compile time.
+    // command_list->bind_buffer(geometry_info_gpu, &resource_manager, binding_point_string_lookup("geometry_info"));
+    Descriptor_Handle geo_vertex_offset_handle = resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
+        srv_desc.Format = DXGI_FORMAT_UNKNOWN;
+        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv_desc.Buffer.FirstElement = 0;
+        srv_desc.Buffer.NumElements  = geometry_info.nitems;
+        srv_desc.Buffer.StructureByteStride = sizeof(geometry_info.ptr[0]);
+        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        d3d12_device->CreateShaderResourceView(geometry_info_gpu->d3d12_resource.Get(), &srv_desc, geo_vertex_offset_handle.cpu_descriptor_handle);
+    }
+    command_list->bind_handle(geo_vertex_offset_handle, binding_point_string_lookup("geometry_info"));
+
+    // Aquire a handle from the online descriptor heap
+    // command_list->bind_buffer(models.ptr[0].meshes.ptr[0].vertex_buffer, &resource_manager, binding_point_string_lookup("vertex_buffer"));
+    Descriptor_Handle vertex_buffer_handle = resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
+        srv_desc.Format = DXGI_FORMAT_UNKNOWN;
+        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv_desc.Buffer.FirstElement = 0;
+        srv_desc.Buffer.NumElements  = models.ptr[0].meshes.ptr[0].vertex_buffer->number_of_elements;
+        srv_desc.Buffer.StructureByteStride = sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
+        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        d3d12_device->CreateShaderResourceView(models.ptr[0].meshes.ptr[0].vertex_buffer->d3d12_resource.Get(), &srv_desc, vertex_buffer_handle.cpu_descriptor_handle);
+    }
+    command_list->bind_handle(vertex_buffer_handle, binding_point_string_lookup("vertex_buffer"));
+
+    Descriptor_Handle index_buffer_handle = resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
+        srv_desc.Format = DXGI_FORMAT_R32_TYPELESS;
+        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv_desc.Buffer.FirstElement = 0;
+        srv_desc.Buffer.NumElements  = models.ptr[0].meshes.ptr[0].index_buffer->number_of_elements / 2; // / 2 because index is 16 bit, and buffer format is 32 bit
+        srv_desc.Buffer.StructureByteStride = 0; //sizeof(u16);
+        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+        d3d12_device->CreateShaderResourceView(models.ptr[0].meshes.ptr[0].index_buffer->d3d12_resource.Get(), &srv_desc, index_buffer_handle.cpu_descriptor_handle);
+    }
+    command_list->bind_handle(index_buffer_handle, binding_point_string_lookup("index_buffer"));
+
+    command_list->d3d12_command_list->SetComputeRootShaderResourceView(command_list->current_bound_shader->binding_points[binding_point_string_lookup("scene")].root_signature_index, tlas->d3d12_resource->GetGPUVirtualAddress());
+
+    // Bind All Materials
+    D_Model* main_model = &models.ptr[0];
+    u32 current_texture_table_index = 0;  // TODO: EEEEKKKKK shouldn't be here. Need a better way of doing this. Maybe we should bind textures like this for rasterization too?
+    for(int i = 0; i < main_model->materials.nitems; i++){
+        D_Material* material = &main_model->materials.ptr[i];
+
+        command_list->bind_texture(material->albedo_texture.texture, &resource_manager, 0);
+
+        if(material->material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
+            command_list->bind_texture(material->normal_texture.texture, &resource_manager, 0);
+        } else {
+            resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();  // Throw away to keep our Material Slots uniform
+        }
+
+        if(material->material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE){
+            command_list->bind_texture(material->roughness_metallic_texture.texture, &resource_manager, 0);
+        } else {
+            resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();  // Throw away to keep our Material Slots uniform
+        }
+    }
+
+    // Need to do this last so it doesn't interfere with Geometry_Info.material_id mapping to above material index.. TODO: find a better solution..
     Texture_Index output_texture_index = {};
     output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
 
     Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
     command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
 
-    // Aquire a handle from the online descriptor heap
-    // Descriptor_Handle rt_as_handle = resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
-
-    // D3D12_RAYTRACING_ACCELERATION_STRUCTURE_SRV rt_as_srv;
-    // rt_as_srv.Location = tlas->d3d12_resource->GetGPUVirtualAddress();
-
-    // D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc;
-    // srv_desc.Format = DXGI_FORMAT_UNKNOWN;
-    // srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE; 
-    // srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    // srv_desc.RaytracingAccelerationStructure = rt_as_srv;
-    // d3d12_device->CreateShaderResourceView(NULL, &srv_desc, rt_as_handle.cpu_descriptor_handle);
-    // command_list->bind_handle(rt_as_handle, binding_point_string_lookup("scene"));
-
-    command_list->d3d12_command_list->SetComputeRootShaderResourceView(command_list->current_bound_shader->binding_points[binding_point_string_lookup("scene")].root_signature_index, tlas->d3d12_resource->GetGPUVirtualAddress());
-
-
     // Now be bind the texture table to the root signature. 
-    // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
 
     #ifndef NVIDIA
@@ -1826,6 +1915,9 @@ void D_Renderer::render(){
     DirectX::XMMATRIX projection_matrix = DirectX::XMMatrixPerspectiveFovRH(DirectX::XMConvertToRadians(camera.fov), (f32) config.render_width / (f32) config.render_height, 0.01f, 2500000000.0f);
     per_frame_data.view_projection_matrix = DirectX::XMMatrixMultiply(view_matrix, projection_matrix);
     DirectX::XMStoreFloat4(&per_frame_data.camera_pos, camera.eye_position);
+    DirectX::XMVECTOR view_matrix_deter;
+    DirectX::XMMATRIX inv_view_matrix = DirectX::XMMatrixInverse(&view_matrix_deter, view_matrix);
+    per_frame_data.view_matrix = view_matrix;
     
     // ////////////////////////////////////
     // /// Update Render To Display Scale

@@ -368,10 +368,9 @@ void load_materials(D_Model& d_model, tg::Model& tg_model){
             // Roughness Metallic Texture
             /////////////////////
 
-            // Here, we are only storing, and using, the base color texture
             texture_index = tg_model.materials[j].pbrMetallicRoughness.metallicRoughnessTexture.index;
 
-            if(texture_index != UINT_MAX){
+            if(texture_index != UINT_MAX){  // Fails when we don't have a metallic roughness texture
 
                 tex = tg_model.textures[texture_index];
 

@@ -20,6 +20,9 @@ const enum Binding_Point_Index : u32 {
     INPUT_TEXTURE_INDEX,
     TEXTURE_2D_UAV_TABLE,
     SCENE,
+    GEOMETRY_VERTEX_OFFSET,
+    VERTEX_BUFFER,
+    INDEX_BUFFER,
     BINDING_POINT_INDEX_COUNT,
 };
 
@@ -46,6 +49,9 @@ constexpr const Binding_Point_String_Map binding_point_map[] = {
     {"input_texture_index", INPUT_TEXTURE_INDEX},
     {"texture_2d_uav_table", TEXTURE_2D_UAV_TABLE},
     {"scene", SCENE},
+    {"geometry_info", GEOMETRY_VERTEX_OFFSET},
+    {"vertex_buffer", VERTEX_BUFFER},
+    {"index_buffer", INDEX_BUFFER},
 };
 
 // Got from: https://stackoverflow.com/questions/27490858/how-can-you-compare-two-character-strings-statically-at-compile-time

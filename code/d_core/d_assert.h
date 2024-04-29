@@ -1,5 +1,6 @@
 #ifndef _D_ASSERT
 #define _D_ASSERT
+#include "d_os.h"
 
 /*
 *   Defines a debug break
@@ -29,7 +30,8 @@
 #endif // DEBUG_BREAK
 
 #if defined DEBUG
-#define ASSERT(s) do(if(!(s)){DEBUG_BREAK})while(0)
+#define ASSERT(s) do{if(!(s)){DEBUG_BREAK;}}while(0)
+#define ASSERT_LOG(s, l) do{if(!(s)){os_debug_print(l); DEBUG_BREAK;}}while(0)
 #else
 #define ASSERT(s)
 #endif // USING_ASSERT

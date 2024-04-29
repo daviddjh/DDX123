@@ -238,6 +238,7 @@ namespace d_dx12 {
         wchar_t*                                  name;
         u16                                       is_bound_index;
         u64                                       alignment;
+        u32                                       gpu_resource_offset = 0;  // If buffer is aligned inside of d3d12_resource, this is the offset from the beginning of the resource
         union{
 
             D3D12_VERTEX_BUFFER_VIEW              vertex_buffer_view;

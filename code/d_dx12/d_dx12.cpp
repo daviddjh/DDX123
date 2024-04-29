@@ -329,6 +329,7 @@ namespace d_dx12 {
                 D3D12_SHADER_INPUT_BIND_DESC d3d12_shader_input_binding_point_desc;
                 d3d12_function_reflection->GetResourceBindingDesc(i, &(d3d12_shader_input_binding_point_desc));
                 const u32 binding_point_index = binding_point_string_lookup(d3d12_shader_input_binding_point_desc.Name);                    
+                ASSERT_LOG(binding_point_index != UINT_MAX, "Binding Point not found in lookup table!");
 
                 Shader::Binding_Point& ddx12_binding_point = ddx12_shader->binding_points[binding_point_index];
 
@@ -497,14 +498,12 @@ namespace d_dx12 {
                 // L"-E", L"main",              
 
                 // Target.
-                L"-T", L"lib_6_3",            
+                L"-T", L"lib_6_5",            
 
                 // Enable debug information (slim format)
-                //#ifdef _DEBUG
                 L"-Zi",                      
                 L"-Od",
                 L"-Qembed_debug",
-                //#endif
 
                 // Strip reflection into a separate blob. 
                 // L"-Qstrip_reflect",          
@@ -1638,7 +1637,7 @@ namespace d_dx12 {
                         //Shader::Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
                         D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
 
-                        descriptor_range->BaseShaderRegister                = shader_binding_point->bind_point,
+                        descriptor_range->BaseShaderRegister                = shader_binding_point->bind_point;
                         descriptor_range->RegisterSpace                     = shader_binding_point->bind_space;
                         descriptor_range->OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
                         descriptor_range->Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
@@ -1829,13 +1828,10 @@ namespace d_dx12 {
                             break;
                         }
 
-                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
-                        os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
-
                         //Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
                         D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
 
-                        descriptor_range->BaseShaderRegister                = shader_binding_point->bind_point,
+                        descriptor_range->BaseShaderRegister                = shader_binding_point->bind_point;
                         descriptor_range->RegisterSpace                     = shader_binding_point->bind_space;
                         descriptor_range->OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
                         descriptor_range->Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
@@ -2337,7 +2333,7 @@ namespace d_dx12 {
     Descriptor_Handle Descriptor_Heap::get_next_handle(){
 
         // TODO: Check size/index before doing this? Don't go off the end, ring buffer?
-        if(this-> size < this->capacity){
+        if(this->size < this->capacity){
 
             if(d3d12_descriptor_heap == NULL){
                 OutputDebugString("Error (Descriptor_Heap::get_next_handle): The d3d12 Descriptor Heap hasn't been created yet");
@@ -2651,7 +2647,7 @@ namespace d_dx12 {
 
                 // Create the resource in the buffer
                 D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size + buffer->alignment, D3D12_RESOURCE_FLAG_NONE);
+                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size /*+ buffer->alignment*/, D3D12_RESOURCE_FLAG_NONE);
 
                 d3d12_device->CreateCommittedResource(
                     &heap_prop,
@@ -2664,7 +2660,8 @@ namespace d_dx12 {
 
                 buffer->vertex_buffer_view.SizeInBytes = desc.number_of_elements * desc.size_of_each_element;
                 buffer->vertex_buffer_view.StrideInBytes = desc.size_of_each_element;
-                buffer->vertex_buffer_view.BufferLocation = AlignPow2Up(buffer->d3d12_resource->GetGPUVirtualAddress(), buffer->alignment);
+                buffer->vertex_buffer_view.BufferLocation = buffer->d3d12_resource->GetGPUVirtualAddress(); // AlignPow2Up(buffer->d3d12_resource->GetGPUVirtualAddress(), buffer->alignment);
+                buffer->gpu_resource_offset = buffer->vertex_buffer_view.BufferLocation - buffer->d3d12_resource->GetGPUVirtualAddress();
             }
             break;
 
@@ -2673,7 +2670,7 @@ namespace d_dx12 {
             {
                 // Create the resource in the buffer
                 D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size + buffer->alignment);
+                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(total_size /*+ buffer->alignment*/);
 
                 d3d12_device->CreateCommittedResource(
                     &heap_prop,
@@ -2685,8 +2682,9 @@ namespace d_dx12 {
                 );
 
                 buffer->index_buffer_view.SizeInBytes = desc.number_of_elements * desc.size_of_each_element;
-                buffer->index_buffer_view.BufferLocation = AlignPow2Up(buffer->d3d12_resource->GetGPUVirtualAddress(), buffer->alignment);
+                buffer->index_buffer_view.BufferLocation = buffer->d3d12_resource->GetGPUVirtualAddress(); // AlignPow2Up(buffer->d3d12_resource->GetGPUVirtualAddress(), buffer->alignment);
                 buffer->index_buffer_view.Format = DXGI_FORMAT_R16_UINT;
+                buffer->gpu_resource_offset = buffer->index_buffer_view.BufferLocation - buffer->d3d12_resource->GetGPUVirtualAddress();
 
             }
             break;
