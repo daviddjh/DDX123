@@ -224,17 +224,17 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
 
     // Estimate partial derivitive of world space position w/r/t screen space coords
     // https://www.pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing#FindingtheTextureSamplingRate
-    uint2 current_pixel_xy = DispatchRaysDimensions().xy;
+    uint2 current_pixel_xy = DispatchRaysIndex().xy;
     RayDesc rx = create_camera_ray(uint2(current_pixel_xy.x + 1, current_pixel_xy.y));
     RayDesc ry = create_camera_ray(uint2(current_pixel_xy.x, current_pixel_xy.y + 1));
 
     float  d  = -dot(n_hit, p_hit);
-    // float  tx = (-dot(n_hit, rx.Origin) - d) / dot(n_hit, rx.Direction);  // I think something is broken here?
-    float tx = RayTCurrent();
+    float  tx = (-dot(n_hit, rx.Origin) - d) / dot(n_hit, rx.Direction);  // I think something is broken here?
+    // float tx = RayTCurrent();
     float3 px = rx.Origin + tx * rx.Direction;
 
-    // float  ty = (-dot(n_hit, ry.Origin) - d) / dot(n_hit, ry.Direction);  
-    float ty = RayTCurrent();
+    float  ty = (-dot(n_hit, ry.Origin) - d) / dot(n_hit, ry.Direction);  
+    // float ty = RayTCurrent();
     float3 py = ry.Origin + ty * ry.Direction;
 
     float3 dpdx = px - p_hit;
@@ -268,6 +268,9 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
 
     float2 ddx = float2(dudx, dvdx);
     float2 ddy = float2(dudy, dvdy);
+
+    // float2 ddx = float2(dudx, dudy);
+    // float2 ddy = float2(dvdx, dvdy);
  
     // float4 albedo_sample = albedo_texture.SampleLevel(sampler_1, uv_hit, 0);
     float4 albedo_sample = albedo_texture.SampleGrad(sampler_1, uv_hit, ddx, ddy);
