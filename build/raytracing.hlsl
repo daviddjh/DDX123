@@ -74,6 +74,7 @@ RayDesc create_camera_ray(uint2 pixel_xy){
     float3 pixel_center = pixel00_loc + (xy.x * pixel_delta_u) + (xy.y * pixel_delta_v);
     float3 ray_direction = normalize(pixel_center - camera_center);
     ray_direction = mul(float4(ray_direction, 1.), per_frame_data.view_matrix);
+    ray_direction = normalize(ray_direction);
     // ray_direction = mul(per_frame_data.view_matrix, float4(ray_direction, 1.));
     // ray_direction.z = ray_direction.z;
 
@@ -157,7 +158,7 @@ void MyRaygenShader()
 [shader("closesthit")]
 void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttributes attr)
 {
-    float3 barycentrics = float3(1 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
+    float3 barycentrics = float3(1.f - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
     // float T = RayTCurrent() / 100.;
     // float g = 0.4;
     // float b = 0.5;
@@ -190,12 +191,17 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
     }
 
     Vertex_Position_Normal_Tangent_Color_Texturecoord vertex1 = vertex_buffer[indicies.x + g_info.vertex_offset];
+    vertex1.position *= .1f;
     Vertex_Position_Normal_Tangent_Color_Texturecoord vertex2 = vertex_buffer[indicies.y + g_info.vertex_offset];
+    vertex2.position *= .1f;
     Vertex_Position_Normal_Tangent_Color_Texturecoord vertex3 = vertex_buffer[indicies.z + g_info.vertex_offset];
+    vertex3.position *= .1f;
 
     float2 uv_hit  = barycentrics.x * vertex1.texCoord + barycentrics.y * vertex2.texCoord + barycentrics.z * vertex3.texCoord;
     float3 p_hit   = barycentrics.x * vertex1.position + barycentrics.y * vertex2.position + barycentrics.z * vertex3.position;
+    // p_hit *= .1f;
     float3 n_hit   = barycentrics.x * vertex1.normal   + barycentrics.y * vertex2.normal   + barycentrics.z * vertex3.normal;
+    n_hit = normalize(n_hit);
 
     Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(g_info.material_id * 3)];
     Texture2D normal_texture = texture_2d_table[NonUniformResourceIndex(g_info.material_id * 3 + 1)];
@@ -226,15 +232,17 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
     // https://www.pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing#FindingtheTextureSamplingRate
     uint2 current_pixel_xy = DispatchRaysIndex().xy;
     RayDesc rx = create_camera_ray(uint2(current_pixel_xy.x + 1, current_pixel_xy.y));
-    RayDesc ry = create_camera_ray(uint2(current_pixel_xy.x, current_pixel_xy.y + 1));
+    RayDesc ry = create_camera_ray(uint2(current_pixel_xy.x, current_pixel_xy.y - 1));
 
     float  d  = -dot(n_hit, p_hit);
     float  tx = (-dot(n_hit, rx.Origin) - d) / dot(n_hit, rx.Direction);  // I think something is broken here?
+    // tx *= 0.01f;
     // float tx = RayTCurrent();
     float3 px = rx.Origin + tx * rx.Direction;
 
     float  ty = (-dot(n_hit, ry.Origin) - d) / dot(n_hit, ry.Direction);  
     // float ty = RayTCurrent();
+    // ty *= 0.01f;
     float3 py = ry.Origin + ty * ry.Direction;
 
     float3 dpdx = px - p_hit;
@@ -248,7 +256,7 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
     float ata11 = dot(dpdv, dpdv);
 
     invdet = 1 / (ata00 * ata11 - ata01 * ata01);
-    // invdet = isfinite(invdet) ? invdet : 0.f;     // If equation cannot be solved, then set invdet to zero. This leads to point sampled textures.
+    invdet = isfinite(invdet) ? invdet : 0.f;     // If equation cannot be solved, then set invdet to zero. This leads to point sampled textures.
 
     float atb0x = dot(dpdu, dpdx);
     float atb1x = dot(dpdv, dpdx);
@@ -261,10 +269,10 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
     float dudy = (ata11 * atb0y - ata01 * atb1y) * invdet;
     float dvdy = (ata00 * atb1y - ata01 * atb0y) * invdet;
 
-    // dudx = isfinite(dudx) ? clamp(dudx, -1e8f, 1e8f) : 0;
-    // dvdx = isfinite(dvdx) ? clamp(dvdx, -1e8f, 1e8f) : 0;
-    // dudy = isfinite(dudy) ? clamp(dudy, -1e8f, 1e8f) : 0;
-    // dvdy = isfinite(dvdy) ? clamp(dvdy, -1e8f, 1e8f) : 0;
+    dudx = isfinite(dudx) ? clamp(dudx, -1e8f, 1e8f) : 0;
+    dvdx = isfinite(dvdx) ? clamp(dvdx, -1e8f, 1e8f) : 0;
+    dudy = isfinite(dudy) ? clamp(dudy, -1e8f, 1e8f) : 0;
+    dvdy = isfinite(dvdy) ? clamp(dvdy, -1e8f, 1e8f) : 0;
 
     float2 ddx = float2(dudx, dvdx);
     float2 ddy = float2(dudy, dvdy);

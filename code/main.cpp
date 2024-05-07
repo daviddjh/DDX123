@@ -1151,6 +1151,9 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
         instanceDesc.Transform[0][0] = 0.1f;
         instanceDesc.Transform[1][1] = 0.1f;
         instanceDesc.Transform[2][2] = 0.1f;
+        // instanceDesc.Transform[0][0] = 1.0f;
+        // instanceDesc.Transform[1][1] = 1.0f;
+        // instanceDesc.Transform[2][2] = 1.0f;
 
         instanceDesc.AccelerationStructure = blases[i]->d3d12_resource->GetGPUVirtualAddress();
         instanceDesc.Flags = 0;
