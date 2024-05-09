@@ -5,10 +5,6 @@
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx12.h"
-#include "nv_helpers_dx12/ShaderBindingTableGenerator.h"
-#include "nv_helpers_dx12/TopLevelASGenerator.h"
-#include "nv_helpers_dx12/BottomLevelASGenerator.h"
-#include "nv_helpers_dx12/DXRHelper.h"
 
 #include <chrono>
 #include <random>
@@ -20,11 +16,6 @@
 #include "shaders.cpp"
 #include "constant_buffers.h"
 
-#include "nv_helpers_dx12/ShaderBindingTableGenerator.cpp"
-#include "nv_helpers_dx12/TopLevelASGenerator.cpp"
-#include "nv_helpers_dx12/BottomLevelASGenerator.cpp"
-
-
 using namespace d_dx12;
 using namespace d_std;
 using namespace DirectX;
@@ -33,7 +24,6 @@ using namespace DirectX;
 
 // Sets window, rendertargets to 4k resolution
 // #define d_4k
-// #define NVIDIA
 
 struct D_Camera {
     DirectX::XMVECTOR eye_position;
@@ -133,13 +123,6 @@ struct D_Renderer {
     Span<D_Model>     models;
     Per_Frame_Data    per_frame_data;
 
-    nv_helpers_dx12::ShaderBindingTableGenerator m_sbtHelper;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_sbtStorage;
-    Upload_Buffer::Allocation sbt_upload_storage;
-    float m_aspectRatio = 1920. / 1080.;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
-    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-
     std::vector<Buffer*> blases;
     Buffer* tlas;
     Buffer* instance_buffer;
@@ -165,7 +148,6 @@ struct D_Renderer {
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS; // Storage for the bottom Level AS
 
-    nv_helpers_dx12::TopLevelASGenerator m_topLevelASGenerator;
     AccelerationStructureBuffers m_topLevelASBuffers;
     std::vector<std::pair<Microsoft::WRL::ComPtr<ID3D12Resource>, DirectX::XMMATRIX>> m_instances;
 
@@ -843,11 +825,6 @@ int D_Renderer::init(){
     Command_List* command_list = direct_command_lists[current_backbuffer_index];
     command_list->reset();
     calc_acceleration_structure(command_list);
-    #ifndef NVIDIA
-    // command_list->transition_buffer(shaders.dxr_rayt_shader->hit_group_shader_table, D3D12_RESOURCE_STATE_GENERIC_READ);
-    // command_list->transition_buffer(shaders.dxr_rayt_shader->ray_gen_shader_table, D3D12_RESOURCE_STATE_GENERIC_READ);
-    // command_list->transition_buffer(shaders.dxr_rayt_shader->miss_shader_table, D3D12_RESOURCE_STATE_GENERIC_READ);
-    #endif
     command_list->close();
     execute_command_list(command_list);
     flush_gpu();
@@ -880,113 +857,6 @@ int D_Renderer::init(){
 
     TODO: fix the main model situation. Define a scene and have the ability to have multiple models
 */
-
-//-----------------------------------------------------------------------------
-//
-// Create a bottom-level acceleration structure based on a list of vertex
-// buffers in GPU memory along with their vertex count. The build is then done
-// in 3 steps: gathering the geometry, computing the sizes of the required
-// buffers, and building the actual AS
-//
-D_Renderer::AccelerationStructureBuffers D_Renderer::CreateBottomLevelAS(
-    std::vector<std::tuple<Microsoft::WRL::ComPtr<ID3D12Resource>, Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t, uint32_t>> vVertexBuffers, Command_List* command_list) {
-  nv_helpers_dx12::BottomLevelASGenerator bottomLevelAS;
-
-  // Adding all vertex buffers and not transforming their position.
-  for (const auto &buffer : vVertexBuffers) {
-    bottomLevelAS.AddVertexBuffer(std::get<0>(buffer).Get(), 0, std::get<2>(buffer), sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord), std::get<1>(buffer).Get(), 0, std::get<3>(buffer), 0, 0);
-  }
-
-  // The AS build requires some scratch space to store temporary information.
-  // The amount of scratch memory is dependent on the scene complexity.
-  UINT64 scratchSizeInBytes = 0;
-  // The final AS also needs to be stored in addition to the existing vertex
-  // buffers. It size is also dependent on the scene complexity.
-  UINT64 resultSizeInBytes = 0;
-
-  bottomLevelAS.ComputeASBufferSizes(d3d12_device.Get(), false, &scratchSizeInBytes,
-                                     &resultSizeInBytes);
-
-  // Once the sizes are obtained, the application is responsible for allocating
-  // the necessary buffers. Since the entire generation will be done on the GPU,
-  // we can directly allocate those on the default heap
-  AccelerationStructureBuffers buffers;
-  buffers.pScratch = nv_helpers_dx12::CreateBuffer(
-      d3d12_device.Get(), scratchSizeInBytes,
-      D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON,
-      nv_helpers_dx12::kDefaultHeapProps);
-  buffers.pResult = nv_helpers_dx12::CreateBuffer(
-      d3d12_device.Get(), resultSizeInBytes,
-      D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-      D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
-      nv_helpers_dx12::kDefaultHeapProps);
-
-  // Build the acceleration structure. Note that this call integrates a barrier
-  // on the generated AS, so that it can be used to compute a top-level AS right
-  // after this method.
-  bottomLevelAS.Generate(command_list->d3d12_command_list.Get(), buffers.pScratch.Get(),
-                         buffers.pResult.Get(), false, nullptr);
-
-  return buffers;
-}
-
-//-----------------------------------------------------------------------------
-// Create the main acceleration structure that holds all instances of the scene.
-// Similarly to the bottom-level AS generation, it is done in 3 steps: gathering
-// the instances, computing the memory requirements for the AS, and building the
-// AS itself
-//
-void D_Renderer::CreateTopLevelAS(
-    const std::vector<std::pair<Microsoft::WRL::ComPtr<ID3D12Resource>, DirectX::XMMATRIX>>
-        &instances, Command_List* command_list  // pair of bottom level AS and matrix of the instance
-) {
-  // Gather all the instances into the builder helper
-  for (size_t i = 0; i < instances.size(); i++) {
-    m_topLevelASGenerator.AddInstance(instances[i].first.Get(),
-                                      instances[i].second, static_cast<UINT>(i),
-                                      static_cast<UINT>(0));
-  }
-
-  // As for the bottom-level AS, the building the AS requires some scratch space
-  // to store temporary data in addition to the actual AS. In the case of the
-  // top-level AS, the instance descriptors also need to be stored in GPU
-  // memory. This call outputs the memory requirements for each (scratch,
-  // results, instance descriptors) so that the application can allocate the
-  // corresponding memory
-  UINT64 scratchSize, resultSize, instanceDescsSize;
-
-  m_topLevelASGenerator.ComputeASBufferSizes(d3d12_device.Get(), true, &scratchSize,
-                                             &resultSize, &instanceDescsSize);
-
-  // Create the scratch and result buffers. Since the build is all done on GPU,
-  // those can be allocated on the default heap
-  m_topLevelASBuffers.pScratch = nv_helpers_dx12::CreateBuffer(
-      d3d12_device.Get(), scratchSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-      D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-      nv_helpers_dx12::kDefaultHeapProps);
-  m_topLevelASBuffers.pResult = nv_helpers_dx12::CreateBuffer(
-      d3d12_device.Get(), resultSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-      D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
-      nv_helpers_dx12::kDefaultHeapProps);
-
-  // The buffer describing the instances: ID, shader binding information,
-  // matrices ... Those will be copied into the buffer by the helper through
-  // mapping, so the buffer has to be allocated on the upload heap.
-  m_topLevelASBuffers.pInstanceDesc = nv_helpers_dx12::CreateBuffer(
-      d3d12_device.Get(), instanceDescsSize, D3D12_RESOURCE_FLAG_NONE,
-      D3D12_RESOURCE_STATE_GENERIC_READ, nv_helpers_dx12::kUploadHeapProps);
-
-  // After all the buffers are allocated, or if only an update is required, we
-  // can build the acceleration structure. Note that in the case of the update
-  // we also pass the existing AS as the 'previous' AS, so that it can be
-  // refitted in place.
-  m_topLevelASGenerator.Generate(command_list->d3d12_command_list.Get(),
-                                 m_topLevelASBuffers.pScratch.Get(),
-                                 m_topLevelASBuffers.pResult.Get(),
-                                 m_topLevelASBuffers.pInstanceDesc.Get());
-}
-
-
 
 void D_Renderer::calc_acceleration_structure(Command_List* command_list){
 
@@ -1222,78 +1092,6 @@ void D_Renderer::calc_acceleration_structure(Command_List* command_list){
     // Create the TLAS
     command_list->d3d12_command_list->BuildRaytracingAccelerationStructure(&tlas_desc, 0, nullptr);
 
-    #if 0  // NVIDIA
-    // Create the vertex buffer.
-    {
-        // Define the geometry for a triangle.
-        Vertex triangleVertices[] = {
-            {{0.0f, 2500.f * m_aspectRatio, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
-            {{2500.f, -2500.f * m_aspectRatio, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
-            {{-2500.f, -2500.f * m_aspectRatio, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}}};
-            // {{0.0f, 0.25f * m_aspectRatio, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}},
-            // {{0.25f, -0.25f * m_aspectRatio, 0.0f}, {0.0f, 1.0f, 1.0f, 1.0f}},
-            // {{-0.25f, -0.25f * m_aspectRatio, 0.0f}, {1.0f, 0.0f, 1.0f, 1.0f}}};
-
-        const UINT vertexBufferSize = sizeof(triangleVertices);
-
-        // Note: using upload heaps to transfer static data like vert buffers is not
-        // recommended. Every time the GPU needs it, the upload heap will be
-        // marshalled over. Please read up on Default Heap usage. An upload heap is
-        // used here for code simplicity and because there are very few verts to
-        // actually transfer.
-        ThrowIfFailed(d3d12_device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE,
-            &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-            IID_PPV_ARGS(&m_vertexBuffer)));
-
-        // Copy the triangle data to the vertex buffer.
-        UINT8 *pVertexDataBegin;
-        CD3DX12_RANGE readRange(
-            0, 0); // We do not intend to read from this resource on the CPU.
-        ThrowIfFailed(m_vertexBuffer->Map(
-            0, &readRange, reinterpret_cast<void **>(&pVertexDataBegin)));
-        memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
-        m_vertexBuffer->Unmap(0, nullptr);
-
-        // Initialize the vertex buffer view.
-        m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
-        m_vertexBufferView.StrideInBytes = sizeof(Vertex);
-        m_vertexBufferView.SizeInBytes = vertexBufferSize;
-    }
-
-
-    //   Build the bottom AS from the Triangle vertex buffer
-    // AccelerationStructureBuffers bottomLevelBuffers = CreateBottomLevelAS({{m_vertexBuffer.Get(), 
-    //                                                                         nullptr, // main_model->meshes.ptr[0].index_buffer->d3d12_resource.Get(),
-    //                                                                         3, /*main_model->meshes.ptr[0].vertex_buffer->number_of_elements,*/
-    //                                                                         0 /*main_model->meshes.ptr[0].index_buffer->number_of_elements*/ }}
-    //                                                                         , command_list);
-
-    AccelerationStructureBuffers bottomLevelBuffers = CreateBottomLevelAS({{main_model->meshes.ptr[0].vertex_buffer->d3d12_resource.Get(), 
-                                                                            main_model->meshes.ptr[0].index_buffer->d3d12_resource.Get(),
-                                                                            main_model->meshes.ptr[0].vertex_buffer->number_of_elements,
-                                                                            main_model->meshes.ptr[0].index_buffer->number_of_elements }}
-                                                                            , command_list);
-
-    // Just one instance for now
-    m_instances = {{bottomLevelBuffers.pResult, XMMatrixIdentity()}};
-    CreateTopLevelAS(m_instances, command_list);
-
-    // Flush the command list and wait for it to finish
-    command_list->close();
-    execute_command_list(command_list);
-    flush_gpu();
-    // command_list->reset();
-
-    // Once the command list is finished executing, reset it to be reused for
-    // rendering
-
-    // Store the AS buffers. The rest of the buffers will be released once we exit
-    // the function
-    m_bottomLevelAS = bottomLevelBuffers.pResult;
-    #endif
-
 }
 
 void D_Renderer::build_shader_tables(Command_List* command_list, Shader* shader){
@@ -1301,37 +1099,6 @@ void D_Renderer::build_shader_tables(Command_List* command_list, Shader* shader)
     Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> state_object_properties;
     ThrowIfFailed(shader->d3d12_rt_state_object.As(&state_object_properties));
 
-    // NVIDIA START
-    
-    #ifdef NVIDIA
-    // The ray generation only uses heap data
-    m_sbtHelper.AddRayGenerationProgram(L"MyRaygenShader", {});
-
-    // The miss and hit shaders do not access any external resources: instead they
-    // communicate their results through the ray payload
-    m_sbtHelper.AddMissProgram(L"MyHitGroup", {});
-
-    // Adding the triangle hit shader
-    m_sbtHelper.AddHitGroup(L"MyMissShader", {});
-
-    // Compute the size of the SBT given the number of shaders and their
-    // parameters
-    uint32_t sbtSize = m_sbtHelper.ComputeSBTSize();
-
-    // Create the SBT on the upload heap. This is required as the helper will use
-    // mapping to write the SBT contents. After the SBT compilation it could be
-    // copied to the default heap for performance.
-    m_sbtStorage = nv_helpers_dx12::CreateBuffer(
-        d3d12_device.Get(), sbtSize, D3D12_RESOURCE_FLAG_NONE,
-        D3D12_RESOURCE_STATE_GENERIC_READ, nv_helpers_dx12::kUploadHeapProps);
-    if (!m_sbtStorage) {
-        throw std::logic_error("Could not allocate the shader binding table");
-    }
-    // Compile the SBT from the shader and parameters info
-    m_sbtHelper.Generate(m_sbtStorage.Get(), state_object_properties.Get());
-
-    // NVIDIA END
-    #else
     void* ray_gen_shader_itentifier     = state_object_properties->GetShaderIdentifier(L"MyRaygenShader");
     void* hit_group_shader_itentifier   = state_object_properties->GetShaderIdentifier(L"MyHitGroup");
     void* miss_shader_itentifier        = state_object_properties->GetShaderIdentifier(L"MyMissShader");
@@ -1356,7 +1123,7 @@ void D_Renderer::build_shader_tables(Command_List* command_list, Shader* shader)
         buffer_desc.alignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
         shader->ray_gen_shader_table = resource_manager.create_buffer(L"Ray Gen Shader Table", buffer_desc);
 
-        sbt_upload_storage = command_list->load_buffer(shader->ray_gen_shader_table, (u8*)ray_gen_shader_itentifier, shader_record_size, 256);
+        command_list->load_buffer(shader->ray_gen_shader_table, (u8*)ray_gen_shader_itentifier, shader_record_size, 256);
 
     }
 
@@ -1394,7 +1161,6 @@ void D_Renderer::build_shader_tables(Command_List* command_list, Shader* shader)
 
         command_list->load_buffer(shader->hit_group_shader_table, (u8*)&hit_shader_record, shader_record_size, 256);
     }
-    #endif
 }
 
 void D_Renderer::render_shadow_map(Command_List* command_list){
@@ -1813,7 +1579,6 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
 
-    #ifndef NVIDIA
     D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
     dispatchDesc.HitGroupTable.StartAddress             = shaders.dxr_rayt_shader->hit_group_shader_table->d3d12_resource->GetGPUVirtualAddress();
     dispatchDesc.HitGroupTable.SizeInBytes              = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
@@ -1827,50 +1592,6 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     dispatchDesc.Height = config.display_height;
     dispatchDesc.Depth  = 1;
     command_list->d3d12_command_list->DispatchRays(&dispatchDesc);
-    #else
-
-        D3D12_DISPATCH_RAYS_DESC desc = {};
-    // The layout of the SBT is as follows: ray generation shader, miss
-    // shaders, hit groups. As described in the CreateShaderBindingTable method,
-    // all SBT entries of a given type have the same size to allow a fixed
-    // stride.
-
-    // The ray generation shaders are always at the beginning of the SBT.
-    uint32_t rayGenerationSectionSizeInBytes =
-        m_sbtHelper.GetRayGenSectionSize();
-    desc.RayGenerationShaderRecord.StartAddress =
-        m_sbtStorage->GetGPUVirtualAddress();
-    desc.RayGenerationShaderRecord.SizeInBytes =
-        rayGenerationSectionSizeInBytes;
-
-    // The miss shaders are in the second SBT section, right after the ray
-    // generation shader. We have one miss shader for the camera rays and one
-    // for the shadow rays, so this section has a size of 2*m_sbtEntrySize. We
-    // also indicate the stride between the two miss shaders, which is the size
-    // of a SBT entry
-    uint32_t missSectionSizeInBytes = m_sbtHelper.GetMissSectionSize();
-    desc.MissShaderTable.StartAddress =
-        m_sbtStorage->GetGPUVirtualAddress() + rayGenerationSectionSizeInBytes;
-    desc.MissShaderTable.SizeInBytes = missSectionSizeInBytes;
-    desc.MissShaderTable.StrideInBytes = m_sbtHelper.GetMissEntrySize();
-
-    // The hit groups section start after the miss shaders. In this sample we
-    // have one 1 hit group for the triangle
-    uint32_t hitGroupsSectionSize = m_sbtHelper.GetHitGroupSectionSize();
-    desc.HitGroupTable.StartAddress = m_sbtStorage->GetGPUVirtualAddress() +
-                                      rayGenerationSectionSizeInBytes +
-                                      missSectionSizeInBytes;
-    desc.HitGroupTable.SizeInBytes = hitGroupsSectionSize;
-    desc.HitGroupTable.StrideInBytes = m_sbtHelper.GetHitGroupEntrySize();
-
-    // Dimensions of the image to render, identical to a kernel launch dimension
-    desc.Width = config.render_width;
-    desc.Height = config.render_height;
-    desc.Depth = 1;
-
-    command_list->d3d12_command_list->DispatchRays(&desc);
-    #endif
-
 }
 
 void D_Renderer::render(){
