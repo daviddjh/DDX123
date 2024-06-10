@@ -9,8 +9,9 @@
 
 // TODO: Re-Evaluate
 //#include <string>
-#include <vector>
-#include <map>
+// #include <vector>
+// #include <map>
+#include <exception>
 #include <stdio.h>
 
 #define NOMINMAX
@@ -31,8 +32,8 @@
 #ifdef _DEBUG
 #define DEBUG_LOG(x)              d_std::os_debug_print(__FILE__ ":" stringerize(__LINE__) " - Log: " x "\n")
 #define DEBUG_ERROR(x)            d_std::os_debug_print(__FILE__ ":" stringerize(__LINE__) " - ERROR: " x "\n"); DEBUG_BREAK
-#define DEBUG_LOG_F(arena, ...)   d_std::os_debug_printf(arena, __FILE__ ":" stringerize(__LINE__) " - Log: " __VA_ARGS__)
-#define DEBUG_ERROR_F(arena, ...) d_std::os_debug_printf(arena, __FILE__ ":" stringerize(__LINE__) " - ERROR: " __VA_ARGS__); DEBUG_BREAK
+#define DEBUG_LOG_F(...)   d_std::os_debug_printf(__FILE__ ":" stringerize(__LINE__) " - Log: " __VA_ARGS__)
+#define DEBUG_ERROR_F(...) d_std::os_debug_printf(__FILE__ ":" stringerize(__LINE__) " - ERROR: " __VA_ARGS__); DEBUG_BREAK
 #else 
 #define DEBUG_LOG(x)
 #define DEBUG_ERROR(x)

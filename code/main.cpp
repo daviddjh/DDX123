@@ -12,7 +12,7 @@
 
 #include "d_core.cpp"
 #include "d_dx12.cpp"
-#include "model.cpp"
+#include "d_model.cpp"
 #include "shaders.cpp"
 #include "constant_buffers.h"
 
@@ -120,57 +120,33 @@ struct D_Renderer {
 
     Descriptor_Handle imgui_font_handle;
     RECT              window_rect;
-    Span<D_Model>     models;
+    D_Scene           scene;
     Per_Frame_Data    per_frame_data;
 
-    std::vector<Buffer*> blases;
-    Buffer* tlas;
-    Buffer* instance_buffer;
+    // d_array<Buffer*> blases;
+    // Buffer* tlas;
+    // Buffer* instance_buffer;
     
-    struct Geometry_Info {
-        u32               vertex_offset;
-        u32               index_byte_offset;
-        u32               material_id;
-        u32               material_flags;
-        // DirectX::XMMATRIX model_matrix;
-    };
+    // struct Geometry_Info {
+    //     u32               vertex_offset;
+    //     u32               index_byte_offset;
+    //     u32               material_id;
+    //     u32               material_flags;
+    //     // DirectX::XMMATRIX model_matrix;
+    // };
 
-    Span<Geometry_Info> geometry_info;
-    Buffer*   geometry_info_gpu;
+    // Span<Geometry_Info> geometry_info;
+    // Buffer*   geometry_info_gpu;
 
+    // struct AccelerationStructureBuffers {
+    //     Microsoft::WRL::ComPtr<ID3D12Resource> pScratch;      // Scratch memory for AS builder
+    //     Microsoft::WRL::ComPtr<ID3D12Resource> pResult;       // Where the AS is
+    //     Microsoft::WRL::ComPtr<ID3D12Resource> pInstanceDesc; // Hold the matrices of the instances
+    // };
 
+    // Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS; // Storage for the bottom Level AS
 
-    struct AccelerationStructureBuffers {
-        Microsoft::WRL::ComPtr<ID3D12Resource> pScratch;      // Scratch memory for AS builder
-        Microsoft::WRL::ComPtr<ID3D12Resource> pResult;       // Where the AS is
-        Microsoft::WRL::ComPtr<ID3D12Resource> pInstanceDesc; // Hold the matrices of the instances
-    };
-
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS; // Storage for the bottom Level AS
-
-    AccelerationStructureBuffers m_topLevelASBuffers;
-    std::vector<std::pair<Microsoft::WRL::ComPtr<ID3D12Resource>, DirectX::XMMATRIX>> m_instances;
-
-    /// Create the acceleration structure of an instance
-    ///
-    /// \param     vVertexBuffers : pair of buffer and vertex count
-    /// \return    AccelerationStructureBuffers for TLAS
-    AccelerationStructureBuffers CreateBottomLevelAS(
-        std::vector<std::tuple<Microsoft::WRL::ComPtr<ID3D12Resource>, Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t, uint32_t>> vVertexBuffers, Command_List* command_list);
-
-    /// Create the main acceleration structure that holds
-    /// all instances of the scene
-    /// \param     instances : pair of BLAS and transform
-    void CreateTopLevelAS(
-        const std::vector<std::pair<Microsoft::WRL::ComPtr<ID3D12Resource>, DirectX::XMMATRIX>>
-            &instances, Command_List* command_list);
-
-
-
-
-
-
-
+    // AccelerationStructureBuffers m_topLevelASBuffers;
 
     int  init();
     void render();
@@ -189,6 +165,8 @@ struct D_Renderer {
 
 D_Renderer renderer;
 Memory_Arena *per_frame_arena;
+Memory_Arena *per_scene_arena;
+Memory_Arena *lifetime_arena;
 bool application_is_initialized = false;
 
 #define MAX_TICK_SAMPLES 20
@@ -460,7 +438,7 @@ void D_Renderer::shutdown(){
     buffers.ssao_sample_kernel->d_dx12_release();
 
     // Release model resources
-    D_Model* model = &models.ptr[0];
+    D_Model* model = &scene.models.ptr[0];
 
     for(u64 i = 0; i < model->meshes.nitems; i++){
 
@@ -649,7 +627,7 @@ int D_Renderer::init(){
     upload_command_list->reset();
 
     // Create shader tables in memory for DXR shaders
-    build_shader_tables(upload_command_list, shaders.dxr_rayt_shader);
+    upload_command_list->build_shader_tables(shaders.dxr_rayt_shader);
 
     //////////////////////////
     //  Upload our GLTF Model
@@ -657,8 +635,8 @@ int D_Renderer::init(){
 
     // NOTE: DONT NEGLECT BACKSIDE CULLING (:
 
-    renderer.models.alloc(sizeof(D_Model), 1);
-    D_Model& test_model = renderer.models.ptr[0];
+    scene.models.make_array(per_scene_arena, 1);
+    D_Model& test_model = scene.models[0];
 
     load_gltf_model(test_model, "C:\\dev\\glTF-Sample-Models\\2.0\\Sponza\\glTF\\Sponza.gltf");
     upload_model_to_gpu(upload_command_list, test_model);
@@ -700,7 +678,7 @@ int D_Renderer::init(){
         ssao_sample_kernel_data[i].y *= scale;
         ssao_sample_kernel_data[i].z *= scale;
 
-        d_std::os_debug_printf(per_frame_arena, "ssao_sample kernel index: %u, x: %f, y: %f, z: %f\n", i, ssao_sample_kernel_data[i].x, ssao_sample_kernel_data[i].y, ssao_sample_kernel_data[i].z);
+        DEBUG_LOG_F("ssao_sample kernel index: %u, x: %f, y: %f, z: %f\n", i, ssao_sample_kernel_data[i].x, ssao_sample_kernel_data[i].y, ssao_sample_kernel_data[i].z);
 
     }
 
@@ -824,7 +802,7 @@ int D_Renderer::init(){
     // Compute the Acceleration Structure
     Command_List* command_list = direct_command_lists[current_backbuffer_index];
     command_list->reset();
-    calc_acceleration_structure(command_list);
+    command_list->calc_acceleration_structure(&scene);
     command_list->close();
     execute_command_list(command_list);
     flush_gpu();
@@ -845,322 +823,6 @@ int D_Renderer::init(){
 
     return 0;
 
-}
-
-/*
-    TLAS = Top Level Acceleration Structure
-    BLAS = Bottom Level Acceleration Structure
-    Number of Bottom level acceleration structures = Number of meshes
-    Number of Geometry Desc per BLAS = 1?
-    Instance Descriptions are used to describe the BLAS to the TLAS
-    - Can be useful to instance one BLAS with many transforms
-
-    TODO: fix the main model situation. Define a scene and have the ability to have multiple models
-*/
-
-void D_Renderer::calc_acceleration_structure(Command_List* command_list){
-
-    // Assuming there is one model!!! TODO: Fix this!
-    D_Model* main_model = &models.ptr[0];
-    //D_Mesh* current_mesh = &main_model->meshes.ptr[0];
-    
-    u32 num_blas = main_model->meshes.nitems;
-
-    // Prepare the BLAS create structs
-    std::vector<UINT64> blas_size(num_blas);
-    std::vector<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC> blas_descs(num_blas);
-    Span <D3D12_RAYTRACING_GEOMETRY_DESC> geometry_descs;  // This memory needs to be available when we create the AS
-    geometry_descs.alloc(1024);
-
-    ///////////////////////////////
-    // Query minimum size for AS
-    ///////////////////////////////
-
-    // Fake TLAS description. Used to query how much memory we need
-    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlas_prebuild_info;
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlas_inputs = {};
-
-    tlas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
-    tlas_inputs.NumDescs = num_blas;
-    tlas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-    tlas_inputs.pGeometryDescs = nullptr;
-    tlas_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-
-    // Query how much memory we need
-    d3d12_device->GetRaytracingAccelerationStructurePrebuildInfo(&tlas_inputs, &tlas_prebuild_info);
-    UINT64 scratch_buffer_size_needed = tlas_prebuild_info.ScratchDataSizeInBytes;
-
-    ////////////////////////////////////////////////////////////
-    // Create the BLASes
-    // - One per mesh. 
-    // - # of geometry desc = # of primitive_groups
-    ////////////////////////////////////////////////////////////
-
-    for(int i = 0; i < num_blas; i++ ){
-
-        D_Mesh* current_mesh = &main_model->meshes.ptr[i];
-        u16 num_geometry_desc = current_mesh->primitive_groups.nitems;
-        geometry_info.alloc(num_geometry_desc);
-
-        for(int j = 0; j < num_geometry_desc; j++){
-
-            D_Draw_Call* current_draw_call = &current_mesh->draw_calls.ptr[j];
-
-            // Create geometry descriptions for each primitive group
-
-            D3D12_RAYTRACING_GEOMETRY_DESC* desc = &geometry_descs.ptr[j];
-            desc->Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-            desc->Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-
-            // Define where the vertex + index buffers are + their offsets
-            D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC& triangles_desc = desc->Triangles;
-            triangles_desc.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-            triangles_desc.VertexCount = current_draw_call->vertex_count;
-            triangles_desc.VertexBuffer.StrideInBytes = current_mesh->vertex_buffer->vertex_buffer_view.StrideInBytes; // sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
-            triangles_desc.VertexBuffer.StartAddress = current_mesh->vertex_buffer->d3d12_resource->GetGPUVirtualAddress() + (current_draw_call->vertex_offset * current_mesh->vertex_buffer->vertex_buffer_view.StrideInBytes);
-            if(triangles_desc.VertexBuffer.StartAddress % 4 != 0){
-                DEBUG_BREAK;
-            }
-
-            // TODO: Compute prior. Goes for rasterization passes too..
-            DirectX::XMMATRIX model_matrix = DirectX::XMMatrixIdentity();
-            DirectX::XMMATRIX scale_matrix = DirectX::XMMatrixScaling(0.1, 0.1, 0.1);
-            model_matrix = DirectX::XMMatrixMultiply(scale_matrix, DirectX::XMMatrixIdentity());
-            DirectX::XMMATRIX translation_matrix = DirectX::XMMatrixTranslation(main_model->coords.x, main_model->coords.y, main_model->coords.z);
-            // geometry_info.ptr[j].model_matrix = DirectX::XMMatrixMultiply(translation_matrix, model_matrix);
-            geometry_info.ptr[j].vertex_offset = current_draw_call->vertex_offset;
-            geometry_info.ptr[j].index_byte_offset = current_draw_call->index_offset * sizeof(u16);
-            geometry_info.ptr[j].material_id    = current_draw_call->material_index;
-            geometry_info.ptr[j].material_flags = main_model->materials.ptr[current_draw_call->material_index].material_flags;
-
-            triangles_desc.IndexBuffer = current_mesh->index_buffer->d3d12_resource->GetGPUVirtualAddress() + current_draw_call->index_offset * sizeof(u16);
-            if(triangles_desc.IndexBuffer % sizeof(u16) != 0){
-                DEBUG_BREAK;
-            }
-            triangles_desc.IndexCount = current_draw_call->index_count;
-            triangles_desc.IndexFormat = DXGI_FORMAT_R16_UINT;
-            triangles_desc.Transform3x4 = 0;
-
-        }
-
-        Buffer_Desc geometry_info_gpu_desc;
-        geometry_info_gpu_desc.number_of_elements = geometry_info.nitems;
-        geometry_info_gpu_desc.size_of_each_element = sizeof(geometry_info.ptr[0]);
-        geometry_info_gpu_desc.usage = Buffer::USAGE_CONSTANT_BUFFER;
-        geometry_info_gpu = resource_manager.create_buffer(L"Geometry Vertex Offsets", geometry_info_gpu_desc);
-        command_list->load_buffer(geometry_info_gpu, (u8*)geometry_info.ptr, geometry_info.nitems * sizeof(geometry_info.ptr[0]), sizeof(geometry_info.ptr[0]));
-
-        // Fill BLAS create struct
-        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* blas_desc = &blas_descs[i];
-        blas_desc->Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
-        blas_desc->Inputs.NumDescs = num_geometry_desc;
-        blas_desc->Inputs.pGeometryDescs = geometry_descs.ptr;
-        blas_desc->Inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE; // Perfered for static geo: https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_raytracing_acceleration_structure_build_flags
-        blas_desc->Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-
-        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_prebuild_info;
-        d3d12_device->GetRaytracingAccelerationStructurePrebuildInfo(&blas_desc->Inputs, &blas_prebuild_info);
-
-        blas_size[i] = blas_prebuild_info.ResultDataMaxSizeInBytes;
-        // Here we'll make sure to increase the scratch buffer size, if we need it.
-        scratch_buffer_size_needed = d_max(blas_prebuild_info.ScratchDataSizeInBytes, scratch_buffer_size_needed);
-
-        if(current_mesh->vertex_buffer->state != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE){
-            command_list->transition_buffer(current_mesh->vertex_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        }
-
-        if(current_mesh->index_buffer->state != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE){
-            command_list->transition_buffer(current_mesh->index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        }
-
-    }
-
-    // How should we create a scratch buffer???
-    // Is a UAV buffer in state: D3D12_RESOURCE_STATE_COMMON
-    // scratchBuffer.Create(L"Acceleration Structure Scratch Buffer", static_cast<UINT>(scratch_buffer_size_needed), 1);
-    Buffer_Desc scratch_buffer_desc;
-    scratch_buffer_desc.number_of_elements = 1.;
-    scratch_buffer_desc.size_of_each_element = scratch_buffer_size_needed;
-    scratch_buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
-    scratch_buffer_desc.state = D3D12_RESOURCE_STATE_COMMON;
-    scratch_buffer_desc.create_cbv = false;
-    /*
-    - The scratch_buffer_size_needed looks way to big!!!
-    - Check if it's supposed to be that big. if not, fix it
-    - May need to rethink primitive groups / meshes?
-    */
-    Buffer* scratch_buffer = resource_manager.create_buffer(L"Scratch buffer for building acceleration structure", scratch_buffer_desc);
-
-    std::vector<D3D12_RAYTRACING_INSTANCE_DESC> instance_descs (num_blas);
-    blases.resize(num_blas);
-
-    for (UINT i = 0; i < blas_descs.size(); i++)
-    {
-
-        // Create the BLAS
-        Buffer_Desc blas_resource_desc;    
-        blas_resource_desc.number_of_elements   = 1.;
-        blas_resource_desc.size_of_each_element = blas_size[i];
-        blas_resource_desc.usage                = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
-        blas_resource_desc.state                = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
-        blas_resource_desc.flags                = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-        blas_resource_desc.create_cbv           = false;
-
-        // TODO: In the future, all these BLAS resources should be in the same "page", segmented out of the same placed resource or something
-        // Reference: https://developer.nvidia.com/blog/managing-memory-for-acceleration-structures-in-dxr/
-        blases[i] = resource_manager.create_buffer(L"BLAS Resource", blas_resource_desc);
-
-        blas_descs[i].DestAccelerationStructureData    = blases[i]->d3d12_resource->GetGPUVirtualAddress();
-        blas_descs[i].ScratchAccelerationStructureData = scratch_buffer->d3d12_resource->GetGPUVirtualAddress();
-        blas_descs[i].SourceAccelerationStructureData  = NULL;
-
-        D3D12_RAYTRACING_INSTANCE_DESC& instanceDesc = instance_descs[i];
-
-        // Identity matrix
-        ZeroMemory(instanceDesc.Transform, sizeof(instanceDesc.Transform));
-        instanceDesc.Transform[0][0] = 0.1f;
-        instanceDesc.Transform[1][1] = 0.1f;
-        instanceDesc.Transform[2][2] = 0.1f;
-        // instanceDesc.Transform[0][0] = 1.0f;
-        // instanceDesc.Transform[1][1] = 1.0f;
-        // instanceDesc.Transform[2][2] = 1.0f;
-
-        instanceDesc.AccelerationStructure = blases[i]->d3d12_resource->GetGPUVirtualAddress();
-        instanceDesc.Flags = 0;
-        instanceDesc.InstanceID = 0;
-        instanceDesc.InstanceMask = 1;
-        instanceDesc.InstanceContributionToHitGroupIndex = i;
-    }
-
-    // Can't use this because we need the GPUVirtualAddress... Just use the dynamic_buffer directly??
-    //
-    // CURRENTLY CAUSING GPU FAULT!!!!!!!!!!!!!!!!!!!!!
-    // 
-    // Descriptor_Handle instances_descs_handle = resource_manager.load_dyanamic_frame_data(instance_descs.data(), instance_descs.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC), 256);
-
-    Buffer_Desc instance_buffer_desc;
-    instance_buffer_desc.number_of_elements = instance_descs.size();
-    instance_buffer_desc.size_of_each_element = sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
-    instance_buffer_desc.usage = Buffer::USAGE_CONSTANT_BUFFER;
-    instance_buffer = resource_manager.create_buffer(L"Instance Buffer", instance_buffer_desc);
-    u32 instance_descs_allocation_size = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * instance_descs.size();
-    // Dynamic_Buffer::Allocation dynamic_instance_desc_allocation = dynamic_buffer.allocate(instance_descs_allocation_size, 256);
-    // memcpy(dynamic_instance_desc_allocation.cpu_addr, instance_descs.data(), instance_descs_allocation_size);
-
-    command_list->load_buffer(instance_buffer, (u8*)instance_descs.data(), instance_descs.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC), sizeof(D3D12_RAYTRACING_INSTANCE_DESC));
-
-    //////////////////////////
-    // Create TLAS
-    //////////////////////////
-
-    // Allocate Dest Memory
-    Buffer_Desc tlas_buffer_desc;
-    tlas_buffer_desc.number_of_elements   = 1.;
-    tlas_buffer_desc.size_of_each_element = tlas_prebuild_info.ResultDataMaxSizeInBytes;
-    tlas_buffer_desc.usage                = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
-    tlas_buffer_desc.state                = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
-    tlas_buffer_desc.flags                = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-    tlas_buffer_desc.create_cbv           = false;
-
-    tlas = resource_manager.create_buffer(L"TLAS Resource", tlas_buffer_desc);
-
-    // Specify where the instance data buffer is located.
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC tlas_desc;
-    tlas_inputs.InstanceDescs = instance_buffer->d3d12_resource->GetGPUVirtualAddress();
-    tlas_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-    tlas_desc.Inputs = tlas_inputs;
-    tlas_desc.DestAccelerationStructureData = tlas->d3d12_resource->GetGPUVirtualAddress();
-    tlas_desc.ScratchAccelerationStructureData = scratch_buffer->d3d12_resource->GetGPUVirtualAddress();
-    tlas_desc.SourceAccelerationStructureData = NULL;
-
-    // With all the necessary buffers set up and structures filled in,
-    // we can finally tell the GPU to build our acceleration structure
-
-    // Create the BLASes
-    for (UINT i = 0; i < blas_descs.size(); i++)
-    {
-        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC info;
-        info;
-        command_list->d3d12_command_list->BuildRaytracingAccelerationStructure(&blas_descs[i], 0, nullptr);
-    }
-
-    // NEED BARRIER BETWEEN TOP AND BOTTOM!!
-
-    command_list->d3d12_command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(blases[0]->d3d12_resource.Get()));
-    command_list->transition_buffer(instance_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-
-    // Create the TLAS
-    command_list->d3d12_command_list->BuildRaytracingAccelerationStructure(&tlas_desc, 0, nullptr);
-
-}
-
-void D_Renderer::build_shader_tables(Command_List* command_list, Shader* shader){
-
-    Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> state_object_properties;
-    ThrowIfFailed(shader->d3d12_rt_state_object.As(&state_object_properties));
-
-    void* ray_gen_shader_itentifier     = state_object_properties->GetShaderIdentifier(L"MyRaygenShader");
-    void* hit_group_shader_itentifier   = state_object_properties->GetShaderIdentifier(L"MyHitGroup");
-    void* miss_shader_itentifier        = state_object_properties->GetShaderIdentifier(L"MyMissShader");
-    u32 shader_ident_size               = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
-    u32 shader_record_size;
-
-    void* null_ptr = calloc(1, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-
-    // Ray gen Shader Table
-    {
-        shader_record_size = shader_ident_size;  // This will change if we add root constant buffers, then the size will increase to accound for them
-
-        Shader_Record ray_gen_shader_record;
-        memcpy(&ray_gen_shader_record.shader_id, ray_gen_shader_itentifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-
-        // Old
-        Buffer_Desc buffer_desc;
-        buffer_desc.create_cbv = false;
-        buffer_desc.number_of_elements = 1.;
-        buffer_desc.size_of_each_element = shader_record_size;
-        buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
-        buffer_desc.alignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
-        shader->ray_gen_shader_table = resource_manager.create_buffer(L"Ray Gen Shader Table", buffer_desc);
-
-        command_list->load_buffer(shader->ray_gen_shader_table, (u8*)ray_gen_shader_itentifier, shader_record_size, 256);
-
-    }
-
-    // Miss Shader Table
-    {
-        Shader_Record miss_shader_record;
-        memcpy(&miss_shader_record.shader_id, miss_shader_itentifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-        // memcpy(&miss_shader_record.shader_id, null_ptr, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-
-        shader_record_size = shader_ident_size;  // This will change if we add root constant buffers, then the size will increase to accound for them
-        Buffer_Desc buffer_desc;
-        buffer_desc.create_cbv = false;
-        buffer_desc.number_of_elements = 1.;
-        buffer_desc.size_of_each_element = shader_record_size;
-        buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
-        buffer_desc.alignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
-        shader->miss_shader_table = resource_manager.create_buffer(L"Miss Shader Table", buffer_desc);
-
-        command_list->load_buffer(shader->miss_shader_table, (u8*)&miss_shader_record, shader_record_size, 256);
-    }
-
-    // Hit Group Shader Table
-    {
-        Shader_Record hit_shader_record;
-        memcpy(&hit_shader_record.shader_id, hit_group_shader_itentifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-
-        shader_record_size = shader_ident_size;  // This will change if we add root constant buffers, then the size will increase to accound for them
-        Buffer_Desc buffer_desc;
-        buffer_desc.create_cbv = false;
-        buffer_desc.number_of_elements = 1.;
-        buffer_desc.size_of_each_element = shader_record_size;
-        buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
-        buffer_desc.alignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
-        shader->hit_group_shader_table = resource_manager.create_buffer(L"Hit Group Shader Table", buffer_desc);
-
-        command_list->load_buffer(shader->hit_group_shader_table, (u8*)&hit_shader_record, shader_record_size, 256);
-    }
 }
 
 void D_Renderer::render_shadow_map(Command_List* command_list){
@@ -1195,7 +857,7 @@ void D_Renderer::render_shadow_map(Command_List* command_list){
     Descriptor_Handle light_matrix_handle = resource_manager.load_dyanamic_frame_data((void*)&light_view_projection_matrix, sizeof(DirectX::XMMATRIX), 256);
     command_list->bind_handle(light_matrix_handle, binding_point_string_lookup("light_matrix"));
 
-    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+    bind_and_draw_model(command_list, &scene.models[0]);
     
     // Transition shadow ds to Pixel Resource State
     command_list->transition_texture(textures.shadow_ds, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -1226,7 +888,7 @@ void D_Renderer::forward_render_pass(Command_List* command_list){
     Descriptor_Handle per_frame_data_handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
     command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
 
-    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+    bind_and_draw_model(command_list, &scene.models.ptr[0]);
 }
 
 void D_Renderer::deferred_render_pass(Command_List* command_list){
@@ -1270,7 +932,7 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     // command_list->bind_constant_arguments(&view_projection_matrix, sizeof(DirectX::XMMATRIX) / 4, binding_point_string_lookup("view_projection_matrix"));
     // command_list->bind_constant_arguments(&camera.eye_position,    sizeof(DirectX::XMVECTOR),     binding_point_string_lookup("camera_position_buffer"));
 
-    bind_and_draw_model(command_list, &renderer.models.ptr[0]);
+    bind_and_draw_model(command_list, &scene.models.ptr[0]);
 
     ///////////////////////
     // Shading Pass
@@ -1501,15 +1163,18 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     Descriptor_Handle geo_vertex_offset_handle = resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
 
     {
-        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
-        srv_desc.Format = DXGI_FORMAT_UNKNOWN;
-        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srv_desc.Buffer.FirstElement = 0;
-        srv_desc.Buffer.NumElements  = geometry_info.nitems;
-        srv_desc.Buffer.StructureByteStride = sizeof(geometry_info.ptr[0]);
-        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-        d3d12_device->CreateShaderResourceView(geometry_info_gpu->d3d12_resource.Get(), &srv_desc, geo_vertex_offset_handle.cpu_descriptor_handle);
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
+            .Format                  = DXGI_FORMAT_UNKNOWN,
+            .ViewDimension           = D3D12_SRV_DIMENSION_BUFFER,
+            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+            .Buffer = {
+                .FirstElement        = 0,
+                .NumElements         = scene.acceleration_structure.geometry_info->number_of_elements,
+                .StructureByteStride = sizeof(Geometry_Info),
+                .Flags               = D3D12_BUFFER_SRV_FLAG_NONE,
+            }
+        };
+        d3d12_device->CreateShaderResourceView(scene.acceleration_structure.geometry_info->d3d12_resource.Get(), &srv_desc, geo_vertex_offset_handle.cpu_descriptor_handle);
     }
     command_list->bind_handle(geo_vertex_offset_handle, binding_point_string_lookup("geometry_info"));
 
@@ -1523,10 +1188,10 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
         srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
         srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srv_desc.Buffer.FirstElement = 0;
-        srv_desc.Buffer.NumElements  = models.ptr[0].meshes.ptr[0].vertex_buffer->number_of_elements;
+        srv_desc.Buffer.NumElements  = scene.models.ptr[0].meshes.ptr[0].vertex_buffer->number_of_elements;
         srv_desc.Buffer.StructureByteStride = sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
         srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-        d3d12_device->CreateShaderResourceView(models.ptr[0].meshes.ptr[0].vertex_buffer->d3d12_resource.Get(), &srv_desc, vertex_buffer_handle.cpu_descriptor_handle);
+        d3d12_device->CreateShaderResourceView(scene.models[0].meshes.ptr[0].vertex_buffer->d3d12_resource.Get(), &srv_desc, vertex_buffer_handle.cpu_descriptor_handle);
     }
     command_list->bind_handle(vertex_buffer_handle, binding_point_string_lookup("vertex_buffer"));
 
@@ -1538,17 +1203,17 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
         srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
         srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srv_desc.Buffer.FirstElement = 0;
-        srv_desc.Buffer.NumElements  = models.ptr[0].meshes.ptr[0].index_buffer->number_of_elements / 2; // / 2 because index is 16 bit, and buffer format is 32 bit
+        srv_desc.Buffer.NumElements  = scene.models[0].meshes.ptr[0].index_buffer->number_of_elements / 2; // / 2 because index is 16 bit, and buffer format is 32 bit
         srv_desc.Buffer.StructureByteStride = 0; //sizeof(u16);
         srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
-        d3d12_device->CreateShaderResourceView(models.ptr[0].meshes.ptr[0].index_buffer->d3d12_resource.Get(), &srv_desc, index_buffer_handle.cpu_descriptor_handle);
+        d3d12_device->CreateShaderResourceView(scene.models[0].meshes.ptr[0].index_buffer->d3d12_resource.Get(), &srv_desc, index_buffer_handle.cpu_descriptor_handle);
     }
     command_list->bind_handle(index_buffer_handle, binding_point_string_lookup("index_buffer"));
 
-    command_list->d3d12_command_list->SetComputeRootShaderResourceView(command_list->current_bound_shader->binding_points[binding_point_string_lookup("scene")].root_signature_index, tlas->d3d12_resource->GetGPUVirtualAddress());
+    command_list->d3d12_command_list->SetComputeRootShaderResourceView(command_list->current_bound_shader->binding_points[binding_point_string_lookup("scene")].root_signature_index, scene.acceleration_structure.tlas->d3d12_resource->GetGPUVirtualAddress());
 
     // Bind All Materials
-    D_Model* main_model = &models.ptr[0];
+    D_Model* main_model = &scene.models[0];
     u32 current_texture_table_index = 0;  // TODO: EEEEKKKKK shouldn't be here. Need a better way of doing this. Maybe we should bind textures like this for rasterization too?
     for(int i = 0; i < main_model->materials.nitems; i++){
         D_Material* material = &main_model->materials.ptr[i];
@@ -1579,18 +1244,25 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
 
-    D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
-    dispatchDesc.HitGroupTable.StartAddress             = shaders.dxr_rayt_shader->hit_group_shader_table->d3d12_resource->GetGPUVirtualAddress();
-    dispatchDesc.HitGroupTable.SizeInBytes              = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
-    dispatchDesc.HitGroupTable.StrideInBytes            = dispatchDesc.HitGroupTable.SizeInBytes;
-    dispatchDesc.MissShaderTable.StartAddress           = shaders.dxr_rayt_shader->miss_shader_table->d3d12_resource->GetGPUVirtualAddress();
-    dispatchDesc.MissShaderTable.SizeInBytes            = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
-    dispatchDesc.MissShaderTable.StrideInBytes          = dispatchDesc.MissShaderTable.SizeInBytes;
-    dispatchDesc.RayGenerationShaderRecord.StartAddress = shaders.dxr_rayt_shader->ray_gen_shader_table->d3d12_resource->GetGPUVirtualAddress();
-    dispatchDesc.RayGenerationShaderRecord.SizeInBytes  = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
-    dispatchDesc.Width  = config.render_width;
-    dispatchDesc.Height = config.display_height;
-    dispatchDesc.Depth  = 1;
+    D3D12_DISPATCH_RAYS_DESC dispatchDesc = {
+        .RayGenerationShaderRecord = {
+            .StartAddress = shaders.dxr_rayt_shader->ray_gen_shader_table->d3d12_resource->GetGPUVirtualAddress(),
+            .SizeInBytes  = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
+        },
+        .MissShaderTable = {
+            .StartAddress   = shaders.dxr_rayt_shader->miss_shader_table->d3d12_resource->GetGPUVirtualAddress(),
+            .SizeInBytes    = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
+            .StrideInBytes  = dispatchDesc.MissShaderTable.SizeInBytes,
+        },
+        .HitGroupTable = {
+            .StartAddress  = shaders.dxr_rayt_shader->hit_group_shader_table->d3d12_resource->GetGPUVirtualAddress(),
+            .SizeInBytes   = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
+            .StrideInBytes = dispatchDesc.HitGroupTable.SizeInBytes,
+        },
+        .Width  = config.render_width,
+        .Height = config.display_height,
+        .Depth  = 1,
+    };
     command_list->d3d12_command_list->DispatchRays(&dispatchDesc);
 }
 
@@ -1643,9 +1315,9 @@ void D_Renderer::render(){
     DirectX::XMMATRIX inv_view_matrix = DirectX::XMMatrixInverse(&view_matrix_deter, view_matrix);
     per_frame_data.view_matrix = view_matrix;
     
-    // ////////////////////////////////////
-    // /// Update Render To Display Scale
-    // ////////////////////////////////////
+    ////////////////////////////////////
+    /// Update Render To Display Scale
+    ////////////////////////////////////
 
     per_frame_data.render_to_display_scale = config.display_width / config.render_width;
 
@@ -1702,7 +1374,7 @@ void D_Renderer::render(){
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // Compute Shader!!
+    // Post Processing Compute Shader!!
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // command_list->set_shader(shaders.post_processing_shader);
     
@@ -1995,6 +1667,8 @@ WinMain(HINSTANCE hInstance,
 
     // Set up memory arenas
     per_frame_arena = d_std::make_arena(); 
+    per_scene_arena = d_std::make_arena(); 
+    lifetime_arena  = d_std::make_arena(); 
 
     // Renderer Scope
     {

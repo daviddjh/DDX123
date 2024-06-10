@@ -33,6 +33,7 @@ Shader* create_forward_render_pbr_shader()
     //  Input Layout
     /////////////////
 
+    shader_desc.input_layout.alloc(per_frame_arena, 10);
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "NORMAL")     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "COLOR")      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
@@ -72,6 +73,7 @@ Shader* create_deferred_render_gbuffer_shader()
     //  Input Layout
     /////////////////////
 
+    shader_desc.input_layout.alloc(per_frame_arena, 10);
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "NORMAL")     , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "COLOR")      , DXGI_FORMAT_R32G32B32_FLOAT, 0});
@@ -127,6 +129,7 @@ Shader* create_deferred_render_shading_shader()
     //  Input Layout
     /////////////////////
 
+    shader_desc.input_layout.alloc(per_frame_arena, 10);
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
 
     /////////////////////
@@ -176,6 +179,7 @@ Shader* create_shadow_mapping_shader()
     //  Input Layout
     /////////////////
 
+    shader_desc.input_layout.alloc(per_frame_arena, 10);
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "POSITION")   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "NORMAL"  )   , DXGI_FORMAT_R32G32B32_FLOAT, 0});
     shader_desc.input_layout.push_back({DSTR(per_frame_arena, "TANGENT" )   , DXGI_FORMAT_R32G32B32_FLOAT, 0});

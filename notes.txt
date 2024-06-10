@@ -1,3 +1,76 @@
+6/9/24
+
+Create APIs for:
+- BindCBV
+- BindSRV
+- BindUAV
+
+Each returns index in descriptor heap.
+The indicies are stored in data structure. Definition is shared by shader code and CPU code.
+DS is filled out then bound using a specific binding api: SetDescriptorIndecies(void*, size);
+
+Shader code creates definition for GetResource()
+
+5/30/24
+
+main.cpp cleanup todo:
+
+General resource binding cleanup
+
+    Ex: move:
+
+    Descriptor_Handle vertex_buffer_handle = resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
+        srv_desc.Format = DXGI_FORMAT_UNKNOWN;
+        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv_desc.Buffer.FirstElement = 0;
+        srv_desc.Buffer.NumElements  = models.ptr[0].meshes.ptr[0].vertex_buffer->number_of_elements;
+        srv_desc.Buffer.StructureByteStride = sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
+        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        d3d12_device->CreateShaderResourceView(models.ptr[0].meshes.ptr[0].vertex_buffer->d3d12_resource.Get(), &srv_desc, vertex_buffer_handle.cpu_descriptor_handle);
+    }
+    command_list->bind_handle(vertex_buffer_handle, binding_point_string_lookup("vertex_buffer"));
+
+    To:
+    command_list->bind_buffer(vertex_buffer_handle);
+    
+
+    or something
+
+    Clean up material binding for ray tracing. ( Currently binding into specific slots?? Probably because of geometry info buffer )
+
+    Move away from opengl style "sets"
+
+    ++++++++++++++++++++++++++++++++++++++++++++++++++++++++ DONE
+    Move "calc_acceleration_structure" to d_dx12
+        Inputs:
+        - model
+
+        Outputs:
+        - tlas_buffer
+        - instance_buffer
+        
+        Can contain /|\ into a RT_Acceleration_Structure struct
+        That can be used as a member of dispatch rays draw struct
+
+        Need to find a place for:
+        - Per model? tlas buffer
+        - Per model instance_buffer
+        - Per model blases buffer
+
+    Move "build_shader_tables" to d_dx12 - create shader
+        Inputs:
+        - Command List
+        - Shader
+
+        Outputs:
+        - ray_gen, miss, and hit shader tables. - to be added to shader struct
+    ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
 4/3/24
 
 Made a ray tracing pass with compute shader. Just displays a color.

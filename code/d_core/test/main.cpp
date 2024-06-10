@@ -48,7 +48,7 @@ unsigned long __stdcall main(){
         u8 weight;
     };
 
-    arena = d_std::make_arena_reserve(MB(512));
+    arena = d_std::make_arena(MB(512));
 
     Person* people = arena->allocate_array<Person>(100);
 
@@ -118,21 +118,31 @@ unsigned long __stdcall main(){
 
     d_std::os_debug_print(d_std::format_lit_string(arena, "My Numbers: %u, %u\n", 2, 1152));
 
-    d_std::os_debug_printf(arena, "My Other Numbers: %u, %u\n", 55, 100);
+    d_std::os_debug_printf("My Other Numbers: %u, %u\n", 55, 100);
     
     d_std::os_debug_printf(arena, "My float: %f\n", -100.200);
 
-    d_std::os_debug_printf(arena, "My second and third floats: %f, %f\n", -15.1, 1003.2);
+    d_std::os_debug_printf("My second and third floats: %f, %f\n", -15.1, 1003.2);
 
     d_std::os_debug_printf(arena, "My string: %s\n", "I'm Yours");
+    
+    d_std::os_debug_printf(arena, "My string other string: %s\n", "Not anymore lol");
 
     char best_playlist_ever[30] = "Backyard BBQ";
 
     d_std::os_debug_printf(arena, "2023 Summer I'm singing: %s\n", best_playlist_ever);
 
+    char other_best_playlist_ever[30] = "Party Cove";
+
+    d_std::os_debug_printf("2024 Summer I'm singing: %s\n", other_best_playlist_ever);
+
     d_std::d_string chicken_fried = d_std::string_from_lit_string(arena, "cold beer on a friday night");
 
     d_std::os_debug_printf(arena, "Chicken Fried: %$\n", chicken_fried);
+
+    chicken_fried = d_std::string_from_lit_string(arena, "pair of jeans that fit just right");
+
+    d_std::os_debug_printf("%$\n", chicken_fried);
 
     arena->reset();
 
@@ -156,13 +166,13 @@ unsigned long __stdcall main(){
 
     u32 hash;
 
-    hash = murmur3_32((const u8*)"Hello", 5);
+    hash = d_std::murmur3_32((const u8*)"Hello", 5);
     d_std::os_debug_printf(arena, "Hash of Hello: %u\n", hash);
 
-    hash = murmur3_32((const u8*)"GoodBye", 7);
+    hash = d_std::murmur3_32((const u8*)"GoodBye", 7);
     d_std::os_debug_printf(arena, "Hash of Goodbye: %u\n", hash);
 
-    hash = murmur3_32((const u8*)"Hello", 5);
+    hash = d_std::murmur3_32((const u8*)"Hello", 5);
     d_std::os_debug_printf(arena, "Hash of Hello: %u\n", hash);
 
     // Index past end of array

@@ -108,7 +108,7 @@ namespace d_std {
     };
 
     Memory_Arena* make_arena();
-    Memory_Arena* make_arena_reserve(u64 size);
+    Memory_Arena* make_arena(u64 reserve_size);
 
 }
 

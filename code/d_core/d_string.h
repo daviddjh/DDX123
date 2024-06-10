@@ -17,6 +17,7 @@ namespace d_std {
     d_string string_from_lit_string(Memory_Arena *arena, char* lit_string);
     d_string format_lit_string(Memory_Arena *arena, char* lit_string, ...);
     d_string _format_lit_string(Memory_Arena *arena, char* lit_string, u_ptr va_args);
+    void _format_lit_string(char* return_string, u16 return_string_max_size, char* lit_string, u_ptr va_args);
 
 }
 

@@ -15,11 +15,12 @@
 #endif // ifdef OS_WINDOWS
 #endif // ifdef PCOUNTER
 
-#ifndef PROFILED_SCOPE(ID)
-
-#define PROFILED_SCOPE(...)
-#define PROFILED_FUNCTION()
-
+#ifndef PROFILED_SCOPE
+    #define PROFILED_SCOPE(...)
 #endif // ifndef PROFILED_SCOPE
+
+#ifndef PROFILED_FUNCTION
+    #define PROFILED_FUNCTION()
+#endif // ifndef PROFILED_FUNCTION
 
 #endif // ifndef _D_PERF

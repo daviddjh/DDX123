@@ -1,4 +1,5 @@
 #include "d_dx12.h"
+#include "d_model.h"
 
 #include "WICTextureLoader.h"
 #include "DirectXTex.h"
@@ -1376,8 +1377,8 @@ namespace d_dx12 {
                     case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
 
                     {
-                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
-                        os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
+                        DEBUG_LOG_F("User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
+                        os_debug_printf(", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
 
                         //Shader::Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
                         D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
@@ -1466,8 +1467,9 @@ namespace d_dx12 {
 
             }
 
-            std::vector<D3D12_INPUT_ELEMENT_DESC> input_layout;
-            for(int i = 0; i < desc.input_layout.size(); i++){
+            d_stack<D3D12_INPUT_ELEMENT_DESC> input_layout;
+            input_layout.alloc(per_frame_arena, desc.input_layout.size);
+            for(int i = 0; i < desc.input_layout.size; i++){
 
                 D3D12_INPUT_ELEMENT_DESC input_element_desc;
                 input_element_desc.SemanticName         = desc.input_layout[i].name.c_str(d_dx12_arena);
@@ -1504,7 +1506,7 @@ namespace d_dx12 {
 
             // Describe PSO
             pipelineStateStream.pRootSignature        = shader->d3d12_root_signature.Get();
-            pipelineStateStream.InputLayout           = { input_layout.data(), (u16)input_layout.size() };
+            pipelineStateStream.InputLayout           = { input_layout.ptr, (u16)input_layout.size };
             pipelineStateStream.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
             pipelineStateStream.blend_desc            = alpha_blend_desc;
             pipelineStateStream.VS                    = CD3DX12_SHADER_BYTECODE(d3d12_vertex_shader_blob.Get());
@@ -1631,8 +1633,8 @@ namespace d_dx12 {
                     case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
 
                     {
-                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
-                        os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
+                        DEBUG_LOG_F("User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
+                        os_debug_printf(", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
 
                         //Shader::Binding_Point * shader_binding_point = &(shader->binding_points[binding_point_string_lookup(desc.parameter_list[j].name.c_str(per_frame_arena))]);
                         D3D12_DESCRIPTOR_RANGE1* descriptor_range = (D3D12_DESCRIPTOR_RANGE1*)calloc(NUM_DESCRIPTOR_RANGES_IN_TABLE, sizeof(D3D12_DESCRIPTOR_RANGE1));
@@ -1817,8 +1819,8 @@ namespace d_dx12 {
                     case(Shader::Input_Type::TYPE_UNORDERED_ACCESS_RESOURCE):
 
                     {
-                        DEBUG_LOG_F(d_dx12_arena, "User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
-                        os_debug_printf(d_dx12_arena, ", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
+                        DEBUG_LOG_F("User Parameter Name: %$, Type: Texture Read / Texture Write / Constant Buffer, Shader Register: %u", shader_binding_point->name, shader_binding_point->bind_point);
+                        os_debug_printf(", Shader Space: %u, Root Signature Index: %u\n\n", shader_binding_point->bind_space, num_root_paramters);
 
                         // Our RT acceleration structures need to use root SRVs
                         if(j == SCENE){
@@ -3054,6 +3056,7 @@ namespace d_dx12 {
 
     void Command_List::load_texture_from_file(Texture* texture, const wchar_t* filename){
 
+        #if 0
         if(texture->usage != Texture::USAGE::USAGE_SAMPLED){
             OutputDebugString("Error (load_texture_from_file): Invalid Texture Usage");
             return;
@@ -3137,6 +3140,7 @@ namespace d_dx12 {
             d3d12_device->CreateShaderResourceView(texture->d3d12_resource.Get(), &srv_desc, texture->offline_descriptor_handle.cpu_descriptor_handle);
 
         }
+        #endif
 
         return;
     }
@@ -3751,4 +3755,317 @@ namespace d_dx12 {
 
     }
 
+    ////////////////////////////
+    // DXR
+    ////////////////////////////
+
+    /*
+        TLAS = Top Level Acceleration Structure
+        BLAS = Bottom Level Acceleration Structure
+        Number of Bottom level acceleration structures = Number of meshes
+        Number of Geometry Desc per BLAS = 1?
+        Instance Descriptions are used to describe the BLAS to the TLAS
+        - Can be useful to instance one BLAS with many transforms
+
+        TODO: fix the main model situation. Define a scene and have the ability to have multiple models
+    */
+
+    void Command_List::calc_acceleration_structure(D_Scene* scene){
+
+        // Assuming there is one model!!! TODO: Fix this!
+        D_Model* main_model = &scene->models[0];
+        //D_Mesh* current_mesh = &main_model->meshes.ptr[0];
+        
+        u32 num_blas = main_model->meshes.nitems;
+
+        // Prepare the BLAS create structs
+        d_array<UINT64> blas_size;                                              blas_size.make_array(d_dx12_arena, num_blas);
+        d_array<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC> blas_descs; blas_descs.make_array(d_dx12_arena, num_blas);
+        d_array<D3D12_RAYTRACING_GEOMETRY_DESC> geometry_descs;                 geometry_descs.make_array(d_dx12_arena, 1024); // This memory needs to be available when we create the AS
+
+        ///////////////////////////////
+        // Query minimum size for AS
+        ///////////////////////////////
+
+        // Fake TLAS description. Used to query how much memory we need
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlas_prebuild_info;
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlas_inputs = {};
+
+        tlas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+        tlas_inputs.NumDescs = num_blas;
+        tlas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+        tlas_inputs.pGeometryDescs = nullptr;
+        tlas_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+
+        // Query how much memory we need
+        d3d12_device->GetRaytracingAccelerationStructurePrebuildInfo(&tlas_inputs, &tlas_prebuild_info);
+        UINT64 scratch_buffer_size_needed = tlas_prebuild_info.ScratchDataSizeInBytes;
+
+        ////////////////////////////////////////////////////////////
+        // Create the BLASes
+        // - One per mesh. 
+        // - # of geometry desc = # of primitive_groups
+        ////////////////////////////////////////////////////////////
+
+        d_array<Geometry_Info> geometry_info_cpu;
+
+        for(int i = 0; i < num_blas; i++ ){
+
+            D_Mesh* current_mesh = &main_model->meshes.ptr[i];
+            u16 num_geometry_desc = current_mesh->primitive_groups.nitems;
+            // geometry_info.alloc(num_geometry_desc);
+            geometry_info_cpu.make_array(d_dx12_arena, num_geometry_desc);
+
+            for(int j = 0; j < num_geometry_desc; j++){
+
+                D_Draw_Call* current_draw_call = &current_mesh->draw_calls.ptr[j];
+
+                // Create geometry descriptions for each primitive group
+
+                D3D12_RAYTRACING_GEOMETRY_DESC* desc = &geometry_descs[j];
+                desc->Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+                desc->Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+                // Define where the vertex + index buffers are + their offsets
+                D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC& triangles_desc = desc->Triangles;
+                triangles_desc.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+                triangles_desc.VertexCount = current_draw_call->vertex_count;
+                triangles_desc.VertexBuffer.StrideInBytes = current_mesh->vertex_buffer->vertex_buffer_view.StrideInBytes; // sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
+                triangles_desc.VertexBuffer.StartAddress = current_mesh->vertex_buffer->d3d12_resource->GetGPUVirtualAddress() + (current_draw_call->vertex_offset * current_mesh->vertex_buffer->vertex_buffer_view.StrideInBytes);
+                if(triangles_desc.VertexBuffer.StartAddress % 4 != 0){
+                    DEBUG_BREAK;
+                }
+
+                // TODO: Compute prior. Goes for rasterization passes too..
+                DirectX::XMMATRIX model_matrix = DirectX::XMMatrixIdentity();
+                DirectX::XMMATRIX scale_matrix = DirectX::XMMatrixScaling(0.1, 0.1, 0.1);
+                model_matrix = DirectX::XMMatrixMultiply(scale_matrix, DirectX::XMMatrixIdentity());
+                DirectX::XMMATRIX translation_matrix = DirectX::XMMatrixTranslation(main_model->coords.x, main_model->coords.y, main_model->coords.z);
+
+                // geometry_info.ptr[j].model_matrix = DirectX::XMMatrixMultiply(translation_matrix, model_matrix);
+                geometry_info_cpu[j].vertex_offset     = current_draw_call->vertex_offset;
+                geometry_info_cpu[j].index_byte_offset = current_draw_call->index_offset * sizeof(u16);
+                geometry_info_cpu[j].material_id       = current_draw_call->material_index;
+                geometry_info_cpu[j].material_flags    = main_model->materials.ptr[current_draw_call->material_index].material_flags;
+
+                triangles_desc.IndexBuffer = current_mesh->index_buffer->d3d12_resource->GetGPUVirtualAddress() + current_draw_call->index_offset * sizeof(u16);
+                if(triangles_desc.IndexBuffer % sizeof(u16) != 0){
+                    DEBUG_BREAK;
+                }
+                triangles_desc.IndexCount = current_draw_call->index_count;
+                triangles_desc.IndexFormat = DXGI_FORMAT_R16_UINT;
+                triangles_desc.Transform3x4 = 0;
+
+            }
+
+
+            // Load Geometry info onto GPU
+            Buffer_Desc geometry_info_gpu_desc;
+            geometry_info_gpu_desc.number_of_elements   = geometry_info_cpu.capacity;
+            geometry_info_gpu_desc.size_of_each_element = sizeof(geometry_info_cpu[0]);
+            geometry_info_gpu_desc.usage                = Buffer::USAGE_CONSTANT_BUFFER;
+
+            Buffer** geometry_info = &scene->acceleration_structure.geometry_info;
+            *geometry_info         = resource_manager->create_buffer(L"Geometry Vertex Offsets", geometry_info_gpu_desc);
+            load_buffer(*geometry_info, (u8*)geometry_info_cpu.ptr, geometry_info_cpu.capacity * sizeof(geometry_info_cpu.ptr[0]), sizeof(geometry_info_cpu.ptr[0]));
+
+
+            // Fill BLAS create struct
+            D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* blas_desc = &blas_descs[i];
+            blas_desc->Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+            blas_desc->Inputs.NumDescs = num_geometry_desc;
+            blas_desc->Inputs.pGeometryDescs = geometry_descs.ptr;
+            blas_desc->Inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE; // Perfered for static geo: https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_raytracing_acceleration_structure_build_flags
+            blas_desc->Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+
+            D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_prebuild_info;
+            d3d12_device->GetRaytracingAccelerationStructurePrebuildInfo(&blas_desc->Inputs, &blas_prebuild_info);
+
+            blas_size[i] = blas_prebuild_info.ResultDataMaxSizeInBytes;
+            // Here we'll make sure to increase the scratch buffer size, if we need it.
+            scratch_buffer_size_needed = d_max(blas_prebuild_info.ScratchDataSizeInBytes, scratch_buffer_size_needed);
+
+            if(current_mesh->vertex_buffer->state != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE){
+                transition_buffer(current_mesh->vertex_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            }
+
+            if(current_mesh->index_buffer->state != D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE){
+                transition_buffer(current_mesh->index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            }
+
+        }
+
+        // Create a scratch buffer
+        Buffer_Desc scratch_buffer_desc;
+        scratch_buffer_desc.number_of_elements = 1.;
+        scratch_buffer_desc.size_of_each_element = scratch_buffer_size_needed;
+        scratch_buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+        scratch_buffer_desc.state = D3D12_RESOURCE_STATE_COMMON;
+        scratch_buffer_desc.create_cbv = false;
+        Buffer* scratch_buffer = resource_manager->create_buffer(L"Scratch buffer for building acceleration structure", scratch_buffer_desc);
+
+
+        // Create the instance desc and BLAS buffers
+        d_array<D3D12_RAYTRACING_INSTANCE_DESC> instance_descs; instance_descs.make_array(d_dx12_arena, num_blas);
+        scene->acceleration_structure.blases.make_array(d_dx12_arena, num_blas);
+
+        for (UINT i = 0; i < blas_descs.capacity; i++)
+        {
+
+            // Create the BLAS
+            Buffer_Desc blas_resource_desc;    
+            blas_resource_desc.number_of_elements   = 1.;
+            blas_resource_desc.size_of_each_element = blas_size[i];
+            blas_resource_desc.usage                = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+            blas_resource_desc.state                = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+            blas_resource_desc.flags                = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+            blas_resource_desc.create_cbv           = false;
+
+            // TODO: In the future, all these BLAS resources should be in the same "page", segmented out of the same placed resource or something
+            // Reference: https://developer.nvidia.com/blog/managing-memory-for-acceleration-structures-in-dxr/
+            scene->acceleration_structure.blases[i] = resource_manager->create_buffer(L"BLAS Resource", blas_resource_desc);
+
+            blas_descs[i].DestAccelerationStructureData    = scene->acceleration_structure.blases[i]->d3d12_resource->GetGPUVirtualAddress();
+            blas_descs[i].ScratchAccelerationStructureData = scratch_buffer->d3d12_resource->GetGPUVirtualAddress();
+            blas_descs[i].SourceAccelerationStructureData  = NULL;
+
+            D3D12_RAYTRACING_INSTANCE_DESC& instanceDesc = instance_descs[i];
+
+            // Identity matrix
+            ZeroMemory(instanceDesc.Transform, sizeof(instanceDesc.Transform));
+            instanceDesc.Transform[0][0] = 0.1f;
+            instanceDesc.Transform[1][1] = 0.1f;
+            instanceDesc.Transform[2][2] = 0.1f;
+            // instanceDesc.Transform[0][0] = 1.0f;
+            // instanceDesc.Transform[1][1] = 1.0f;
+            // instanceDesc.Transform[2][2] = 1.0f;
+
+            instanceDesc.AccelerationStructure = scene->acceleration_structure.blases[i]->d3d12_resource->GetGPUVirtualAddress();
+            instanceDesc.Flags = 0;
+            instanceDesc.InstanceID = 0;
+            instanceDesc.InstanceMask = 1;
+            instanceDesc.InstanceContributionToHitGroupIndex = i;
+        }
+
+        // Load our instance buffer data to GPU
+        Buffer_Desc instance_buffer_desc;
+        instance_buffer_desc.number_of_elements = instance_descs.capacity;
+        instance_buffer_desc.size_of_each_element = sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
+        instance_buffer_desc.usage = Buffer::USAGE_CONSTANT_BUFFER;
+        scene->acceleration_structure.instance_buffer = resource_manager->create_buffer(L"Instance Buffer", instance_buffer_desc);
+        u32 instance_descs_allocation_size = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * instance_descs.capacity;
+        load_buffer(scene->acceleration_structure.instance_buffer, (u8*)instance_descs.ptr, instance_descs.capacity * sizeof(D3D12_RAYTRACING_INSTANCE_DESC), sizeof(D3D12_RAYTRACING_INSTANCE_DESC));
+
+        //////////////////////////
+        // Create TLAS
+        //////////////////////////
+
+        // Allocate Dest Memory
+        Buffer_Desc tlas_buffer_desc;
+        tlas_buffer_desc.number_of_elements   = 1.;
+        tlas_buffer_desc.size_of_each_element = tlas_prebuild_info.ResultDataMaxSizeInBytes;
+        tlas_buffer_desc.usage                = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+        tlas_buffer_desc.state                = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+        tlas_buffer_desc.flags                = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        tlas_buffer_desc.create_cbv           = false;
+
+        scene->acceleration_structure.tlas = resource_manager->create_buffer(L"TLAS Resource", tlas_buffer_desc);
+
+        // Specify where the instance data buffer is located.
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC tlas_desc;
+        tlas_inputs.InstanceDescs = scene->acceleration_structure.instance_buffer->d3d12_resource->GetGPUVirtualAddress();
+        tlas_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+        tlas_desc.Inputs = tlas_inputs;
+        tlas_desc.DestAccelerationStructureData = scene->acceleration_structure.tlas->d3d12_resource->GetGPUVirtualAddress();
+        tlas_desc.ScratchAccelerationStructureData = scratch_buffer->d3d12_resource->GetGPUVirtualAddress();
+        tlas_desc.SourceAccelerationStructureData = NULL;
+
+        // With all the necessary buffers set up and structures filled in,
+        // we can finally tell the GPU to build our acceleration structure
+
+        // Create the BLASes
+        for (UINT i = 0; i < blas_descs.capacity; i++)
+        {
+            D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC info;
+            info;
+            d3d12_command_list->BuildRaytracingAccelerationStructure(&blas_descs[i], 0, nullptr);
+        }
+
+        // NEED BARRIER BETWEEN TOP AND BOTTOM!!
+
+        d3d12_command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(scene->acceleration_structure.blases[0]->d3d12_resource.Get()));
+        transition_buffer(scene->acceleration_structure.instance_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        // Create the TLAS
+        d3d12_command_list->BuildRaytracingAccelerationStructure(&tlas_desc, 0, nullptr);
+
+    }
+
+    void Command_List::build_shader_tables(Shader* shader){
+
+        Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> state_object_properties;
+        ThrowIfFailed(shader->d3d12_rt_state_object.As(&state_object_properties));
+
+        // TODO: Update, cant have these static. need to use shader reflection
+        void* ray_gen_shader_itentifier     = state_object_properties->GetShaderIdentifier(L"MyRaygenShader");
+        void* hit_group_shader_itentifier   = state_object_properties->GetShaderIdentifier(L"MyHitGroup");
+        void* miss_shader_itentifier        = state_object_properties->GetShaderIdentifier(L"MyMissShader");
+        u32 shader_ident_size               = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+        u32 shader_record_size              = shader_ident_size;  // This will change if we add root constant buffers, then the size will increase to accound for them
+
+        // Ray gen Shader Table
+        {
+            shader_record_size = shader_ident_size;  // This will change if we add root constant buffers, then the size will increase to accound for them
+
+            Shader_Record ray_gen_shader_record;
+            memcpy(&ray_gen_shader_record.shader_id, ray_gen_shader_itentifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+            // Old
+            Buffer_Desc buffer_desc;
+            buffer_desc.create_cbv = false;
+            buffer_desc.number_of_elements = 1.;
+            buffer_desc.size_of_each_element = shader_record_size;
+            buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+            buffer_desc.alignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
+            shader->ray_gen_shader_table = resource_manager->create_buffer(L"Ray Gen Shader Table", buffer_desc);
+
+            load_buffer(shader->ray_gen_shader_table, (u8*)ray_gen_shader_itentifier, shader_record_size, 256);
+
+        }
+
+        // Miss Shader Table
+        {
+            Shader_Record miss_shader_record;
+            memcpy(&miss_shader_record.shader_id, miss_shader_itentifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+            Buffer_Desc buffer_desc;
+            buffer_desc.create_cbv = false;
+            buffer_desc.number_of_elements = 1.;
+            buffer_desc.size_of_each_element = shader_record_size;
+            buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+            buffer_desc.alignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
+            shader->miss_shader_table = resource_manager->create_buffer(L"Miss Shader Table", buffer_desc);
+
+            load_buffer(shader->miss_shader_table, (u8*)&miss_shader_record, shader_record_size, 256);
+        }
+
+        // Hit Group Shader Table
+        {
+            Shader_Record hit_shader_record;
+            memcpy(&hit_shader_record.shader_id, hit_group_shader_itentifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+            Buffer_Desc buffer_desc;
+            buffer_desc.create_cbv = false;
+            buffer_desc.number_of_elements = 1.;
+            buffer_desc.size_of_each_element = shader_record_size;
+            buffer_desc.usage = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+            buffer_desc.alignment = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT;
+            shader->hit_group_shader_table = resource_manager->create_buffer(L"Hit Group Shader Table", buffer_desc);
+
+            load_buffer(shader->hit_group_shader_table, (u8*)&hit_shader_record, shader_record_size, 256);
+        }
+    }
+
 }
+
+

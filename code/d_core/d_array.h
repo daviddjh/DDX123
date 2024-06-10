@@ -8,7 +8,7 @@ namespace d_std {
 
     template<typename T>
     struct d_array {
-        T* array     = 0;
+        T* ptr     = 0;
         //u64 size     = 0;
         u64 capacity = 0;
 
@@ -48,8 +48,8 @@ namespace d_std {
     template <typename T> 
     void d_array<T>::make_array(Memory_Arena *arena, u64 nitems){
 
-        this->array = arena->allocate_array<T>(nitems);
-        if(this->array){
+        this->ptr = arena->allocate_array<T>(nitems);
+        if(this->ptr){
             capacity = nitems;
             //size = 0;
             this->arena = arena;
@@ -66,7 +66,7 @@ namespace d_std {
     // Release memory of array back to arena.
     template <typename T> 
     void d_array<T>::release(){
-        this->arena->deallocate_array<T>(this->array);
+        this->arena->deallocate_array<T>(this->ptr);
         this->arena = 0;
         this->capacity = 0;
         //this->size = 0;
@@ -83,7 +83,7 @@ namespace d_std {
         }
         #endif
 
-        *(this->array + size) = item;
+        *(this->ptr + size) = item;
         size++;
         return;
     }
@@ -108,7 +108,7 @@ namespace d_std {
         }
         #endif
 
-        *(this->array + index) = item;
+        *(this->ptr + index) = item;
 
         return;
     }
@@ -123,7 +123,7 @@ namespace d_std {
         }
         #endif
 
-        return *(this->array + index);
+        return *(this->ptr + index);
     }
 
     // Uses [] operator to act like a std::vector, for non-const values, return a reference, so my_array[3] = 5 works
@@ -136,7 +136,7 @@ namespace d_std {
         }
         #endif
 
-        return *(array + index);
+        return *(ptr + index);
     }
 
     // Uses [] operator to act like a std::vector, for const values, return a value.
@@ -149,7 +149,7 @@ namespace d_std {
         }
         #endif
 
-        return *(array + index);
+        return *(ptr + index);
     }
 
 };

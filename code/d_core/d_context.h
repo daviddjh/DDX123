@@ -5,6 +5,19 @@
 *   Provides context macros to identify what compiler / os is being used
 */
 
+// Define debug... seems like its always one or the other
+#ifdef _DEBUG
+#ifndef DEBUG
+#define DEBUG
+#endif
+#endif
+
+#ifdef DEBUG
+#ifndef _DEBUG
+#define _DEBUG
+#endif
+#endif
+
 /////////////////
 // COMPILER
 /////////////////

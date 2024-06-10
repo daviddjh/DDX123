@@ -10,15 +10,15 @@
 
 #ifdef DEBUG
 #ifdef OS_WINDOWS
-#define DEBUG_BREAK if (IsDebuggerPresent()) __debugbreak()
+#define DEBUG_BREAK if (d_std::is_debugger_present()) __debugbreak()
 #endif
 
 #ifdef OS_LINUX
-#define DEBUG_BREAK if (IsDebuggerPresent() __raise(SIGTRAP))
+#define DEBUG_BREAK if (d_std::is_debugger_present()) __raise(SIGTRAP))
 #endif
 
 #ifdef OS_APPLE
-#define DEBUG_BREAK if (IsDebuggerPresent() asm {int 3} )
+#define DEBUG_BREAK if (d_std::is_debugger_present() asm {int 3} )
 #endif
 
 #else

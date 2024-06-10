@@ -15,16 +15,17 @@ namespace d_std {
         return key_4_bytes;
     }
 
-    u32 murmur3_32(const u8* key, u32 len, u32 seed = 0){
+    u32 murmur3_32(void* key, u32 len, u32 seed = 0){
         u32 h = seed;
         u32 k;
+        u8* key_u8 = (u8*)key;
 
-        // For each 4 bytes in key
+        // For each 4 bytes in key_u8
         for(size_t i = len >> 2; i != 0; i--){
             // Copy 4 bytes to k
-            memcpy(&k, key, sizeof(u32));
-            // Move key to next 4 bytes
-            key += sizeof(u32);
+            memcpy(&k, key_u8, sizeof(u32));
+            // Move key_u8 to next 4 bytes
+            key_u8 += sizeof(u32);
             h ^= murmur3_scramble_32(k);
             h = (h << 13) | (h >> 19);
             h = h * 5 + 0xe6546b64;
@@ -34,7 +35,7 @@ namespace d_std {
         k = 0;
         for(size_t i = len & 3; i != 0; i--){
             k <<= 8;
-            k |= key[i - 1];
+            k |= key_u8[i - 1];
         }
 
         h ^= murmur3_scramble_32(k);
@@ -60,7 +61,7 @@ namespace d_std {
 
     template<typename Value, u32 size>
     Value Static_String_Hash_Table<Value, size>::get_value(d_std::d_string key){
-        u32 value_index_32 = murmur3_32(key, key.size);
+        u32 value_index_32 = murmur3_32(key.string, key.size);
         u32 value_index = value_index_32 % this->value_array_size;
 
         ASSERT(value_index < size);
@@ -69,7 +70,7 @@ namespace d_std {
 
     template<typename Value, u32 size>
     void Static_String_Hash_Table<Value, size>::add_value(d_std::d_string key, Value value){
-        u32 value_index_32 = murmur3_32(key, key.size);
+        u32 value_index_32 = murmur3_32(key.string, key.size);
         u32 value_index = value_index_32 % this->value_array_size;
 
         ASSERT(value_index < size);

@@ -23,6 +23,9 @@ namespace d_std {
     void  os_debug_printf(char* lit_string, ...);
     void  os_debug_print (d_string);
 
+    // Debug
+    bool is_debugger_present();
+
 }
 
 #endif // _D_OS

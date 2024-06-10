@@ -2,6 +2,7 @@
 
 #include "../pch.h"
 #include "shaders.h"
+// #define D3DX12_NO_STATE_OBJECT_HELPERS
 #include "third_party/d3dx12.h"
 
 #define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
@@ -18,6 +19,7 @@ namespace d_dx12 {
     struct Shader;
     struct Shader_Desc;
     struct Upload_Buffer;
+    struct D_Scene;
 
     // Copied to GPU memory in a table { Shader Record 1}, {Shader Record 2}
     struct Shader_Record {
@@ -109,7 +111,7 @@ namespace d_dx12 {
 
         // List of input elements, not nesseceraly within the same stride, since each element
         // layout could be for a different vertex buffer slot
-        std::vector<Input_Element_Desc> input_layout; 
+        d_std::d_stack<Input_Element_Desc> input_layout; 
 
     };
 
@@ -233,8 +235,8 @@ namespace d_dx12 {
         Descriptor_Handle                         online_descriptor_handle;
         D3D12_RESOURCE_STATES                     state;
         USAGE                                     usage = USAGE_NONE;
-        u64                                       number_of_elements;
-        u64                                       size_of_each_element;
+        u32                                       number_of_elements;
+        u32                                       size_of_each_element;
         wchar_t*                                  name;
         u16                                       is_bound_index;
         u64                                       alignment;
@@ -261,6 +263,21 @@ namespace d_dx12 {
         bool create_cbv = true;
         u64 alignment = 0;
 
+    };
+
+    struct Geometry_Info {
+        u32               vertex_offset;
+        u32               index_byte_offset;
+        u32               material_id;
+        u32               material_flags;
+        // DirectX::XMMATRIX model_matrix;
+    };
+
+    struct Acceleration_Structure {
+        d_std::d_array<Buffer*> blases;
+        Buffer* tlas;
+        Buffer* instance_buffer;
+        Buffer* geometry_info;
     };
 
     struct Upload_Buffer {
@@ -337,6 +354,8 @@ namespace d_dx12 {
         void draw(u32 number_of_verticies);
         void dispatch(u32 threadgroup_count_x, u32 threadgroup_count_y, u32 threadgroup_count_z);
         void draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset);
+        void build_shader_tables(Shader* shader);
+        void calc_acceleration_structure(d_dx12::D_Scene* scene);
         void d_dx12_release();
 
     };
