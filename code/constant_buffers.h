@@ -82,6 +82,12 @@ ALIGN_STRUCT struct _Matrix
     matrix _matrix;
 };
 
+// Model Matrix
+ALIGN_STRUCT struct Post_Processing_Config
+{
+    uint ssao_enabled;
+};
+
 #ifdef __cplusplus
 #undef float2
 #undef float3

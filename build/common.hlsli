@@ -7,6 +7,7 @@
 #define PixelSpace  space2
 #define ComputeSpace  space2
 #define Tex2DSpace  space100
+#define Tex2DUAVSpace  space101
 
 #define MATERIAL_FLAG_NONE                     0x0
 #define MATERIAL_FLAG_NORMAL_TEXTURE           0x1
@@ -26,6 +27,8 @@ static const float PI = 3.14159265359;
 
 // Our texture sampler and texture table
 // TODO: More Samplers
-SamplerState                   sampler_1          : register(s0, CommonSpace);
-Texture2D                      texture_2d_table[] : register(t0, Tex2DSpace);
-ConstantBuffer<Per_Frame_Data> per_frame_data     : register(b0, CommonSpace);
+# define GET_RESOURCE(index) ResourceDescriptorHeap[index]
+SamplerState                   sampler_1              : register(s0, CommonSpace);
+Texture2D                      texture_2d_table[]     : register(t0, Tex2DSpace);
+RWTexture2D<float4>            texture_2d_uav_table[] : register(u0, Tex2DUAVSpace);
+ConstantBuffer<Per_Frame_Data> per_frame_data         : register(b10, CommonSpace);

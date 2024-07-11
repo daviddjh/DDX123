@@ -7,11 +7,12 @@
 
 // Output texture
 // RWTexture2D<float4> outputTexture : register(u0);
-RWTexture2D<float4> texture_2d_uav_table[] : register(u0, space99);
+// RWTexture2D<float4> texture_2d_uav_table[] : register(u0, space99);
 
-ConstantBuffer<Texture_Index> output_texture_index : register(b0, ComputeSpace);
-ConstantBuffer<Texture_Index> input_texture_index  : register(b1, ComputeSpace);
-ConstantBuffer<Texture_Index> ssao_texture_index   : register(b2, ComputeSpace);
+ConstantBuffer<Texture_Index> output_texture_index            : register(b0, ComputeSpace);
+ConstantBuffer<Texture_Index> input_texture_index             : register(b1, ComputeSpace);
+ConstantBuffer<Texture_Index> ssao_texture_index              : register(b2, ComputeSpace);
+ConstantBuffer<Post_Processing_Config> post_processing_config : register(b3, ComputeSpace);
 
 // The compute shader
 [numthreads(GROUP_SIZE_X, GROUP_SIZE_Y, 1)]
@@ -21,7 +22,10 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float3 color = texture_2d_table[input_texture_index.texture_index][DTid.xy].xyz;
 
     // Read ssao occlusion ammount
-    float ssao_occlusion = texture_2d_table[ssao_texture_index.texture_index][DTid.xy].x;
+    float ssao_occlusion = 0.5;
+    if(post_processing_config.ssao_enabled){
+        ssao_occlusion = texture_2d_table[ssao_texture_index.texture_index][DTid.xy].x;
+    }
     
     // Tone Map and Gamma Correct
     color *= ssao_occlusion;
@@ -31,8 +35,6 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     // ACES
     color = apply_aces_film_curve(color);
-    
-    // color = ssao_occlusion;
 
     // Gamma Correction - (Inverse Electrical Optical Transfer Function)
     color = apply_srgb_curve(color);  // - Gamma, for sRGB. REC709. SDR

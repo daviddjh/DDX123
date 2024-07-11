@@ -4,7 +4,7 @@
 #define GROUP_SIZE_X 8
 #define GROUP_SIZE_Y 8
 
-RWTexture2D<float4> texture_2d_uav_table[] : register(u0, space99);
+// RWTexture2D<float4> texture_2d_uav_table[] : register(u0, space99);
 
 ConstantBuffer<Texture_Index> output_texture_index  : register(b0, ComputeSpace);
 ConstantBuffer<Output_Dimensions> output_dimensions : register(b1, ComputeSpace);

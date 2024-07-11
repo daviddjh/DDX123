@@ -499,7 +499,7 @@ namespace d_dx12 {
                 // L"-E", L"main",              
 
                 // Target.
-                L"-T", L"lib_6_5",            
+                L"-T", L"lib_6_6",            
 
                 // Enable debug information (slim format)
                 L"-Zi",                      
@@ -1297,6 +1297,8 @@ namespace d_dx12 {
                 D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
                 D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
                 D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+                D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED |
+                D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED |
                 D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
 
@@ -1553,6 +1555,8 @@ namespace d_dx12 {
                 D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
                 D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
                 D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+                D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED |
+                D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED |
                 D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
 
@@ -1739,6 +1743,8 @@ namespace d_dx12 {
                 D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
                 D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
                 D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+                // D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED |
+                // D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED |
                 D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
 
@@ -1836,7 +1842,7 @@ namespace d_dx12 {
                         descriptor_range->BaseShaderRegister                = shader_binding_point->bind_point;
                         descriptor_range->RegisterSpace                     = shader_binding_point->bind_space;
                         descriptor_range->OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-                        descriptor_range->Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
+                        descriptor_range->Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_NONE; // D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE | D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
 
                         descriptor_range->NumDescriptors                    = shader_binding_point->bind_count;
                         // If the number of descriptors is 0, then we assume it's an unbound descriptor array
@@ -2637,6 +2643,11 @@ namespace d_dx12 {
         buffer->number_of_elements = desc.number_of_elements;
         buffer->size_of_each_element = desc.size_of_each_element;
         buffer->alignment = desc.alignment;
+        buffer->format = desc.format;
+        buffer->aligned_total_size = AlignPow2Up(buffer->alignment, 256);
+        memset(&buffer->cbv_descriptor_handle, 0, sizeof(Descriptor_Handle));
+        memset(&buffer->srv_descriptor_handle, 0, sizeof(Descriptor_Handle));
+        memset(&buffer->uav_descriptor_handle, 0, sizeof(Descriptor_Handle));
         u32 total_size = desc.number_of_elements * desc.size_of_each_element;
 
         // Reserve an index into the "is_bound_online" table - used to check if already in the online descriptor table
@@ -2703,12 +2714,12 @@ namespace d_dx12 {
                 // u16 alignment = 256;
                 // u32 remainder = total_size % alignment;
                 // u32 aligned_total_size = total_size + (alignment - remainder);
-                u32 aligned_total_size = AlignPow2Up(total_size, 256);
+                buffer->aligned_total_size = AlignPow2Up(total_size, 256);
 
                 // Create the resource in the buffer
                 D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
                 //D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(aligned_total_size);
-                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC( D3D12_RESOURCE_DIMENSION_BUFFER, 0, aligned_total_size,
+                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC( D3D12_RESOURCE_DIMENSION_BUFFER, 0, buffer->aligned_total_size,
                                                         1, 1, 1, DXGI_FORMAT_UNKNOWN, 1, 0, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, desc.flags);
 
                 d3d12_device->CreateCommittedResource(
@@ -2734,7 +2745,7 @@ namespace d_dx12 {
 
                     D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc;
                     cbv_desc.BufferLocation = buffer->d3d12_resource->GetGPUVirtualAddress();
-                    cbv_desc.SizeInBytes = aligned_total_size;
+                    cbv_desc.SizeInBytes = buffer->aligned_total_size;
 
                     d3d12_device->CreateConstantBufferView(&cbv_desc, buffer->offline_descriptor_handle.cpu_descriptor_handle);
 
@@ -2764,6 +2775,15 @@ namespace d_dx12 {
         d3d12_device->CreateConstantBufferView(&cbv_desc, handle.cpu_descriptor_handle);
 
         return handle;
+    }
+
+    Dynamic_Buffer::Allocation Resource_Manager::_load_dyanamic_frame_data(void* input_data_ptr, u64 size, u64 alignment){
+
+        // Allocate from dyanamic buffer and copy data over
+        Dynamic_Buffer::Allocation allocation = dynamic_buffer.allocate(size, alignment);
+        memcpy(allocation.cpu_addr, input_data_ptr, size);
+
+        return allocation;
     }
 
     void Resource_Manager::d_dx12_release(){
@@ -3224,6 +3244,107 @@ namespace d_dx12 {
 
     }
 
+    void Command_List::bind_constant_buffer(Buffer* buffer, u32 binding_point){
+
+        // Create offline buffer if we haven't created one yet
+        // adfasfd
+        if(buffer->cbv_descriptor_handle.cpu_descriptor_handle.ptr == 0){
+
+            buffer->cbv_descriptor_handle = resource_manager->offline_cbv_srv_uav_descriptor_heap.get_next_handle();
+
+            D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc;
+            cbv_desc.BufferLocation = buffer->d3d12_resource->GetGPUVirtualAddress();
+            cbv_desc.SizeInBytes    = AlignPow2Up(buffer->aligned_total_size, 256);
+
+            d3d12_device->CreateConstantBufferView(&cbv_desc, buffer->cbv_descriptor_handle.cpu_descriptor_handle);
+
+        }
+
+        // Get an online handle
+        Descriptor_Handle online_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+        // Bind the offline cbv
+        d3d12_device->CopyDescriptorsSimple(1, online_handle.cpu_descriptor_handle, buffer->cbv_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        // Bind to root sig
+        bind_handle(online_handle, binding_point);
+    }
+
+    void Command_List::bind_buffer_read(Buffer* buffer, u32 binding_point, D3D12_SHADER_RESOURCE_VIEW_DESC* srv_desc){
+
+        // Create offline buffer if we haven't created one yet
+        if(buffer->srv_descriptor_handle.cpu_descriptor_handle.ptr == 0){
+
+            buffer->srv_descriptor_handle = resource_manager->offline_cbv_srv_uav_descriptor_heap.get_next_handle();
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC final_srv_desc;
+
+            if(srv_desc == NULL){
+
+                final_srv_desc = {
+                    .Format = buffer->format,
+                    .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+                    .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                    .Buffer = {
+                        .FirstElement = 0,
+                        .NumElements  = buffer->number_of_elements,
+                        .StructureByteStride = buffer->size_of_each_element,
+                        .Flags = D3D12_BUFFER_SRV_FLAG_NONE,
+                    }
+                };
+
+            } else {
+
+               final_srv_desc = *srv_desc; 
+
+            }
+
+            d3d12_device->CreateShaderResourceView(buffer->d3d12_resource.Get(), &final_srv_desc, buffer->srv_descriptor_handle.cpu_descriptor_handle);
+        }
+
+        // Get an online handle
+        Descriptor_Handle online_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+        // Bind the offline srv
+        d3d12_device->CopyDescriptorsSimple(1, online_handle.cpu_descriptor_handle, buffer->srv_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        // Bind to root sig
+        bind_handle(online_handle, binding_point);
+
+    }
+
+    void Command_List::bind_buffer_write(Buffer* buffer, u32 binding_point){
+
+        // Create offline buffer if we haven't created one yet
+        if(buffer->uav_descriptor_handle.cpu_descriptor_handle.ptr == 0){
+
+            buffer->uav_descriptor_handle = resource_manager->offline_cbv_srv_uav_descriptor_heap.get_next_handle();
+
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {
+                .Format = buffer->format,
+                .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                .Buffer = {
+                    .FirstElement = 0,
+                    .NumElements  = buffer->number_of_elements,
+                    .StructureByteStride = buffer->size_of_each_element,
+                    .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
+                }
+
+            };
+
+            d3d12_device->CreateUnorderedAccessView(buffer->d3d12_resource.Get(), NULL, &uav_desc, buffer->uav_descriptor_handle.cpu_descriptor_handle);
+        }
+
+        // Get an online handle
+        Descriptor_Handle online_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+        // Bind the offline srv
+        d3d12_device->CopyDescriptorsSimple(1, online_handle.cpu_descriptor_handle, buffer->uav_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        // Bind to root sig
+        bind_handle(online_handle, binding_point);
+    }
+
     void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32 binding_point_index, bool write){
 
         if(buffer->usage == Buffer::USAGE::USAGE_CONSTANT_BUFFER){
@@ -3577,6 +3698,32 @@ namespace d_dx12 {
         d3d12_command_list->Dispatch(threadgroup_count_x, threadgroup_count_y, threadgroup_count_z); 
     }
 
+    void inline Command_List::dispatch_rays(u32 width, u32 height){
+
+        ASSERT_LOG(current_bound_shader->type != Shader::TYPE_RAY_TRACE, "Can only call dispatch rays on a DXR shader!");
+
+        D3D12_DISPATCH_RAYS_DESC dispatchDesc = {
+            .RayGenerationShaderRecord = {
+                .StartAddress = current_bound_shader->ray_gen_shader_table->d3d12_resource->GetGPUVirtualAddress(),
+                .SizeInBytes  = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
+            },
+            .MissShaderTable = {
+                .StartAddress   = current_bound_shader->miss_shader_table->d3d12_resource->GetGPUVirtualAddress(),
+                .SizeInBytes    = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
+                .StrideInBytes  = dispatchDesc.MissShaderTable.SizeInBytes,
+            },
+            .HitGroupTable = {
+                .StartAddress  = current_bound_shader->hit_group_shader_table->d3d12_resource->GetGPUVirtualAddress(),
+                .SizeInBytes   = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
+                .StrideInBytes = dispatchDesc.HitGroupTable.SizeInBytes,
+            },
+            .Width  = width,
+            .Height = height,
+            .Depth  = 1,
+        };
+        d3d12_command_list->DispatchRays(&dispatchDesc);
+    }
+
     void present(bool using_v_sync){
 
         UINT sync_interval = using_v_sync ? 1 : 0;
@@ -3864,6 +4011,7 @@ namespace d_dx12 {
             geometry_info_gpu_desc.number_of_elements   = geometry_info_cpu.capacity;
             geometry_info_gpu_desc.size_of_each_element = sizeof(geometry_info_cpu[0]);
             geometry_info_gpu_desc.usage                = Buffer::USAGE_CONSTANT_BUFFER;
+            geometry_info_gpu_desc.format               = DXGI_FORMAT_UNKNOWN;
 
             Buffer** geometry_info = &scene->acceleration_structure.geometry_info;
             *geometry_info         = resource_manager->create_buffer(L"Geometry Vertex Offsets", geometry_info_gpu_desc);

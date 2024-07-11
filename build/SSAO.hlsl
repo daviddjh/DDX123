@@ -9,8 +9,6 @@ static const float SSAO_RADIUS = 3.5;
 static const float SSAO_BIAS = 0.25;
 
 // Output texture
-// RWTexture2D<float4> outputTexture : register(u0);
-RWTexture2D<float4>               texture_2d_uav_table[] : register(u0, space99);
 ConstantBuffer<SSAO_Sample>       ssao_sample            : register(b1, ComputeSpace);
 ConstantBuffer<Texture_Index>     ssao_texture_index     : register(b2, ComputeSpace);
 ConstantBuffer<Output_Dimensions> output_dimensions      : register(b3, ComputeSpace);

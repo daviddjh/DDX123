@@ -1,11 +1,12 @@
+#define PFD
 #include "common.hlsli"
 #include "color_space.hlsli"
 
 RaytracingAccelerationStructure scene : register(t0, space0);
-RWTexture2D<float4> texture_2d_uav_table[] : register(u0, space99);
 
 ConstantBuffer<Texture_Index> output_texture_index  : register(b0, ComputeSpace);
 ConstantBuffer<Output_Dimensions> output_dimensions : register(b1, ComputeSpace);
+ConstantBuffer<Texture_Index>   texture_array_begin : register(b2, ComputeSpace);
 
 
 struct Vertex_Position_Normal_Tangent_Color_Texturecoord
@@ -94,64 +95,23 @@ RayDesc create_camera_ray(uint2 pixel_xy){
 [shader("raygeneration")]
 void MyRaygenShader()
 {
-    // float3 camera_center = float3(.0f,.0f,.0f);
-    // float viewport_height = 2.0;
-    // float viewport_width  = viewport_height * ((float)output_dimensions.width / (float)output_dimensions.height) ;
-    // float3 viewport_u = float3(viewport_width, 0, 0);
-    // float3 viewport_v = float3(0, -viewport_height, 0);
-    // float3 pixel_delta_u = viewport_u / output_dimensions.width;
-    // float3 pixel_delta_v = viewport_v / output_dimensions.height;
 
-    // float3 viewport_upper_left = camera_center - float3(0, 0, focal_length) - (viewport_u / 2) - (viewport_v / 2);
-    // float3 pixel00_loc = viewport_upper_left + 0.5*(pixel_delta_u + pixel_delta_v);
-
-    // uint2  xy_uint = uint2(DispatchRaysIndex().xy);
-    // float2 xy   = float2(xy_uint);
-
-    // float3 pixel_center = pixel00_loc + (xy.x * pixel_delta_u) + (xy.y * pixel_delta_v);
-    // float3 ray_direction = normalize(pixel_center - camera_center);
-    // ray_direction = mul(float4(ray_direction, 1.), per_frame_data.view_matrix);
-    // // ray_direction = mul(per_frame_data.view_matrix, float4(ray_direction, 1.));
-    // // ray_direction.z = ray_direction.z;
-
-    // // Trace the ray.
-    // RayDesc ray;
-    // ray.Origin = per_frame_data.camera_pos.xyz;
-    // ray.Direction = ray_direction;
-    // // Set the ray's extents.
-    // // Set TMin to a non-zero small value to avoid aliasing issues due to floating - point errors.
-    // // TMin should be kept small to prevent missing geometry at close contact areas.
-    // ray.TMin = 0.0;
-    // ray.TMax = 100000.0;
+    // Get Screen Pixel
     uint2 pixel_xy = DispatchRaysIndex().xy;
+    
+    // Create Ray from camera
     RayDesc ray = create_camera_ray(pixel_xy);
+
+    // Beginning ray payload ( starting color )
     RayPayload payload = { float4(0.8, 0.4, 0.6, 0) };
-    // RayPayload payload;
-    // payload.color = float4(0, 0, 0, 0);
 
-    // // Get the location within the dispatched 2D grid of work items
-    // // (often maps to pixels, so this could represent a pixel coordinate).
-    // uint2 launchIndex = DispatchRaysIndex().xy;
-    // float2 dims = float2(DispatchRaysDimensions().xy);
-    // float2 d = (((launchIndex.xy + 0.5f) / dims.xy) * 2.f - 1.f );
-    // // Define a ray, consisting of origin, direction, and the min-max distance
-    // // values
-    // RayDesc ray;
-    // ray.Origin = float3(d.x, -d.y, 10);
-    // ray.Direction = float3(0, 0, -1);
-    // ray.TMin = 0;
-    // ray.TMax = 10000;
-    // scene;
+    // Trace the bound scene with ray created above
     TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
-
-    // payload.color *= 0.01;
-    // payload.color += float4(0.8, 0.0, 0.0, 1.0);
 
     // Write the raytraced color to the output texture.
     float3 output_color = payload.color.rgb;
-    // output_color = apply_reinhert(output_color);
-    // output_color = apply_srgb_curve(output_color);
     texture_2d_uav_table[output_texture_index.texture_index][pixel_xy]= float4(output_color, 1);
+
     return;
 }
 
@@ -159,15 +119,6 @@ void MyRaygenShader()
 void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttributes attr)
 {
     float3 barycentrics = float3(1.f - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
-    // float T = RayTCurrent() / 100.;
-    // float g = 0.4;
-    // float b = 0.5;
-    // float GI = GeometryIndex();
-    // float PI = PrimitiveIndex();
-    // float r = 0;//GI / 200;
-    // float g = PI / 10000;
-    // float b = 0;
-    // payload.color = normalize(float4(T, g, b, 1));
 
     uint geometry_index = GeometryIndex();
     Geometry_Info g_info = geometry_info[geometry_index];
@@ -199,18 +150,18 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
 
     float2 uv_hit  = barycentrics.x * vertex1.texCoord + barycentrics.y * vertex2.texCoord + barycentrics.z * vertex3.texCoord;
     float3 p_hit   = barycentrics.x * vertex1.position + barycentrics.y * vertex2.position + barycentrics.z * vertex3.position;
-    // p_hit *= .1f;
     float3 n_hit   = barycentrics.x * vertex1.normal   + barycentrics.y * vertex2.normal   + barycentrics.z * vertex3.normal;
     n_hit = normalize(n_hit);
 
-    Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(g_info.material_id * 3)];
-    Texture2D normal_texture = texture_2d_table[NonUniformResourceIndex(g_info.material_id * 3 + 1)];
-    Texture2D roughness_metallic_texture = texture_2d_table[NonUniformResourceIndex(g_info.material_id * 3 + 2)];
+    Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + g_info.material_id * 3)];
+    Texture2D normal_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + g_info.material_id * 3 + 1)];
+    Texture2D roughness_metallic_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + g_info.material_id * 3 + 2)];
 
+    /////////////////////////////////////////////
     //
     // Ray Differentials
     //
-
+    /////////////////////////////////////////////
 
     // Estimate partial derivitive of world space position w/r/t u and v texture coords
     // https://www.pbr-book.org/4ed/Shapes/Triangle_Meshes#RayndashTriangleIntersection
@@ -277,10 +228,6 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
     float2 ddx = float2(dudx, dvdx);
     float2 ddy = float2(dudy, dvdy);
 
-    // float2 ddx = float2(dudx, dudy);
-    // float2 ddy = float2(dvdx, dvdy);
- 
-    // float4 albedo_sample = albedo_texture.SampleLevel(sampler_1, uv_hit, 0);
     float4 albedo_sample = albedo_texture.SampleGrad(sampler_1, uv_hit, ddx, ddy);
 
     payload.color = albedo_sample;

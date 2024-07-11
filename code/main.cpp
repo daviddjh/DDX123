@@ -255,7 +255,8 @@ void D_Renderer::upload_model_to_gpu(Command_List* command_list, D_Model& test_m
         Buffer_Desc vertex_buffer_desc = {};
         vertex_buffer_desc.number_of_elements = verticies_buffer.nitems;
         vertex_buffer_desc.size_of_each_element = sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
-        vertex_buffer_desc.usage = Buffer::USAGE::USAGE_VERTEX_BUFFER;
+        vertex_buffer_desc.usage  = Buffer::USAGE::USAGE_VERTEX_BUFFER;
+        vertex_buffer_desc.format = DXGI_FORMAT_UNKNOWN;
         // vertex_buffer_desc.alignment = 4;
 
         mesh->vertex_buffer = resource_manager.create_buffer(L"Vertex Buffer", vertex_buffer_desc);
@@ -1065,6 +1066,7 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
     // Post Processing
     //////////////////////////////////////////////////////////
     {
+
         command_list->set_shader(shaders.post_processing_shader);
 
         command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
@@ -1080,6 +1082,13 @@ void D_Renderer::deferred_render_pass(Command_List* command_list){
 
         Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
         command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+        Post_Processing_Config post_processing_config {
+            .ssao_enabled = true
+        };
+
+        Descriptor_Handle post_processing_config_handle = resource_manager.load_dyanamic_frame_data((void*)&post_processing_config, sizeof(Post_Processing_Config), 256);
+        command_list->bind_handle(post_processing_config_handle, binding_point_string_lookup("post_processing_config"));
 
         Texture_Index ssao_texture_index = {};
         ssao_texture_index.texture_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("ssao_texture"), true);
@@ -1135,90 +1144,64 @@ void D_Renderer::compute_rayt_pass(Command_List* command_list){
 
 void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
 
-    //////////////////////////////////////
+    ///////////////////////////////////////////
     // DXR Ray Tracing!
-    //////////////////////////////////////
+    ///////////////////////////////////////////
+
+    // Porting code from backend for debug...
+
 
     command_list->set_shader(shaders.dxr_rayt_shader);
-
-    // build_shader_tables(shaders.dxr_rayt_shader);  // Should be done before rendering. only reason it's here is because it's using dyanmic memory to store tables
 
     Descriptor_Handle per_frame_data_handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
     command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
     
-    // Texture_Index input_texture_index = {};
-    // input_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("input_texture"), true);
-
-    // Descriptor_Handle input_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&input_texture_index, sizeof(Texture_Index), 256);
-    // command_list->bind_handle(input_texture_index_handle, binding_point_string_lookup("input_texture_index"));
-
-    Output_Dimensions output_dimensions = {config.display_width, config.display_height};
-    Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+    Output_Dimensions output_dimensions         = {config.display_width, config.display_height};
+    Descriptor_Handle output_dimensions_handle  = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
     command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
 
     // Cant use Constant buffer for geometry vertex offsets because we don't know how many we have.
     // Constant buffers need to be "Constant". Cant have variable size or anyting. I think the shader/compiler needs to know the size
     // at compile time.
-    // command_list->bind_buffer(geometry_info_gpu, &resource_manager, binding_point_string_lookup("geometry_info"));
-    Descriptor_Handle geo_vertex_offset_handle = resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+    command_list->bind_buffer_read(scene.acceleration_structure.geometry_info, binding_point_string_lookup("geometry_info"));
 
-    {
-        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
-            .Format                  = DXGI_FORMAT_UNKNOWN,
-            .ViewDimension           = D3D12_SRV_DIMENSION_BUFFER,
-            .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-            .Buffer = {
-                .FirstElement        = 0,
-                .NumElements         = scene.acceleration_structure.geometry_info->number_of_elements,
-                .StructureByteStride = sizeof(Geometry_Info),
-                .Flags               = D3D12_BUFFER_SRV_FLAG_NONE,
-            }
-        };
-        d3d12_device->CreateShaderResourceView(scene.acceleration_structure.geometry_info->d3d12_resource.Get(), &srv_desc, geo_vertex_offset_handle.cpu_descriptor_handle);
-    }
-    command_list->bind_handle(geo_vertex_offset_handle, binding_point_string_lookup("geometry_info"));
+    command_list->bind_buffer_read(scene.models[0].meshes.ptr[0].vertex_buffer, binding_point_string_lookup("vertex_buffer"));
 
-    // Aquire a handle from the online descriptor heap
-    // command_list->bind_buffer(models.ptr[0].meshes.ptr[0].vertex_buffer, &resource_manager, binding_point_string_lookup("vertex_buffer"));
-    Descriptor_Handle vertex_buffer_handle = resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+    D3D12_SHADER_RESOURCE_VIEW_DESC d3d12_index_buffer_srv = {
+        .Format = DXGI_FORMAT_R32_TYPELESS,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {
+            .FirstElement = 0,
+            .NumElements = scene.models[0].meshes.ptr[0].index_buffer->number_of_elements / 2, // 2 because index is 16 bit, and buffer format is 32 bit
+            .StructureByteStride = 0,
+            .Flags = D3D12_BUFFER_SRV_FLAG_RAW
+        }
+    };
 
-    {
-        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
-        srv_desc.Format = DXGI_FORMAT_UNKNOWN;
-        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srv_desc.Buffer.FirstElement = 0;
-        srv_desc.Buffer.NumElements  = scene.models.ptr[0].meshes.ptr[0].vertex_buffer->number_of_elements;
-        srv_desc.Buffer.StructureByteStride = sizeof(Vertex_Position_Normal_Tangent_Color_Texturecoord);
-        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-        d3d12_device->CreateShaderResourceView(scene.models[0].meshes.ptr[0].vertex_buffer->d3d12_resource.Get(), &srv_desc, vertex_buffer_handle.cpu_descriptor_handle);
-    }
-    command_list->bind_handle(vertex_buffer_handle, binding_point_string_lookup("vertex_buffer"));
-
-    Descriptor_Handle index_buffer_handle = resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
-
-    {
-        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {0};
-        srv_desc.Format = DXGI_FORMAT_R32_TYPELESS;
-        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srv_desc.Buffer.FirstElement = 0;
-        srv_desc.Buffer.NumElements  = scene.models[0].meshes.ptr[0].index_buffer->number_of_elements / 2; // / 2 because index is 16 bit, and buffer format is 32 bit
-        srv_desc.Buffer.StructureByteStride = 0; //sizeof(u16);
-        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
-        d3d12_device->CreateShaderResourceView(scene.models[0].meshes.ptr[0].index_buffer->d3d12_resource.Get(), &srv_desc, index_buffer_handle.cpu_descriptor_handle);
-    }
-    command_list->bind_handle(index_buffer_handle, binding_point_string_lookup("index_buffer"));
-
+    command_list->bind_buffer_read(scene.models[0].meshes.ptr[0].index_buffer, binding_point_string_lookup("index_buffer"), &d3d12_index_buffer_srv);
+    
     command_list->d3d12_command_list->SetComputeRootShaderResourceView(command_list->current_bound_shader->binding_points[binding_point_string_lookup("scene")].root_signature_index, scene.acceleration_structure.tlas->d3d12_resource->GetGPUVirtualAddress());
+
+    // Need to do this last so it doesn't interfere with Geometry_Info.material_id mapping to above material index.. TODO: find a better solution..
+    Texture_Index output_texture_index = {};
+    output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+
+    Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+    struct Textures_Offset { u32 index; } textures_offset = { resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size };
+    Descriptor_Handle textures_offset_handle = resource_manager.load_dyanamic_frame_data((void*)&textures_offset, sizeof(Textures_Offset), 256);
+    command_list->bind_handle(textures_offset_handle, binding_point_string_lookup("texture_array_begin"));
 
     // Bind All Materials
     D_Model* main_model = &scene.models[0];
-    u32 current_texture_table_index = 0;  // TODO: EEEEKKKKK shouldn't be here. Need a better way of doing this. Maybe we should bind textures like this for rasterization too?
+    // TODO: EEEEKKKKK shouldn't be here. Need a better way of doing this. Maybe we should bind textures like this for rasterization too?
     for(int i = 0; i < main_model->materials.nitems; i++){
         D_Material* material = &main_model->materials.ptr[i];
 
-        command_list->bind_texture(material->albedo_texture.texture, &resource_manager, 0);
+        // command_list->bind_texture(material->albedo_texture.texture, &resource_manager, 0);
+        u32 bind_point = command_list->bind_texture(material->albedo_texture.texture, &resource_manager, 0);
 
         if(material->material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
             command_list->bind_texture(material->normal_texture.texture, &resource_manager, 0);
@@ -1233,37 +1216,52 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
         }
     }
 
-    // Need to do this last so it doesn't interfere with Geometry_Info.material_id mapping to above material index.. TODO: find a better solution..
-    Texture_Index output_texture_index = {};
-    output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
-
-    Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
-    command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
 
     // Now be bind the texture table to the root signature. 
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
 
-    D3D12_DISPATCH_RAYS_DESC dispatchDesc = {
-        .RayGenerationShaderRecord = {
-            .StartAddress = shaders.dxr_rayt_shader->ray_gen_shader_table->d3d12_resource->GetGPUVirtualAddress(),
-            .SizeInBytes  = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
-        },
-        .MissShaderTable = {
-            .StartAddress   = shaders.dxr_rayt_shader->miss_shader_table->d3d12_resource->GetGPUVirtualAddress(),
-            .SizeInBytes    = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
-            .StrideInBytes  = dispatchDesc.MissShaderTable.SizeInBytes,
-        },
-        .HitGroupTable = {
-            .StartAddress  = shaders.dxr_rayt_shader->hit_group_shader_table->d3d12_resource->GetGPUVirtualAddress(),
-            .SizeInBytes   = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
-            .StrideInBytes = dispatchDesc.HitGroupTable.SizeInBytes,
-        },
-        .Width  = config.render_width,
-        .Height = config.display_height,
-        .Depth  = 1,
-    };
-    command_list->d3d12_command_list->DispatchRays(&dispatchDesc);
+    command_list->dispatch_rays(config.render_width, config.render_height);
+
+
+    //////////////////////////////////////////////////////////
+    // Post Processing
+    //////////////////////////////////////////////////////////
+    {
+        command_list->set_shader(shaders.post_processing_shader);
+
+        command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
+        
+        Texture_Index input_texture_index = {};
+        input_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("input_texture"), true);
+
+        Descriptor_Handle input_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&input_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(input_texture_index_handle, binding_point_string_lookup("input_texture_index"));
+
+        Texture_Index output_texture_index = {};
+        output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+
+        Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+        Post_Processing_Config post_processing_config {
+            .ssao_enabled = false
+        };
+
+        Descriptor_Handle post_processing_config_handle = resource_manager.load_dyanamic_frame_data((void*)&post_processing_config, sizeof(Post_Processing_Config), 256);
+        command_list->bind_handle(post_processing_config_handle, binding_point_string_lookup("post_processing_config"));
+
+        Texture_Index ssao_texture_index = {};
+        ssao_texture_index.texture_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("ssao_texture"), true);
+
+        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
+
+        // Now be bind the texture table to the root signature. 
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+        command_list->dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
+    }
 }
 
 void D_Renderer::render(){
@@ -1367,6 +1365,7 @@ void D_Renderer::render(){
             command_list->set_render_targets(1, &textures.main_output_target, nullptr);
             break;
         case D_Render_Passes::DXR_RAY_TRACING:
+            // Ray Tracing pass
             dxr_ray_tracing_pass(command_list);
             command_list->transition_texture(textures.main_output_target, D3D12_RESOURCE_STATE_RENDER_TARGET);
             command_list->set_render_targets(1, &textures.main_output_target, nullptr);
@@ -1378,13 +1377,13 @@ void D_Renderer::render(){
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // command_list->set_shader(shaders.post_processing_shader);
     
-    // // Bind GBuffer Textures (and indices)
+    // // // Bind GBuffer Textures (and indices)
     // Texture_Index output_texture_index = {};
-    // output_texture_index.shadow_texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+    // output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
 
     // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
     // command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
-    // // Now be bind the texture table to the root signature. 
+    // // // Now be bind the texture table to the root signature. 
     // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
     // command_list->dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
 

@@ -6,7 +6,7 @@
 #include "third_party/d3dx12.h"
 
 #define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
-#define DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE 100
+#define DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE 200
 #define NUM_BACK_BUFFERS 2
 #define IS_BOUND_ONLINE_TABLE_SIZE 500
 
@@ -20,6 +20,7 @@ namespace d_dx12 {
     struct Shader_Desc;
     struct Upload_Buffer;
     struct D_Scene;
+    struct Dynamic_Buffer;
 
     // Copied to GPU memory in a table { Shader Record 1}, {Shader Record 2}
     struct Shader_Record {
@@ -115,6 +116,32 @@ namespace d_dx12 {
 
     };
 
+    #define DYNAMIC_BUFFER_SIZE _64MB * 4
+    struct Dynamic_Buffer {
+
+        struct Allocation {
+            D3D12_GPU_VIRTUAL_ADDRESS gpu_addr;
+            u8* cpu_addr;
+            u32 resource_offset;
+            Microsoft::WRL::ComPtr<ID3D12Resource2> d3d12_resource;
+            u64 aligned_size;
+        };
+
+        Microsoft::WRL::ComPtr<ID3D12Resource2> d3d12_resource;
+
+        u8*  inuse_beginning_ptr;        // Beginning of the range of memory in use
+        u8*  inuse_end_ptr;	             // Ending of the range of memory in use
+        u8*  absolute_beginning_ptr;     // Beginning of the range of memory in use
+        u8*  absolute_ending_ptr;        // Ending of the entire ring buffer allocation
+        u64  size;                       // Capacity of the dynamic buffer
+        u8*  frame_ending_ptrs[NUM_BACK_BUFFERS] = {0}; 
+        void init();
+        Allocation allocate(u64 size, u64 alignment);
+        void reset_frame(u8 frame);
+        void save_frame_ptr(u8 frame);
+    };
+
+
     // Descriptor Handle
     struct Descriptor_Handle {
 
@@ -168,16 +195,11 @@ namespace d_dx12 {
         Bind_Status        is_bound_online[IS_BOUND_ONLINE_TABLE_SIZE];
         u8                 is_bound_online_index = 0;
 
-        // TODO: ...
-        #if 0
-        Descriptor_Heap    offline_sampler_descriptor_heap;
-        Descriptor_Heap    online_sampelr_descriptor_heap[NUM_BACK_BUFFERS];
-        #endif
-
         void init();
         Texture* create_texture(wchar_t* name, Texture_Desc& desc);
         Buffer*  create_buffer(wchar_t* name, Buffer_Desc& desc);
         Descriptor_Handle load_dyanamic_frame_data(void* ptr, u64 size, u64 alignment);
+        Dynamic_Buffer::Allocation _load_dyanamic_frame_data(void* ptr, u64 size, u64 alignment);
         void reset_is_bound_online();
         void d_dx12_release();
     };
@@ -234,19 +256,41 @@ namespace d_dx12 {
         Descriptor_Handle                         offline_descriptor_handle;
         Descriptor_Handle                         online_descriptor_handle;
         D3D12_RESOURCE_STATES                     state;
+        DXGI_FORMAT                               format;
         USAGE                                     usage = USAGE_NONE;
         u32                                       number_of_elements;
         u32                                       size_of_each_element;
+        u32                                       aligned_total_size;
         wchar_t*                                  name;
         u16                                       is_bound_index;
         u64                                       alignment;
         u32                                       gpu_resource_offset = 0;  // If buffer is aligned inside of d3d12_resource, this is the offset from the beginning of the resource
-        union{
 
-            D3D12_VERTEX_BUFFER_VIEW              vertex_buffer_view;
-            D3D12_INDEX_BUFFER_VIEW               index_buffer_view;
+        D3D12_VERTEX_BUFFER_VIEW              vertex_buffer_view;
+        D3D12_INDEX_BUFFER_VIEW               index_buffer_view;
 
-        };
+        // Needs:
+        // aligned total size
+        Descriptor_Handle                     cbv_descriptor_handle;
+
+        // Needs:
+        // Format
+        // View Dimension
+        // Shader4ComponentMapping
+        // First Element Offset
+        // Number of Elements
+        // Structure Byte Stride
+        // Flags
+        Descriptor_Handle                     srv_descriptor_handle;
+
+        // Needs:
+        // Format
+        // View Dimension
+        // First Element Offset
+        // Number of elements
+        // Structure Byte Stride
+        // Flags
+        Descriptor_Handle                     uav_descriptor_handle;
         
         void d_dx12_release();
 
@@ -342,6 +386,11 @@ namespace d_dx12 {
         void bind_handle(Descriptor_Handle handle, u32 binding_point);
         void bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32  binding_point, bool write = false);
         u8   bind_texture(Texture* texture, Resource_Manager* resource_manager, u32  binding_point, bool write = false);
+
+        void bind_constant_buffer(Buffer* buffer, u32 binding_point);
+        void bind_buffer_read(Buffer* buffer, u32 binding_point, D3D12_SHADER_RESOURCE_VIEW_DESC* srv_desc = NULL);
+        void bind_buffer_write(Buffer* buffer, u32 binding_point);
+
         void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, u32  parameter_name);
         void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, u32 binding_point);
         Descriptor_Handle bind_descriptor_handles_to_online_descriptor_heap(Descriptor_Handle handle, size_t count);
@@ -353,36 +402,12 @@ namespace d_dx12 {
         void set_scissor_rect(D3D12_RECT scissor_rect);
         void draw(u32 number_of_verticies);
         void dispatch(u32 threadgroup_count_x, u32 threadgroup_count_y, u32 threadgroup_count_z);
+        void dispatch_rays(u32 width, u32 height);
         void draw_indexed(u32 index_count, u32 index_offset, s32 vertex_offset);
         void build_shader_tables(Shader* shader);
         void calc_acceleration_structure(d_dx12::D_Scene* scene);
         void d_dx12_release();
 
-    };
-
-    #define DYNAMIC_BUFFER_SIZE _64MB * 4
-    struct Dynamic_Buffer {
-
-        struct Allocation {
-            D3D12_GPU_VIRTUAL_ADDRESS gpu_addr;
-            u8* cpu_addr;
-            u32 resource_offset;
-            Microsoft::WRL::ComPtr<ID3D12Resource2> d3d12_resource;
-            u64 aligned_size;
-        };
-
-        Microsoft::WRL::ComPtr<ID3D12Resource2> d3d12_resource;
-
-        u8*  inuse_beginning_ptr;        // Beginning of the range of memory in use
-        u8*  inuse_end_ptr;	             // Ending of the range of memory in use
-        u8*  absolute_beginning_ptr;     // Beginning of the range of memory in use
-        u8*  absolute_ending_ptr;        // Ending of the entire ring buffer allocation
-        u64  size;                       // Capacity of the dynamic buffer
-        u8*  frame_ending_ptrs[NUM_BACK_BUFFERS] = {0}; 
-        void init();
-        Allocation allocate(u64 size, u64 alignment);
-        void reset_frame(u8 frame);
-        void save_frame_ptr(u8 frame);
     };
 
     // Display (Basically Just swapchain)
