@@ -1,3 +1,22 @@
+7/11/24
+
+Working on Infinite area light sampling for Ray tracing.
+
+https://www.pbr-book.org/4ed/Light_Sources/Infinite_Area_Lights#UniformInfiniteLight
+
+Done: 
+- Hash function for randomness
+- ImageLe function
+
+TODO:
+- Create distribution of Environment map Image
+- Function to convert UV cords to Sphere vector3
+- Create function to generage vector from hit position to sphere position
+- Compute PDF of sampled light direction
+- Create SampleLi Method with all of these, then traces ray at the end
+
+- Le sample method for miss rays
+
 6/9/24
 
 Create APIs for:

@@ -50,6 +50,20 @@ struct Viewport
     float bottom;
 };
 
+// from: https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
+uint pcg_hash(uint input)
+{
+    uint state = input * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float3 EnvMap_ImageLe(float2 uv){
+    
+    Texture2D environment_texture = texture_2d_table[ /* env texture index */ ];
+    return environment_texture.SampleLevel(sampler_1, uv, 0);
+}
+
 bool IsInsideViewport(float2 p, Viewport viewport)
 {
     return (p.x >= viewport.left && p.x <= viewport.right)
