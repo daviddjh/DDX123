@@ -64,6 +64,19 @@ float3 EnvMap_ImageLe(float2 uv){
     return environment_texture.SampleLevel(sampler_1, uv, 0);
 }
 
+float3 square_coord_to_sphere_coord(float2 square_coords){
+    // convert to [-1, 1], then compute abs
+    float u = square_coords.x * 2 - 1;
+    float v = square_coords.y * 2 - 1;
+
+    float up = abs(u);
+    float vp = abs(v); 
+
+    float signed_distance = 1 - (up + vp);
+    float d = abs(signed_distance);
+    float r = 1 - d;
+}
+
 bool IsInsideViewport(float2 p, Viewport viewport)
 {
     return (p.x >= viewport.left && p.x <= viewport.right)
