@@ -41,6 +41,8 @@ typedef BuiltInTriangleIntersectionAttributes MyAttributes;
 struct RayPayload
 {
     float4 color;
+    uint   hit;
+    float  beta;
 };
 struct Viewport
 {
@@ -64,7 +66,56 @@ float3 EnvMap_ImageLe(float2 uv){
     return environment_texture.SampleLevel(sampler_1, uv, 0);
 }
 
+float copy_sign(float num, float sign_num){
+    num = num * sign(sign_num);
+    return num;
+}
+
+// From: https://www.pbr-book.org/4ed/Geometry_and_Transformations/Spherical_Geometry
+float3 sphere_coord_to_square_coord(float3 sphere_coords){
+
+    float x = abs(sphere_coords.x);
+    float y = abs(sphere_coords.y);
+    float z = abs(sphere_coords.z);
+
+    // compute radius r
+    float r = max(0, sqrt(1 - z));
+
+    // compute argument to atan
+    float a = max(x, y);
+    float b = min(x, y);
+    b = a == 0 ? 0 : b / a;
+
+    // SLOW - pbr book used a polynomial aproximation
+    float phi = atan(b)*2/PI;
+
+    // Extenc phi if input is in the range 45 - 90 degrees
+    if(x < y){
+        phi = 1 - phi;
+    }
+
+    float v = phi * r;
+    float u = r - v;
+
+    // if coords in southern hemisphere, mirror u,v
+    if (sphere_coords.z < 0){
+        float temp = u;
+        u = v;
+        v = temp;
+        u = 1 - u;
+        v = 1 - v;
+    }
+
+    u = copy_sign(u, sphere_coords.x);
+    v = copy_sign(v, sphere_coords.y);
+
+    // Transform from [-1,1] to [0,1]
+    return float2(0.5 * (u + 1), 0.5 * (v + 1));
+}
+
+// From: https://www.pbr-book.org/4ed/Geometry_and_Transformations/Spherical_Geometry
 float3 square_coord_to_sphere_coord(float2 square_coords){
+
     // convert to [-1, 1], then compute abs
     float u = square_coords.x * 2 - 1;
     float v = square_coords.y * 2 - 1;
@@ -72,9 +123,47 @@ float3 square_coord_to_sphere_coord(float2 square_coords){
     float up = abs(u);
     float vp = abs(v); 
 
+    // Compute radius r for square to sphere mapping
     float signed_distance = 1 - (up + vp);
     float d = abs(signed_distance);
     float r = 1 - d;
+
+    // Compute phi for square to sphere mapping. accunts for the 45deg rotation
+    float phi = ( r == 0 ? 1 : (vp - up) / r + 1) * PI / 4;
+
+    float z = copy_sign(1 - sqrt(r), signed_distance);
+    float cos_phi = copy_sign(cos(phi), u);
+    float sin_phi = copy_sign(sin(phi), v);
+    return(cos_phi * r * max(0, sqrt(2 - sqrt(r))),
+           sin_phi * r * max(0, sqrt(2 - sqrt(r))), z);
+}
+
+float3 EnvMap_SampleLi(float3 current_point, float2 u){
+    // TODO: sample uv from a distribution over the image:
+    float map_PDF = 1;
+    // uv = distribution.sample(u, &mapPDF);
+    float2 uv = u;
+    float3 w_light = square_coord_to_sphere_coord(uv);
+    // float3 wi = render_from_light(w_light);  // This is where we would transform the unit vector from light space to "render" space
+    float3 wi = w_light;
+    float pdf = map_PDF / (4 * PI);
+
+    // Create Ray
+    RayDesc ray;
+    ray.Origin    = current_point.xyz;
+    ray.Direction = wi;
+    ray.TMin = 0.001;
+    ray.TMax = 100000.0;
+
+    // Trace the bound scene with ray created above
+    RayPayload payload = { float4(0.0, 0.0, 0.0, 0), 0};
+    TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
+
+}
+
+float3 EnvMap_Le(float3 ray_direction){
+    float2 uv = sphere_coord_to_square_coord(ray_direction);
+    return EnvMap_ImageLe(uv);
 }
 
 bool IsInsideViewport(float2 p, Viewport viewport)
@@ -113,7 +202,7 @@ RayDesc create_camera_ray(uint2 pixel_xy){
     // Set the ray's extents.
     // Set TMin to a non-zero small value to avoid aliasing issues due to floating - point errors.
     // TMin should be kept small to prevent missing geometry at close contact areas.
-    ray.TMin = 0.0;
+    ray.TMin = 0.01;
     ray.TMax = 100000.0;
     return ray;
 
@@ -143,8 +232,22 @@ void MyRaygenShader()
 }
 
 [shader("closesthit")]
+void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr){
+
+    // Account for emissive surface if light was not sampled
+    // End Path if maximum depth rendered
+    // Get BSDF and skip over medium boundries
+    // Sample direct illumination if sample lights is true
+    // Sample outgoing direction at intersecion to continue path
+
+}
+
+[shader("closesthit")]
 void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttributes attr)
 {
+
+    payload.hit = 1;
+
     float3 barycentrics = float3(1.f - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
 
     uint geometry_index = GeometryIndex();
@@ -264,5 +367,6 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
 [shader("miss")]
 void MyMissShader(inout RayPayload payload : SV_RayPayload)
 {
-    payload.color = normalize(float4(0.3, 0.4, 0.6, 1));
+    float3 ray = WorldRayDirection();
+    payload.color += payload.beta * EnvMap_Le(ray);
 }

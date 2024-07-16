@@ -1,3 +1,71 @@
+7/16/24
+
+Working on Infinite area light sampling for Ray tracing.
+
+https://www.pbr-book.org/4ed/Light_Sources/Infinite_Area_Lights#UniformInfiniteLight
+
+Done: 
+- Hash function for randomness
+- ImageLe function
+- Function to convert UV cords to Sphere vector3
+- Create SampleLi Method with all of these, then traces ray at the end
+- Create distribution of Environment map Image - Using uniform distribution for now
+- Compute PDF of sampled light direction - Starting with 1??
+- Create function to generage vector from hit position to sphere position - No need, direct mapping from unit sphere to world space
+- Le sample method for miss rays
+
+TODO:
+
+- Develop simple integrator
+- Work on "TraceRay" function in EnvMap_SampleLi. Need to trace a ray through the scene, only returning information on if I hit anything.
+    - If i did hit anything, then sample the env map and return the value + PDF.
+
+
+7/15/24
+
+Working on Infinite area light sampling for Ray tracing.
+
+https://www.pbr-book.org/4ed/Light_Sources/Infinite_Area_Lights#UniformInfiniteLight
+
+Done: 
+- Hash function for randomness
+- ImageLe function
+- Function to convert UV cords to Sphere vector3
+- Create SampleLi Method with all of these, then traces ray at the end
+- Create distribution of Environment map Image - Using uniform distribution for now
+- Compute PDF of sampled light direction - Starting with 1??
+- Create function to generage vector from hit position to sphere position - No need, direct mapping from unit sphere to world space
+
+TODO:
+
+- Develop simple integrator
+- Le sample method for miss rays
+- Work on "TraceRay" function in EnvMap_SampleLi. Need to trace a ray through the scene, only returning information on if I hit anything.
+    - If i did hit anything, then sample the env map and return the value + PDF.
+
+
+7/14/24
+
+Working on Infinite area light sampling for Ray tracing.
+
+https://www.pbr-book.org/4ed/Light_Sources/Infinite_Area_Lights#UniformInfiniteLight
+
+Done: 
+- Hash function for randomness
+- ImageLe function
+- Function to convert UV cords to Sphere vector3
+- Create SampleLi Method with all of these, then traces ray at the end
+- Create distribution of Environment map Image - Using uniform distribution for now
+- Compute PDF of sampled light direction - Starting with 1??
+- Create function to generage vector from hit position to sphere position - No need, direct mapping from unit sphere to world space
+
+TODO:
+
+- Work on "TraceRay" function in EnvMap_SampleLi. Need to trace a ray through the scene, only returning information on if I hit anything.
+    - If i did hit anything, then sample the env map and return the value + PDF.
+
+- Le sample method for miss rays
+
 7/11/24
 
 Working on Infinite area light sampling for Ray tracing.

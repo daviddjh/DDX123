@@ -13,7 +13,7 @@
 #define MATERIAL_FLAG_NORMAL_TEXTURE           0x1
 #define MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE 0x2
 
-static const float PI = 3.14159265359;
+static const float PI = 3.14159265359f;
 
 //////////////////////////////////
 // COMMON Data Structures

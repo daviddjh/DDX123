@@ -1915,7 +1915,7 @@ namespace d_dx12 {
 
             // Defines maximum payload and attribute size in bytes for RT shaders
             CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT* shader_config_subobject = raytracing_pipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-            u32 payload_size = sizeof(float) * 4;   // color
+            u32 payload_size = sizeof(float) * 4 + 1;   // color + hit bool
             u32 attribute_size = sizeof(float) * 2; // barycentrics
             shader_config_subobject->Config(payload_size, attribute_size);
 
