@@ -1,3 +1,13 @@
+7/18/24
+
+Finish EnvMap_SampleLi before finishing SimplePathTracer.
+
+7/17/24
+
+Working on implementing the diffuse BRDF for now.
+Used as basic BSDF in SimplePathIntegrator.
+From: https://www.pbr-book.org/4ed/Reflection_Models/Diffuse_Reflection
+
 7/16/24
 
 Working on Infinite area light sampling for Ray tracing.

@@ -166,6 +166,65 @@ float3 EnvMap_Le(float3 ray_direction){
     return EnvMap_ImageLe(uv);
 }
 
+float2 sample_uniform_disk_concentric(float2 u){
+    float2 offset = 2 * u - 1; 
+    if (offset.x == 0 && offset.y == 0){
+        return offset;
+    }
+
+    float theta, r;
+    if (abs(offset.x) > abs(offset.y)){
+        r = offset.x;
+        theta = PI/4 * (offset.y/offset.x);
+    } else {
+        r = offset.y;
+        theta = PI/2 - PI/4 * (offset.x/offset.y);
+    }
+    return r * float2(cos(theta), sin(theta));
+}
+
+float3 sample_cosign_hemisphere (float2 u){
+    float2 d = sample_uniform_disk_concentric(u);
+    float  z = max(0, sqrt(1 - sqrt(d.x) - sqrt(d.y)));
+    return float3(d.x, d.y, z);
+}
+
+float3 cosign_hemisphere_pdf (float cos_theta){
+    return cos_theta * INV_PI; // TODO
+}
+
+float abs_cos_theta(float3 w){
+    return abs(w.z);
+}
+
+struct BSDF_Sample {
+    float3 sampled_light;
+    float3 wi;
+    float  pdf;
+};
+
+// From: https://www.pbr-book.org/4ed/Reflection_Models/Diffuse_Reflection
+float3 BxDF_diffuse_f(float3 wo, float3 wi, float3 albedo){
+    return albedo * INV_PI;
+}
+
+BSDF_Sample BxDF_diffuse_sample_f(float3 wo, float3 albedo, float2 random_u){
+    BSDF_Sample bsdf_sample;
+
+    bsdf_sample.sampled_light = albedo * INV_PI;
+    bsdf_sample.wi = sample_cosign_hemisphere(random_u);
+    if(wo.z < 0)
+        bsdf_sample.wi.z *= -1;
+    
+    bsdf_sample.pdf = cosign_hemisphere_pdf(abs_cos_theta(bsdf_sample.wi));
+
+    return bsdf_sample;
+}
+
+float BxDF_diffuse_pdf(float3 wo, float3 wi){
+    return cosign_hemisphere_pdf(abs_cos_theta(wi));
+}
+
 bool IsInsideViewport(float2 p, Viewport viewport)
 {
     return (p.x >= viewport.left && p.x <= viewport.right)
@@ -233,6 +292,17 @@ void MyRaygenShader()
 
 [shader("closesthit")]
 void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr){
+
+    float2 u; // Random Vector -> TODO
+
+    float3 ray_direction = WorldRayDirection();
+    float3 ray_origin    = WorldRayOrigin();
+
+    float3 wo = -ray_direction;
+
+    float3 light_sample = EnvMap_SampleLi(ray_origin, u);
+
+    
 
     // Account for emissive surface if light was not sampled
     // End Path if maximum depth rendered

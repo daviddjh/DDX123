@@ -14,6 +14,7 @@
 #define MATERIAL_FLAG_ROUGHNESSMETALIC_TEXTURE 0x2
 
 static const float PI = 3.14159265359f;
+static const float INV_PI = 0.31830988618379067154;
 
 //////////////////////////////////
 // COMMON Data Structures
