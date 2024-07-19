@@ -36,12 +36,14 @@ static float3 up_dir = float4(0., 1., 0., 0.);
 static float3 right_dir = float4(1., 0., 0., 0.);
 static float  focal_length = 1.;
 
+static float scene_radius = 1000;
+
 typedef BuiltInTriangleIntersectionAttributes MyAttributes;
 
 struct RayPayload
 {
     float4 color;
-    uint   hit;
+    uint   just_hit;
     float  beta;
 };
 struct Viewport
@@ -50,6 +52,14 @@ struct Viewport
     float top;
     float right;
     float bottom;
+};
+
+struct Light_Sample {
+    float3 L;
+    float pdf;
+    float3 wi;
+    float3 p;
+    uint occluded;
 };
 
 // from: https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
@@ -138,7 +148,10 @@ float3 square_coord_to_sphere_coord(float2 square_coords){
            sin_phi * r * max(0, sqrt(2 - sqrt(r))), z);
 }
 
-float3 EnvMap_SampleLi(float3 current_point, float2 u){
+Light_Sample EnvMap_SampleLi(float3 current_point, float2 u){
+
+    Light_Sample light_sample;
+
     // TODO: sample uv from a distribution over the image:
     float map_PDF = 1;
     // uv = distribution.sample(u, &mapPDF);
@@ -158,6 +171,18 @@ float3 EnvMap_SampleLi(float3 current_point, float2 u){
     // Trace the bound scene with ray created above
     RayPayload payload = { float4(0.0, 0.0, 0.0, 0), 0};
     TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
+
+    if (payload.color.x == 1){
+        light_sample.L = EnvMap_ImageLe(uv);
+        light_sample.p = current_point + (wi * 2 * scene_radius);
+        light_sample.pdf = pdf;
+        light_sample.wi = wi;
+        light_sample.occluded = 0;
+    } else {
+        light_sample.occluded = 1;
+    }
+
+    return light_sample;
 
 }
 
@@ -294,15 +319,22 @@ void MyRaygenShader()
 void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr){
 
     float2 u; // Random Vector -> TODO
+    float L = 0;
 
     float3 ray_direction = WorldRayDirection();
     float3 ray_origin    = WorldRayOrigin();
 
     float3 wo = -ray_direction;
 
-    float3 light_sample = EnvMap_SampleLi(ray_origin, u);
+    Light_Sample env_light_sample = EnvMap_SampleLi(ray_origin, u);  
 
-    
+    Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + g_info.material_id * 3)];
+    // TODO: Get albedo sample
+    float4 albedo_sample     = albedo_texture.SampleLevel(sampler_1, 1);
+
+    float3 f = BxDF_diffuse_f(wo, env_light_sample.wi, albedo_sample.rgb);
+
+    L += payload.beta * f * env_light_sample.L / ( 1 * env_light_sample.pdf );
 
     // Account for emissive surface if light was not sampled
     // End Path if maximum depth rendered
@@ -315,8 +347,6 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
 [shader("closesthit")]
 void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttributes attr)
 {
-
-    payload.hit = 1;
 
     float3 barycentrics = float3(1.f - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
 
