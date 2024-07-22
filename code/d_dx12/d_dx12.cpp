@@ -1903,19 +1903,19 @@ namespace d_dx12 {
 
             // Optional?
             dxil_lib_subobject->DefineExport(L"MyRaygenShader");
-            dxil_lib_subobject->DefineExport(L"MyClosestHitShader");
+            dxil_lib_subobject->DefineExport(L"MySimplePathTracer");
             dxil_lib_subobject->DefineExport(L"MyMissShader");
 
             // Specifies shaders to use wwhen a triangle intersects geo
             // Different geo can have different hit groups
             CD3DX12_HIT_GROUP_SUBOBJECT* hit_group_subobject = raytracing_pipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
-            hit_group_subobject->SetClosestHitShaderImport(L"MyClosestHitShader");
+            hit_group_subobject->SetClosestHitShaderImport(L"MySimplePathTracer");
             hit_group_subobject->SetHitGroupExport(L"MyHitGroup");
             hit_group_subobject->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
 
             // Defines maximum payload and attribute size in bytes for RT shaders
             CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT* shader_config_subobject = raytracing_pipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-            u32 payload_size = sizeof(float) * 4 + 1;   // color + hit bool
+            u32 payload_size = 32;   // color + hit bool + beta
             u32 attribute_size = sizeof(float) * 2; // barycentrics
             shader_config_subobject->Config(payload_size, attribute_size);
 
@@ -1924,7 +1924,7 @@ namespace d_dx12 {
 
             // Configures Maximum TraceRay() recursion depth
             CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT* pipeline_config = raytracing_pipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
-            u32 max_recursion_depth = 1;
+            u32 max_recursion_depth = D3D12_RAYTRACING_MAX_DECLARABLE_TRACE_RECURSION_DEPTH;
             pipeline_config->Config(max_recursion_depth);
 
             ThrowIfFailed(d3d12_device->CreateStateObject(raytracing_pipeline, IID_PPV_ARGS(&shader->d3d12_rt_state_object)));
@@ -3700,7 +3700,7 @@ namespace d_dx12 {
 
     void inline Command_List::dispatch_rays(u32 width, u32 height){
 
-        ASSERT_LOG(current_bound_shader->type != Shader::TYPE_RAY_TRACE, "Can only call dispatch rays on a DXR shader!");
+        ASSERT_LOG(current_bound_shader->type == Shader::TYPE_RAY_TRACE, "Can only call dispatch rays on a DXR shader!");
 
         D3D12_DISPATCH_RAYS_DESC dispatchDesc = {
             .RayGenerationShaderRecord = {

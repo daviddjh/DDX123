@@ -1,3 +1,18 @@
+7/21/24
+
+I see the light!
+
+Direct lighting is working. Even indirect lighting is working (i think? too few samples to tell)
+
+TODO:
+- Update random numbers. New random numbers each frame, different over time.
+- Increase sample count in the generate ray's function. Each ray should be randomly^ jittered around the pixel.
+
+7/18/24
+
+Fix env map path lookup. ( Need to load and bind env map ).
+Fix shader compile errors.
+
 7/18/24
 
 Finish EnvMap_SampleLi before finishing SimplePathTracer.

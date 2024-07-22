@@ -54,6 +54,7 @@ struct D_Textures {
     Texture*          g_buffer_normal;
     Texture*          g_buffer_rough_metal;
     Texture*          sampled_texture;
+    Texture*          env_map;
     Texture*          ssao_rotation_texture;
     Texture*          ssao_output_texture;
     Texture*          main_render_target;    // Size of render resolution - input to post processing
@@ -778,6 +779,29 @@ int D_Renderer::init(){
     per_frame_data.light_color    = {20., 20., 20., 0.};
 
     ///////////////////////
+    // Env Map Light
+    ///////////////////////
+    ScratchImage env_map_scratch_img;
+    HRESULT hr = LoadFromHDRFile(L"buikslotermeerplein_4k.hdr", NULL, env_map_scratch_img);
+    // HRESULT hr = LoadFromHDRFile(L"kloofendal_48d_partly_cloudy_puresky_4k.hdr", NULL, env_map_scratch_img);
+    if (FAILED(hr)){
+        DEBUG_ERROR("Error Loading Env Map File!");
+        exit(0);
+    }
+    const Image* env_map_img = env_map_scratch_img.GetImage(0, 0, 0);
+
+    Texture_Desc env_map_desc;
+    env_map_desc.format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    env_map_desc.width  = env_map_img->width;
+    env_map_desc.height = env_map_img->height;
+    env_map_desc.usage  = Texture::USAGE::USAGE_SAMPLED;
+
+    textures.env_map = resource_manager.create_texture(L"Environment Map", env_map_desc);
+
+    upload_command_list->load_decoded_texture_from_memory(textures.env_map, (u_ptr)env_map_img->pixels, true);
+
+
+    ///////////////////////
     //  DearIMGUI
     ///////////////////////
 
@@ -1215,6 +1239,11 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
             resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();  // Throw away to keep our Material Slots uniform
         }
     }
+
+    Texture_Index env_map_index = {};
+    env_map_index.texture_index = (unsigned int)command_list->bind_texture(textures.env_map, &resource_manager, 0);
+    Descriptor_Handle env_map_handle = resource_manager.load_dyanamic_frame_data((void*)&env_map_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(env_map_handle, binding_point_string_lookup("env_map_index"));
 
 
     // Now be bind the texture table to the root signature. 

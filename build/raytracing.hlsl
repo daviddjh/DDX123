@@ -7,6 +7,7 @@ RaytracingAccelerationStructure scene : register(t0, space0);
 ConstantBuffer<Texture_Index> output_texture_index  : register(b0, ComputeSpace);
 ConstantBuffer<Output_Dimensions> output_dimensions : register(b1, ComputeSpace);
 ConstantBuffer<Texture_Index>   texture_array_begin : register(b2, ComputeSpace);
+ConstantBuffer<Texture_Index>   env_map_index       : register(b3, ComputeSpace);
 
 
 struct Vertex_Position_Normal_Tangent_Color_Texturecoord
@@ -43,8 +44,9 @@ typedef BuiltInTriangleIntersectionAttributes MyAttributes;
 struct RayPayload
 {
     float4 color;
-    uint   just_hit;
     float  beta;
+    uint   just_hit;
+    uint   recursion_depth;
 };
 struct Viewport
 {
@@ -63,16 +65,17 @@ struct Light_Sample {
 };
 
 // from: https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
-uint pcg_hash(uint input)
+float pcg_hash(uint input)
 {
     uint state = input * 747796405u + 2891336453u;
     uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-    return (word >> 22u) ^ word;
+    uint final_int = (word >> 22u) ^ word;
+    return final_int * (1.0 / 4294967296.0); // Convert from [0, MAX_INT] int to [0,1] float
 }
 
 float3 EnvMap_ImageLe(float2 uv){
     
-    Texture2D environment_texture = texture_2d_table[ /* env texture index */ ];
+    Texture2D environment_texture = texture_2d_table[env_map_index.texture_index];
     return environment_texture.SampleLevel(sampler_1, uv, 0);
 }
 
@@ -82,70 +85,85 @@ float copy_sign(float num, float sign_num){
 }
 
 // From: https://www.pbr-book.org/4ed/Geometry_and_Transformations/Spherical_Geometry
-float3 sphere_coord_to_square_coord(float3 sphere_coords){
+float2 sphere_coord_to_square_coord(float3 sphere_coords){
 
-    float x = abs(sphere_coords.x);
-    float y = abs(sphere_coords.y);
-    float z = abs(sphere_coords.z);
+    float u = 0.5f + (atan2(sphere_coords.z, sphere_coords.x) / (2.0f * PI));
+    float v = 0.5f - (asin(sphere_coords.y) / PI);
+    return float2(u,v);
 
-    // compute radius r
-    float r = max(0, sqrt(1 - z));
 
-    // compute argument to atan
-    float a = max(x, y);
-    float b = min(x, y);
-    b = a == 0 ? 0 : b / a;
+    // float x = abs(sphere_coords.x);
+    // float y = abs(sphere_coords.y);
+    // float z = abs(sphere_coords.z);
 
-    // SLOW - pbr book used a polynomial aproximation
-    float phi = atan(b)*2/PI;
+    // // compute radius r
+    // float r = max(0, sqrt(1 - z));
 
-    // Extenc phi if input is in the range 45 - 90 degrees
-    if(x < y){
-        phi = 1 - phi;
-    }
+    // // compute argument to atan
+    // float a = max(x, y);
+    // float b = min(x, y);
+    // b = a == 0 ? 0 : b / a;
 
-    float v = phi * r;
-    float u = r - v;
+    // // SLOW - pbr book used a polynomial aproximation
+    // float phi = atan(b)*2/PI;
 
-    // if coords in southern hemisphere, mirror u,v
-    if (sphere_coords.z < 0){
-        float temp = u;
-        u = v;
-        v = temp;
-        u = 1 - u;
-        v = 1 - v;
-    }
+    // // Extenc phi if input is in the range 45 - 90 degrees
+    // if(x < y){
+    //     phi = 1 - phi;
+    // }
 
-    u = copy_sign(u, sphere_coords.x);
-    v = copy_sign(v, sphere_coords.y);
+    // float v = phi * r;
+    // float u = r - v;
 
-    // Transform from [-1,1] to [0,1]
-    return float2(0.5 * (u + 1), 0.5 * (v + 1));
+    // // if coords in southern hemisphere, mirror u,v
+    // if (sphere_coords.z < 0){
+    //     float temp = u;
+    //     u = v;
+    //     v = temp;
+    //     u = 1 - u;
+    //     v = 1 - v;
+    // }
+
+    // u = copy_sign(u, sphere_coords.x);
+    // v = copy_sign(v, sphere_coords.y);
+
+    // // Transform from [-1,1] to [0,1]
+    // return float2(0.5 * (u + 1), 0.5 * (v + 1));
 }
 
 // From: https://www.pbr-book.org/4ed/Geometry_and_Transformations/Spherical_Geometry
 float3 square_coord_to_sphere_coord(float2 square_coords){
 
-    // convert to [-1, 1], then compute abs
-    float u = square_coords.x * 2 - 1;
-    float v = square_coords.y * 2 - 1;
+    float theta = square_coords.x * 2 * PI;  // Azimuthal angle
+    float phi = (1.0f - square_coords.y) * PI;  // Polar angle
 
-    float up = abs(u);
-    float vp = abs(v); 
+    // Convert spherical coordinates to Cartesian coordinates
+    float x = sin(phi) * cos(theta);
+    float y = cos(phi);
+    float z = sin(phi) * sin(theta);
 
-    // Compute radius r for square to sphere mapping
-    float signed_distance = 1 - (up + vp);
-    float d = abs(signed_distance);
-    float r = 1 - d;
+    return float3(x, y, z);
 
-    // Compute phi for square to sphere mapping. accunts for the 45deg rotation
-    float phi = ( r == 0 ? 1 : (vp - up) / r + 1) * PI / 4;
+    // // convert to [-1, 1], then compute abs
+    // float u = square_coords.x * 2 - 1;
+    // float v = square_coords.y * 2 - 1;
 
-    float z = copy_sign(1 - sqrt(r), signed_distance);
-    float cos_phi = copy_sign(cos(phi), u);
-    float sin_phi = copy_sign(sin(phi), v);
-    return(cos_phi * r * max(0, sqrt(2 - sqrt(r))),
-           sin_phi * r * max(0, sqrt(2 - sqrt(r))), z);
+    // float up = abs(u);
+    // float vp = abs(v); 
+
+    // // Compute radius r for square to sphere mapping
+    // float signed_distance = 1 - (up + vp);
+    // float d = abs(signed_distance);
+    // float r = 1 - d;
+
+    // // Compute phi for square to sphere mapping. accunts for the 45deg rotation
+    // float phi = ( r == 0 ? 1 : (vp - up) / r + 1) * PI / 4;
+
+    // float z = copy_sign(1 - sqrt(r), signed_distance);
+    // float cos_phi = copy_sign(cos(phi), u);
+    // float sin_phi = copy_sign(sin(phi), v);
+    // return float3(cos_phi * r * max(0, sqrt(2 - sqrt(r))),
+    //               sin_phi * r * max(0, sqrt(2 - sqrt(r))), z);
 }
 
 Light_Sample EnvMap_SampleLi(float3 current_point, float2 u){
@@ -157,22 +175,33 @@ Light_Sample EnvMap_SampleLi(float3 current_point, float2 u){
     // uv = distribution.sample(u, &mapPDF);
     float2 uv = u;
     float3 w_light = square_coord_to_sphere_coord(uv);
+    
+
+    // Flip ray to only face upwards
+    w_light.y = abs(w_light.y);
+    uv = sphere_coord_to_square_coord(w_light);
+
     // float3 wi = render_from_light(w_light);  // This is where we would transform the unit vector from light space to "render" space
     float3 wi = w_light;
     float pdf = map_PDF / (4 * PI);
 
     // Create Ray
     RayDesc ray;
-    ray.Origin    = current_point.xyz;
+    ray.Origin = current_point.xyz;
     ray.Direction = wi;
     ray.TMin = 0.001;
     ray.TMax = 100000.0;
 
-    // Trace the bound scene with ray created above
-    RayPayload payload = { float4(0.0, 0.0, 0.0, 0), 0};
-    TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
 
-    if (payload.color.x == 1){
+    // Trace the bound scene with ray created above
+    RayPayload payload; //= { float4(1.0, 0.0, 0.0, 0), 0, 1};
+    payload.color = float4(1.0, 0.0, 0.0, 0);
+    payload.beta = 0;
+    payload.just_hit = 1;
+    payload.recursion_depth = 0;
+    TraceRay(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
+
+    if (payload.color.x == 0){
         light_sample.L = EnvMap_ImageLe(uv);
         light_sample.p = current_point + (wi * 2 * scene_radius);
         light_sample.pdf = pdf;
@@ -188,6 +217,7 @@ Light_Sample EnvMap_SampleLi(float3 current_point, float2 u){
 
 float3 EnvMap_Le(float3 ray_direction){
     float2 uv = sphere_coord_to_square_coord(ray_direction);
+    // uv = -uv;
     return EnvMap_ImageLe(uv);
 }
 
@@ -303,7 +333,11 @@ void MyRaygenShader()
     RayDesc ray = create_camera_ray(pixel_xy);
 
     // Beginning ray payload ( starting color )
-    RayPayload payload = { float4(0.8, 0.4, 0.6, 0) };
+    RayPayload payload; //  = { float4(0.0, 0.0, 0.0, 0), 1.0, 0  };
+    payload.color = float4(0.0, 0.0, 0.0, 0);
+    payload.beta = 1.0;
+    payload.just_hit = 0;
+    payload.recursion_depth = 0;
 
     // Trace the bound scene with ray created above
     TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
@@ -315,40 +349,17 @@ void MyRaygenShader()
     return;
 }
 
-[shader("closesthit")]
-void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr){
+struct Hit_Info {
+    float2 uv;
+    float3 p;
+    float3 n;
+    uint material_id;
+    float2 ddx;
+    float2 ddy;
+};
 
-    float2 u; // Random Vector -> TODO
-    float L = 0;
-
-    float3 ray_direction = WorldRayDirection();
-    float3 ray_origin    = WorldRayOrigin();
-
-    float3 wo = -ray_direction;
-
-    Light_Sample env_light_sample = EnvMap_SampleLi(ray_origin, u);  
-
-    Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + g_info.material_id * 3)];
-    // TODO: Get albedo sample
-    float4 albedo_sample     = albedo_texture.SampleLevel(sampler_1, 1);
-
-    float3 f = BxDF_diffuse_f(wo, env_light_sample.wi, albedo_sample.rgb);
-
-    L += payload.beta * f * env_light_sample.L / ( 1 * env_light_sample.pdf );
-
-    // Account for emissive surface if light was not sampled
-    // End Path if maximum depth rendered
-    // Get BSDF and skip over medium boundries
-    // Sample direct illumination if sample lights is true
-    // Sample outgoing direction at intersecion to continue path
-
-}
-
-[shader("closesthit")]
-void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttributes attr)
-{
-
-    float3 barycentrics = float3(1.f - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
+Hit_Info get_hit_info(float2 barycentrics_2) {
+    float3 barycentrics = float3(1.f - barycentrics_2.x - barycentrics_2.y, barycentrics_2.x, barycentrics_2.y);
 
     uint geometry_index = GeometryIndex();
     Geometry_Info g_info = geometry_info[geometry_index];
@@ -378,14 +389,12 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
     Vertex_Position_Normal_Tangent_Color_Texturecoord vertex3 = vertex_buffer[indicies.z + g_info.vertex_offset];
     vertex3.position *= .1f;
 
-    float2 uv_hit  = barycentrics.x * vertex1.texCoord + barycentrics.y * vertex2.texCoord + barycentrics.z * vertex3.texCoord;
-    float3 p_hit   = barycentrics.x * vertex1.position + barycentrics.y * vertex2.position + barycentrics.z * vertex3.position;
-    float3 n_hit   = barycentrics.x * vertex1.normal   + barycentrics.y * vertex2.normal   + barycentrics.z * vertex3.normal;
-    n_hit = normalize(n_hit);
-
-    Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + g_info.material_id * 3)];
-    Texture2D normal_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + g_info.material_id * 3 + 1)];
-    Texture2D roughness_metallic_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + g_info.material_id * 3 + 2)];
+    Hit_Info hit_info;
+    hit_info.uv = barycentrics.x * vertex1.texCoord + barycentrics.y * vertex2.texCoord + barycentrics.z * vertex3.texCoord;
+    hit_info.p  = barycentrics.x * vertex1.position + barycentrics.y * vertex2.position + barycentrics.z * vertex3.position;
+    hit_info.n  = barycentrics.x * vertex1.normal   + barycentrics.y * vertex2.normal   + barycentrics.z * vertex3.normal;
+    hit_info.n  = normalize(hit_info.n);
+    hit_info.material_id = g_info.material_id;
 
     /////////////////////////////////////////////
     //
@@ -415,19 +424,19 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
     RayDesc rx = create_camera_ray(uint2(current_pixel_xy.x + 1, current_pixel_xy.y));
     RayDesc ry = create_camera_ray(uint2(current_pixel_xy.x, current_pixel_xy.y - 1));
 
-    float  d  = -dot(n_hit, p_hit);
-    float  tx = (-dot(n_hit, rx.Origin) - d) / dot(n_hit, rx.Direction);  // I think something is broken here?
+    float  d  = -dot(hit_info.n, hit_info.p);
+    float  tx = (-dot(hit_info.n, rx.Origin) - d) / dot(hit_info.n, rx.Direction);  // I think something is broken here?
     // tx *= 0.01f;
     // float tx = RayTCurrent();
     float3 px = rx.Origin + tx * rx.Direction;
 
-    float  ty = (-dot(n_hit, ry.Origin) - d) / dot(n_hit, ry.Direction);  
+    float  ty = (-dot(hit_info.n, ry.Origin) - d) / dot(hit_info.n, ry.Direction);  
     // float ty = RayTCurrent();
     // ty *= 0.01f;
     float3 py = ry.Origin + ty * ry.Direction;
 
-    float3 dpdx = px - p_hit;
-    float3 dpdy = py - p_hit;
+    float3 dpdx = px - hit_info.p;
+    float3 dpdy = py - hit_info.p;
 
     // Find partial derivitive of (u,v) texture coords w/r/t (x, y) screen space coords
     // https://www.pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing#FindingtheTextureSamplingRate
@@ -455,10 +464,86 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
     dudy = isfinite(dudy) ? clamp(dudy, -1e8f, 1e8f) : 0;
     dvdy = isfinite(dvdy) ? clamp(dvdy, -1e8f, 1e8f) : 0;
 
-    float2 ddx = float2(dudx, dvdx);
-    float2 ddy = float2(dudy, dvdy);
+    hit_info.ddx = float2(dudx, dvdx);
+    hit_info.ddy = float2(dudy, dvdy);
 
-    float4 albedo_sample = albedo_texture.SampleGrad(sampler_1, uv_hit, ddx, ddy);
+    return hit_info;
+}
+
+[shader("closesthit")]
+void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr){
+
+    if(payload.just_hit == 1) {
+        payload.color.x = 1; 
+        return;
+    }
+
+    payload.recursion_depth++;
+
+    float2 u; // Random Vector -> TODO
+    float3 ray_index = DispatchRaysIndex();
+    u.x = asfloat(pcg_hash(asint(ray_index.x)));
+    u.y = asfloat(pcg_hash(asint(ray_index.y)));
+    float L = 0;
+    float beta = payload.beta;
+
+
+    // Account for emissive surface if light was not sampled
+    // End Path if maximum depth rendered
+    // Get BSDF and skip over medium boundries
+    // Sample direct illumination if sample lights is true
+
+    float3 ray_direction = WorldRayDirection();
+    float3 ray_origin    = WorldRayOrigin();
+    float3 ray_hit_point = ray_origin + (RayTCurrent() * ray_direction);
+
+    float3 wo = -ray_direction;
+
+    Light_Sample env_light_sample = EnvMap_SampleLi(ray_hit_point, u);  
+
+    Hit_Info hit_info = get_hit_info(attr.barycentrics);
+
+    Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3)];
+    // Texture2D normal_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 1)];
+    // Texture2D roughness_metallic_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 2)];
+
+    float4 albedo_sample = albedo_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy);
+    float3 f = BxDF_diffuse_f(wo, env_light_sample.wi, albedo_sample.rgb);
+
+    if(!env_light_sample.occluded)
+        payload.color.rgb += f * payload.beta * env_light_sample.L;// payload.beta * f * env_light_sample.L / ( 1 * env_light_sample.pdf );
+
+    // Sample outgoing direction at intersecion to continue path
+    BSDF_Sample bsdf_sample = BxDF_diffuse_sample_f(wo, albedo_sample.rgb, u);
+
+    payload.beta -= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.n) / bsdf_sample.pdf);
+    // pbrt handles whether the ray was specular or not
+
+    // Create and trace new ray
+    RayDesc ray;
+    ray.Origin = ray_hit_point;
+    ray.Direction = bsdf_sample.wi;
+    ray.TMin = 0.01;
+    ray.TMax = 100000.0;
+
+    // Trace the bound scene with ray created above
+    if(payload.beta > 0.0 && payload.recursion_depth < 4)
+        TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
+    return;
+
+}
+
+[shader("closesthit")]
+void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttributes attr)
+{
+
+    Hit_Info hit_info = get_hit_info(attr.barycentrics);
+
+    Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3)];
+    Texture2D normal_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 1)];
+    Texture2D roughness_metallic_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 2)];
+
+    float4 albedo_sample = albedo_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy);
 
     payload.color = albedo_sample;
 
@@ -467,6 +552,10 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
 [shader("miss")]
 void MyMissShader(inout RayPayload payload : SV_RayPayload)
 {
+    if(payload.just_hit == 1) {
+        payload.color.x = 0; 
+        return;
+    }
     float3 ray = WorldRayDirection();
-    payload.color += payload.beta * EnvMap_Le(ray);
+    payload.color.rgb += payload.beta * EnvMap_Le(ray);
 }
