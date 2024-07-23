@@ -1,3 +1,18 @@
+7/22/24
+
+Randomness!
+
+Randomness has been introduced over time. Scene looks much better, and more correct!
+
+Bugs to look into:
+- Upload Buffer allocation failure after running app too long, probably releated to random texture...
+- Odd line in the middle of the screen 
+- Increasing sample count does not have the effect that I thought it would have.
+    - 1 sample vs 300 samples looks very similar
+
+TODO:
+- Upgrade to a more complex path tracer
+
 7/21/24
 
 I see the light!

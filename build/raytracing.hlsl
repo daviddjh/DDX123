@@ -8,6 +8,7 @@ ConstantBuffer<Texture_Index> output_texture_index  : register(b0, ComputeSpace)
 ConstantBuffer<Output_Dimensions> output_dimensions : register(b1, ComputeSpace);
 ConstantBuffer<Texture_Index>   texture_array_begin : register(b2, ComputeSpace);
 ConstantBuffer<Texture_Index>   env_map_index       : register(b3, ComputeSpace);
+ConstantBuffer<Texture_Index>   random_tex_index    : register(b4, ComputeSpace);
 
 
 struct Vertex_Position_Normal_Tangent_Color_Texturecoord
@@ -44,9 +45,10 @@ typedef BuiltInTriangleIntersectionAttributes MyAttributes;
 struct RayPayload
 {
     float4 color;
-    float  beta;
+    float3  beta;
     uint   just_hit;
     uint   recursion_depth;
+    uint   random_u;
 };
 struct Viewport
 {
@@ -71,6 +73,23 @@ float pcg_hash(uint input)
     uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
     uint final_int = (word >> 22u) ^ word;
     return final_int * (1.0 / 4294967296.0); // Convert from [0, MAX_INT] int to [0,1] float
+}
+
+float pcg_hash_prng(inout uint rng_state)
+{
+    uint state = rng_state;
+    rng_state = rng_state * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    uint final_int = (word >> 22u) ^ word;
+    return final_int * (1.0 / 4294967296.0); // Convert from [0, MAX_INT] int to [0,1] float
+}
+
+float3 get_rand_float3(inout uint u){
+    float3 rand;
+    rand.x = pcg_hash(u);
+    rand.y = pcg_hash(u);
+    rand.z = pcg_hash(u);
+    return rand;
 }
 
 float3 EnvMap_ImageLe(float2 uv){
@@ -286,7 +305,7 @@ bool IsInsideViewport(float2 p, Viewport viewport)
         && (p.y >= viewport.top && p.y <= viewport.bottom);
 }
 
-RayDesc create_camera_ray(uint2 pixel_xy){
+RayDesc create_camera_ray(uint2 pixel_xy, inout uint random_u){
 
     float3 camera_center = float3(.0f,.0f,.0f);
     float viewport_height = 2.0;
@@ -295,6 +314,10 @@ RayDesc create_camera_ray(uint2 pixel_xy){
     float3 viewport_v = float3(0, -viewport_height, 0);
     float3 pixel_delta_u = viewport_u / output_dimensions.width;
     float3 pixel_delta_v = viewport_v / output_dimensions.height;
+    float3 u_rand = get_rand_float3(random_u);
+    float3 v_rand = get_rand_float3(random_u);
+    u_rand *= pixel_delta_u;
+    v_rand *= pixel_delta_v;
 
     float3 viewport_upper_left = camera_center - float3(0, 0, focal_length) - (viewport_u / 2) - (viewport_v / 2);
     float3 pixel00_loc = viewport_upper_left + 0.5*(pixel_delta_u + pixel_delta_v);
@@ -302,7 +325,7 @@ RayDesc create_camera_ray(uint2 pixel_xy){
     uint2  xy_uint = uint2(pixel_xy);
     float2 xy   = float2(xy_uint);
 
-    float3 pixel_center = pixel00_loc + (xy.x * pixel_delta_u) + (xy.y * pixel_delta_v);
+    float3 pixel_center = pixel00_loc + ((xy.x * pixel_delta_u) + u_rand) + ((xy.y * pixel_delta_v) + v_rand);
     float3 ray_direction = normalize(pixel_center - camera_center);
     ray_direction = mul(float4(ray_direction, 1.), per_frame_data.view_matrix);
     ray_direction = normalize(ray_direction);
@@ -328,22 +351,38 @@ void MyRaygenShader()
 
     // Get Screen Pixel
     uint2 pixel_xy = DispatchRaysIndex().xy;
-    
-    // Create Ray from camera
-    RayDesc ray = create_camera_ray(pixel_xy);
+    uint2 texture_loc = pixel_xy % 32;
 
+    Texture2D<uint> random_tex = texture_2d_uint_table[random_tex_index.texture_index];
+    uint random_u = random_tex.Load(float3(texture_loc, 0));
+    random_u *= pixel_xy.x * pixel_xy.y;
+    
+    
     // Beginning ray payload ( starting color )
     RayPayload payload; //  = { float4(0.0, 0.0, 0.0, 0), 1.0, 0  };
     payload.color = float4(0.0, 0.0, 0.0, 0);
-    payload.beta = 1.0;
-    payload.just_hit = 0;
-    payload.recursion_depth = 0;
+    payload.random_u = random_u;
 
-    // Trace the bound scene with ray created above
-    TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
+    static const uint SAMPLE_COUNT = 1;
+    RayDesc ray;
+    for(uint i = 0; i < SAMPLE_COUNT; i++){
 
+        // Create Ray from camera
+        ray = create_camera_ray(pixel_xy, random_u);
+        payload.beta = float3(1.0, 1.0, 1.0);
+        payload.just_hit = 0;
+        payload.recursion_depth = 0;
+        TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
+
+    }
+
+    // ray = create_camera_ray(pixel_xy, random_u);
+    // payload.beta = 1.0;
+    // payload.just_hit = 0;
+    // payload.recursion_depth = 0;
+    // TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
     // Write the raytraced color to the output texture.
-    float3 output_color = payload.color.rgb;
+    float3 output_color = payload.color.rgb ; // / SAMPLE_COUNT;
     texture_2d_uav_table[output_texture_index.texture_index][pixel_xy]= float4(output_color, 1);
 
     return;
@@ -421,8 +460,9 @@ Hit_Info get_hit_info(float2 barycentrics_2) {
     // Estimate partial derivitive of world space position w/r/t screen space coords
     // https://www.pbr-book.org/4ed/Textures_and_Materials/Texture_Sampling_and_Antialiasing#FindingtheTextureSamplingRate
     uint2 current_pixel_xy = DispatchRaysIndex().xy;
-    RayDesc rx = create_camera_ray(uint2(current_pixel_xy.x + 1, current_pixel_xy.y));
-    RayDesc ry = create_camera_ray(uint2(current_pixel_xy.x, current_pixel_xy.y - 1));
+    uint rand = 0;
+    RayDesc rx = create_camera_ray(uint2(current_pixel_xy.x + 1, current_pixel_xy.y), rand);
+    RayDesc ry = create_camera_ray(uint2(current_pixel_xy.x, current_pixel_xy.y - 1), rand);
 
     float  d  = -dot(hit_info.n, hit_info.p);
     float  tx = (-dot(hit_info.n, rx.Origin) - d) / dot(hit_info.n, rx.Direction);  // I think something is broken here?
@@ -482,8 +522,10 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
 
     float2 u; // Random Vector -> TODO
     float3 ray_index = DispatchRaysIndex();
-    u.x = asfloat(pcg_hash(asint(ray_index.x)));
-    u.y = asfloat(pcg_hash(asint(ray_index.y)));
+    // u.x = asfloat(pcg_hash(asint(ray_index.x)));
+    // u.y = asfloat(pcg_hash(asint(ray_index.y)));
+    u.xy = get_rand_float3(payload.random_u).xy;
+    // u.y = pcg_hash_prng(payload.random_u);
     float L = 0;
     float beta = payload.beta;
 
@@ -516,7 +558,7 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     // Sample outgoing direction at intersecion to continue path
     BSDF_Sample bsdf_sample = BxDF_diffuse_sample_f(wo, albedo_sample.rgb, u);
 
-    payload.beta -= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.n) / bsdf_sample.pdf);
+    payload.beta *= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.n) / bsdf_sample.pdf);
     // pbrt handles whether the ray was specular or not
 
     // Create and trace new ray
@@ -527,7 +569,7 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     ray.TMax = 100000.0;
 
     // Trace the bound scene with ray created above
-    if(payload.beta > 0.0 && payload.recursion_depth < 4)
+    if((payload.beta.x > 0.0 || payload.beta.y > 0.0 || payload.beta.z > 0.0) && payload.recursion_depth < 4)
         TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
     return;
 

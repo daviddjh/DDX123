@@ -9,6 +9,7 @@
 #include <chrono>
 #include <random>
 #include "timeapi.h"
+#include <Wincrypt.h>
 
 #include "d_core.cpp"
 #include "d_dx12.cpp"
@@ -55,6 +56,7 @@ struct D_Textures {
     Texture*          g_buffer_rough_metal;
     Texture*          sampled_texture;
     Texture*          env_map;
+    Texture*          random_tex;
     Texture*          ssao_rotation_texture;
     Texture*          ssao_output_texture;
     Texture*          main_render_target;    // Size of render resolution - input to post processing
@@ -123,6 +125,8 @@ struct D_Renderer {
     RECT              window_rect;
     D_Scene           scene;
     Per_Frame_Data    per_frame_data;
+
+    HCRYPTPROV   hCryptProv;
 
     // d_array<Buffer*> blases;
     // Buffer* tlas;
@@ -800,6 +804,23 @@ int D_Renderer::init(){
 
     upload_command_list->load_decoded_texture_from_memory(textures.env_map, (u_ptr)env_map_img->pixels, true);
 
+    ///////////////////////////
+    // Random Texture
+    ///////////////////////////
+    Texture_Desc random_tex_desc;
+    random_tex_desc.format = DXGI_FORMAT_R8_UINT;
+    random_tex_desc.width  = 32;
+    random_tex_desc.height = 32;
+    random_tex_desc.usage  = Texture::USAGE::USAGE_SAMPLED;
+
+    textures.random_tex = resource_manager.create_texture(L"Random Texture", random_tex_desc);
+
+    CryptAcquireContext(&hCryptProv, NULL, NULL, PROV_RSA_FULL, 0);
+
+    u32 random_data[32 * 32];
+    CryptGenRandom(hCryptProv, 32*32*4, (u8*)&random_data);
+
+    upload_command_list->load_decoded_texture_from_memory(textures.random_tex, (u_ptr)&random_data, false);
 
     ///////////////////////
     //  DearIMGUI
@@ -1174,6 +1195,10 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
 
     // Porting code from backend for debug...
 
+    u32 random_data[32 * 32];
+    CryptGenRandom(hCryptProv, 32*32*4, (u8*)&random_data);
+
+    command_list->load_decoded_texture_from_memory(textures.random_tex, (u_ptr)&random_data, false);
 
     command_list->set_shader(shaders.dxr_rayt_shader);
 
@@ -1245,10 +1270,15 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     Descriptor_Handle env_map_handle = resource_manager.load_dyanamic_frame_data((void*)&env_map_index, sizeof(Texture_Index), 256);
     command_list->bind_handle(env_map_handle, binding_point_string_lookup("env_map_index"));
 
+    Texture_Index random_tex_index = {};
+    random_tex_index.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+    Descriptor_Handle random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(random_tex_handle, binding_point_string_lookup("random_tex_index"));
 
     // Now be bind the texture table to the root signature. 
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
 
     command_list->dispatch_rays(config.render_width, config.render_height);
 
