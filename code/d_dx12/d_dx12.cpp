@@ -2752,6 +2752,53 @@ namespace d_dx12 {
                 }
             }
             break;
+
+            case(Buffer::USAGE::USAGE_SHADER_RESOURCE):
+            {
+                // Should I get a descriptor handle here? It's offline so it should be fine?
+                buffer->offline_descriptor_handle = this->offline_cbv_srv_uav_descriptor_heap.get_next_handle();
+
+                // Not sure where to find this, just showed up in an error...
+                // Guess we need to align CB size to 256
+                // Old NVidia requirement?
+                // u16 alignment = 256;
+                // u32 remainder = total_size % alignment;
+                // u32 aligned_total_size = total_size + (alignment - remainder);
+                buffer->aligned_total_size = AlignPow2Up(total_size, 256);
+
+                // Create the resource in the buffer
+                D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+                //D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(aligned_total_size);
+                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC( D3D12_RESOURCE_DIMENSION_BUFFER, 0, buffer->aligned_total_size,
+                                                        1, 1, 1, DXGI_FORMAT_UNKNOWN, 1, 0, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, desc.flags);
+
+                d3d12_device->CreateCommittedResource(
+                    &heap_prop,
+                    D3D12_HEAP_FLAG_NONE,
+                    &resource_desc,
+                    buffer->state,
+                    nullptr,
+                    IID_PPV_ARGS(buffer->d3d12_resource.GetAddressOf())
+                );
+
+                #ifdef DEBUG
+                buffer->d3d12_resource->SetName(name);
+                #endif
+
+                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc;
+                srv_desc.Format = DXGI_FORMAT_UNKNOWN;// desc.format;
+                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                srv_desc.Buffer.FirstElement = 0;
+                srv_desc.Buffer.NumElements = desc.number_of_elements;
+                srv_desc.Buffer.StructureByteStride = desc.size_of_each_element;
+                srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+
+                d3d12_device->CreateShaderResourceView(buffer->d3d12_resource.Get(), &srv_desc, buffer->offline_descriptor_handle.cpu_descriptor_handle);
+
+            }
+            break;
+
         }
 
         return buffer;

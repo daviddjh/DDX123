@@ -22,16 +22,17 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float3 color = texture_2d_table[input_texture_index.texture_index][DTid.xy].xyz;
 
     // Read ssao occlusion ammount
-    float ssao_occlusion = 0.5;
     if(post_processing_config.ssao_enabled){
+        float ssao_occlusion = 0.5;
         ssao_occlusion = texture_2d_table[ssao_texture_index.texture_index][DTid.xy].x;
+        color *= ssao_occlusion;
     }
     
     // Tone Map and Gamma Correct
-    color *= ssao_occlusion;
 
     // Reinhert
     // color = apply_reinhert(color);
+    color *= 0.4;
 
     // ACES
     color = apply_aces_film_curve(color);

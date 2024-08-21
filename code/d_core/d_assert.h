@@ -34,6 +34,7 @@
 #define ASSERT_LOG(s, l) do{if(!(s)){os_debug_print(l); DEBUG_BREAK;}}while(0)
 #else
 #define ASSERT(s)
+#define ASSERT_LOG(s,l)
 #endif // USING_ASSERT
 
 #endif // _D_ASSERT

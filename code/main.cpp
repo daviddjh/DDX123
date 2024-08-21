@@ -61,12 +61,17 @@ struct D_Textures {
     Texture*          ssao_output_texture;
     Texture*          main_render_target;    // Size of render resolution - input to post processing
     Texture*          main_output_target;    // Size of output resolution - output of post processing
+    Texture*          env_conditional_cdfs;     
+    Texture*          env_luminance_distribution;     
 };
 
 struct D_Buffers{
     Buffer*           full_screen_quad_vertex_buffer;
     Buffer*           full_screen_quad_index_buffer;
     Buffer*           ssao_sample_kernel;
+    Buffer*           env_marginal_cdf;
+    Buffer*           env_full_conditional_distribution_integrals;
+    Buffer*           env_importance_sample_info;
 };
 
 enum D_Render_Passes : u8 {
@@ -125,6 +130,10 @@ struct D_Renderer {
     RECT              window_rect;
     D_Scene           scene;
     Per_Frame_Data    per_frame_data;
+
+    // Env map importance sampling
+    f32* conditional_cdfs;
+    f32* full_distribution_integrals;
 
     HCRYPTPROV   hCryptProv;
 
@@ -785,6 +794,8 @@ int D_Renderer::init(){
     ///////////////////////
     // Env Map Light
     ///////////////////////
+
+    // Load image to CPU
     ScratchImage env_map_scratch_img;
     HRESULT hr = LoadFromHDRFile(L"buikslotermeerplein_4k.hdr", NULL, env_map_scratch_img);
     // HRESULT hr = LoadFromHDRFile(L"kloofendal_48d_partly_cloudy_puresky_4k.hdr", NULL, env_map_scratch_img);
@@ -802,7 +813,132 @@ int D_Renderer::init(){
 
     textures.env_map = resource_manager.create_texture(L"Environment Map", env_map_desc);
 
+    // Load image to GPU
     upload_command_list->load_decoded_texture_from_memory(textures.env_map, (u_ptr)env_map_img->pixels, true);
+
+    // Create lumosity CDFs
+    {
+        u32 width  = env_map_img->width;
+        u32 height = env_map_img->height;
+        
+        // Create pdf distribution data + fill with luminance values
+        f32* distribution_data = (f32*)per_frame_arena->allocate( width * height * 4 /* 4 bytes in f32 */);
+
+        f32 conditional_min = 9999.;
+        f32 conditional_max = 0.0;
+        f32 conditional_minmax_delta = -1;
+        for (u32 i = 0; i < height; i++){
+            for (u32 j = 0; j < width; j++){
+                // Calculate and store luminance
+                f32 luminance = ((f32*)env_map_img->pixels)[(i*width + j) * 4] * 0.2126 + ((f32*)env_map_img->pixels)[(i*width+ j) * 4 + 1] * 0.7152 + ((f32*)env_map_img->pixels)[(i*width+ j) * 4 + 2] * 0.0722;
+                distribution_data[(i*width) + j] = luminance;
+                conditional_min = (luminance < conditional_min) ? luminance : conditional_min;
+                conditional_max = (luminance > conditional_max) ? luminance : conditional_max;
+            }
+        }
+        conditional_minmax_delta = 1.0;// conditional_max - conditional_min;
+
+        // Calculate conditional cdfs
+        f32 marginal_min = 9999.;
+        f32 marginal_max = 0.0;
+        f32* conditional_cdfs = (f32*)per_frame_arena->allocate( width * ( height + 1 ) * 4 /* 4 bytes in f32 */);
+        f32* full_conditional_distribution_integrals = (f32*)per_frame_arena->allocate( width * 4 /* 4 bytes in f32 */);
+        for (int i = 0; i < width; i++){
+            f32* cdf = &conditional_cdfs[i*height];
+            cdf[0] = 0;
+            for (int j = 1; j < height + 1; j++){
+                cdf[j] = cdf[j - 1] + distribution_data[(j*width + i)] * conditional_minmax_delta / height;   // Integral of pdf distribution up to j
+            }
+
+            full_conditional_distribution_integrals[i] = cdf[height]; // Full Integral of pdf distribution [0, height + 1]
+            marginal_min = (full_conditional_distribution_integrals[i] < marginal_min) ? full_conditional_distribution_integrals[i] : marginal_min;
+            marginal_max = (full_conditional_distribution_integrals[i] > marginal_max) ? full_conditional_distribution_integrals[i] : marginal_max;
+
+            if (full_conditional_distribution_integrals[i] == 0){     // No luminance this column, fill in with uniform distribution ( linear cdf )
+                for (int j = 1; j < height + 1; j++){
+                    cdf[j] = ((float)j) / height;
+                }
+            } else {
+                for (int j = 1; j < height + 1; j++){     // Normalize CDF
+                    cdf[j] /= full_conditional_distribution_integrals[i];
+                }
+            }
+
+        }
+
+        // Create Marginal CDF 
+        f32* marginal_cdf = (f32*)per_frame_arena->allocate( (width + 1) * 4 /* 4 bytes in f32 */);
+        f32  full_marginal_distribution_integral;
+
+        f32 marginal_minmax_delta = 1.0;//marginal_max - marginal_min;
+
+        marginal_cdf[0] = 0;
+        for (int j = 1; j < width + 1; j++){
+            marginal_cdf[j] = marginal_cdf[j - 1] + full_conditional_distribution_integrals[j - 1] * marginal_minmax_delta / width;   // Integral of pdf distribution up to j
+        }
+
+        full_marginal_distribution_integral = marginal_cdf[width]; // Full Integral of array of conditional integrals [0, width + 1]
+
+        if (full_marginal_distribution_integral == 0){     // No luminance this column, fill in with uniform distribution ( linear cdf )
+            for (int j = 1; j < width+ 1; j++){
+                marginal_cdf[j] = ((float)j) / width;
+            }
+        } else {
+            for (int j = 1; j < width + 1; j++){     // Normalize CDF
+                marginal_cdf[j] /= full_marginal_distribution_integral;
+            }
+        }
+
+        // :)
+
+        // Upload data and to GPU
+
+        Texture_Desc env_conditional_cdfs_desc;
+        env_conditional_cdfs_desc.format = DXGI_FORMAT_R32_FLOAT;
+        env_conditional_cdfs_desc.width  = width;  
+        env_conditional_cdfs_desc.height = height + 1;  
+        env_conditional_cdfs_desc.usage  = Texture::USAGE::USAGE_SAMPLED;
+        textures.env_conditional_cdfs = resource_manager.create_texture(L"conditional_cdfs", env_conditional_cdfs_desc);
+        upload_command_list->load_decoded_texture_from_memory(textures.env_conditional_cdfs, (u_ptr)conditional_cdfs, false);
+
+        Texture_Desc env_luminance_distribution_desc;
+        env_luminance_distribution_desc.format = DXGI_FORMAT_R32_FLOAT;
+        env_luminance_distribution_desc.width  = width;  
+        env_luminance_distribution_desc.height = height;  
+        env_luminance_distribution_desc.usage  = Texture::USAGE::USAGE_SAMPLED;
+        textures.env_luminance_distribution = resource_manager.create_texture(L"env_luminance_distribution", env_luminance_distribution_desc);
+        upload_command_list->load_decoded_texture_from_memory(textures.env_luminance_distribution, (u_ptr)distribution_data, false);
+
+        Buffer_Desc env_marginal_cdf_desc = {};
+        env_marginal_cdf_desc.number_of_elements = width + 1;
+        env_marginal_cdf_desc.size_of_each_element = sizeof(f32);
+        env_marginal_cdf_desc.usage  = Buffer::USAGE::USAGE_SHADER_RESOURCE;
+        env_marginal_cdf_desc.format = DXGI_FORMAT_R32_FLOAT;
+        buffers.env_marginal_cdf = resource_manager.create_buffer(L"env_marginal_cdf", env_marginal_cdf_desc);
+        upload_command_list->load_buffer(buffers.env_marginal_cdf, (u8*)marginal_cdf, (width + 1) * 4, 256);
+
+        Buffer_Desc env_full_conditional_distribution_integrals_desc = {};
+        env_full_conditional_distribution_integrals_desc.number_of_elements = width;
+        env_full_conditional_distribution_integrals_desc.size_of_each_element = sizeof(f32);
+        env_full_conditional_distribution_integrals_desc.usage  = Buffer::USAGE::USAGE_SHADER_RESOURCE;
+        env_full_conditional_distribution_integrals_desc.format = DXGI_FORMAT_R32_FLOAT;
+        buffers.env_full_conditional_distribution_integrals = resource_manager.create_buffer(L"env_full_conditional_distribution_integrals", env_full_conditional_distribution_integrals_desc);
+        upload_command_list->load_buffer(buffers.env_full_conditional_distribution_integrals, (u8*)full_conditional_distribution_integrals, width * 4, 256);
+
+        Buffer_Desc env_importance_sample_info_desc = {};
+        env_importance_sample_info_desc.number_of_elements = 1;
+        env_importance_sample_info_desc.size_of_each_element = sizeof(Env_Map_Importance_Sample_Info);
+        env_importance_sample_info_desc.usage  = Buffer::USAGE::USAGE_CONSTANT_BUFFER;
+        buffers.env_importance_sample_info = resource_manager.create_buffer(L"env_importance_sample_info", env_importance_sample_info_desc);
+
+        Env_Map_Importance_Sample_Info env_map_sample_info;
+        env_map_sample_info.full_marginal_distribution_integral = full_marginal_distribution_integral;
+        env_map_sample_info.width  = width;
+        env_map_sample_info.height = height;
+
+        upload_command_list->load_buffer(buffers.env_importance_sample_info, (u8*)&env_map_sample_info, sizeof(Env_Map_Importance_Sample_Info), 256);
+        
+    }
 
     ///////////////////////////
     // Random Texture
@@ -1275,10 +1411,51 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     Descriptor_Handle random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
     command_list->bind_handle(random_tex_handle, binding_point_string_lookup("random_tex_index"));
 
+
+    // Bindings needed for importance sampling the environment map
+    Texture_Index env_conditional_cdfs_index = {};
+    env_conditional_cdfs_index.texture_index = (unsigned int)command_list->bind_texture(textures.env_conditional_cdfs, &resource_manager, 0);
+    Descriptor_Handle env_conditional_cdfs_handle = resource_manager.load_dyanamic_frame_data((void*)&env_conditional_cdfs_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(env_conditional_cdfs_handle, binding_point_string_lookup("env_conditional_cdfs_index"));
+
+    Texture_Index env_luminance_distribution_index = {};
+    env_luminance_distribution_index.texture_index = (unsigned int)command_list->bind_texture(textures.env_luminance_distribution, &resource_manager, 0);
+    Descriptor_Handle env_luminance_distribution_handle = resource_manager.load_dyanamic_frame_data((void*)&env_luminance_distribution_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(env_luminance_distribution_handle, binding_point_string_lookup("env_luminance_distribution_index"));
+
+
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc;
+        srv_desc.Format = DXGI_FORMAT_UNKNOWN;// desc.format;
+        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv_desc.Buffer.FirstElement = 0;
+        srv_desc.Buffer.NumElements = buffers.env_marginal_cdf->number_of_elements;
+        srv_desc.Buffer.StructureByteStride = buffers.env_marginal_cdf->size_of_each_element;
+        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        command_list->bind_buffer_read(buffers.env_marginal_cdf, binding_point_string_lookup("env_marginal_cdf"), &srv_desc);
+    }
+
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc;
+        srv_desc.Format = DXGI_FORMAT_UNKNOWN;// desc.format;
+        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv_desc.Buffer.FirstElement = 0;
+        srv_desc.Buffer.NumElements = buffers.env_full_conditional_distribution_integrals->number_of_elements;
+        srv_desc.Buffer.StructureByteStride = buffers.env_full_conditional_distribution_integrals->size_of_each_element;
+        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        command_list->bind_buffer_read(buffers.env_full_conditional_distribution_integrals, binding_point_string_lookup("env_full_conditional_distribution_integrals"), &srv_desc);
+    }
+
+    command_list->bind_constant_buffer(buffers.env_importance_sample_info, binding_point_string_lookup("env_importance_sample_info"));
+
+
     // Now be bind the texture table to the root signature. 
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
     command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_float_table"));
 
     command_list->dispatch_rays(config.render_width, config.render_height);
 

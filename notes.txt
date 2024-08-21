@@ -1,3 +1,10 @@
+8/21/24
+
+!!!!!!!!
+Its not the beta. The color is off on half the screen, but the noise in that part of the screen looks comparable? So something downstream of NEE on first bounce is affecting the color.
+!!!!!!!!
+
+
 7/22/24
 
 Randomness!

@@ -88,6 +88,12 @@ ALIGN_STRUCT struct Post_Processing_Config
     uint ssao_enabled;
 };
 
+ALIGN_STRUCT struct Env_Map_Importance_Sample_Info {
+    float full_marginal_distribution_integral;
+    uint width;
+    uint height;
+};
+
 #ifdef __cplusplus
 #undef float2
 #undef float3

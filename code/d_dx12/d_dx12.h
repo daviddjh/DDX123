@@ -249,7 +249,8 @@ namespace d_dx12 {
             USAGE_NONE,
             USAGE_VERTEX_BUFFER,
             USAGE_INDEX_BUFFER,
-            USAGE_CONSTANT_BUFFER
+            USAGE_CONSTANT_BUFFER,
+            USAGE_SHADER_RESOURCE
         };
 
         Microsoft::WRL::ComPtr<ID3D12Resource2>   d3d12_resource;
