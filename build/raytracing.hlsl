@@ -120,11 +120,11 @@ float sqr(float a){
 
 // Functions for spherical paramerterization of vector w:
 float cos_theta(float3 w){
-    return w.y;
+    return w.z;
 }
 
 float cos_2_theta(float3 w){
-    return w.y * w.y;
+    return w.z * w.z;
 }
 
 float sin_2_theta(float3 w){
@@ -146,7 +146,7 @@ float cos_phi(float3 w){
 
 float sin_phi(float3 w){
     float _sin_theta = sin_theta(w);
-    return (_sin_theta == 0) ? 0 : clamp(w.z / _sin_theta, -1, 1);
+    return (_sin_theta == 0) ? 0 : clamp(w.y / _sin_theta, -1, 1);
 }
 
 float3 EnvMap_ImageLe(float2 uv){
@@ -449,7 +449,7 @@ float3 fresnel_schlick_aprox(float cosTheta, float3 F0){
     return F0 + (float3(1.0,1.0,1.0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-#define ROUGHNESS 0.001
+#define ROUGHNESS 0.1
 
 // Sample normal at a microfacet ( TrowbridgeReitz )
 // PBR book section 9.6
@@ -543,7 +543,7 @@ float3 BxDF_TS_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info){
     if((sqr(wm.x) + sqr(wm.y) + sqr(wm.z)) == 0) return float3(0., 0., 0.);
     wm = normalize(wm);
 
-    float3 base_metallic   = 0.2;  // TODO SHOULD BE SAMPLED FROM TEXTURE
+    float3 base_metallic   = 0.0;  // TODO SHOULD BE SAMPLED FROM TEXTURE
     float3 F0 = float3(0.04, 0.04, 0.04); 
     F0 = lerp(F0, albedo, base_metallic);
     float3 F = fresnel_schlick_aprox(cosTheta_o, F0);
@@ -611,7 +611,7 @@ BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info
     float cosTheta_i = abs(cos_theta(wi));
 
     // Fresnel Factor for conductor BRDF:
-    float3 base_metallic   = 0.2;  // TODO SHOULD BE SAMPLED FROM TEXTURE
+    float3 base_metallic   = 0.0;  // TODO SHOULD BE SAMPLED FROM TEXTURE
 
     float3 F0 = float3(0.04, 0.04, 0.04); 
     F0 = lerp(F0, albedo, base_metallic);
@@ -696,7 +696,7 @@ void MyRaygenShader()
     payload.color = float4(0.0, 0.0, 0.0, 0);
     payload.random_u = random_u;
 
-    static const uint SAMPLE_COUNT = 20;
+    static const uint SAMPLE_COUNT = 15;
     RayDesc ray;
     for(uint i = 0; i < SAMPLE_COUNT; i++){
 
