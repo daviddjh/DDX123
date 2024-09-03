@@ -329,6 +329,8 @@ namespace d_dx12 {
                 // Get shader input reflection data, find binding point index for shader->binding_points
                 D3D12_SHADER_INPUT_BIND_DESC d3d12_shader_input_binding_point_desc;
                 d3d12_function_reflection->GetResourceBindingDesc(i, &(d3d12_shader_input_binding_point_desc));
+                // Skip the "$Globals" binding point
+                if(strcmp(d3d12_shader_input_binding_point_desc.Name, "$Globals") == 0) continue;
                 const u32 binding_point_index = binding_point_string_lookup(d3d12_shader_input_binding_point_desc.Name);                    
                 ASSERT_LOG(binding_point_index != UINT_MAX, "Binding Point not found in lookup table!");
 
@@ -399,6 +401,8 @@ namespace d_dx12 {
             // Get shader input reflection data, find binding point index for shader->binding_points
             D3D12_SHADER_INPUT_BIND_DESC d3d12_shader_input_binding_point_desc;
             d3d12_shader_reflection->GetResourceBindingDesc(i, &(d3d12_shader_input_binding_point_desc));
+            // Skip the "$Globals" binding point
+            if(strcmp(d3d12_shader_input_binding_point_desc.Name, "$Globals") == 0) continue;
             const u32 binding_point_index = binding_point_string_lookup(d3d12_shader_input_binding_point_desc.Name);                    
 
             Shader::Binding_Point& ddx12_binding_point = ddx12_shader->binding_points[binding_point_index];

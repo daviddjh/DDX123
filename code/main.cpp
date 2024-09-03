@@ -844,23 +844,23 @@ int D_Renderer::init(){
         f32* conditional_cdfs = (f32*)per_frame_arena->allocate( width * ( height + 1 ) * 4 /* 4 bytes in f32 */);
         f32* full_conditional_distribution_integrals = (f32*)per_frame_arena->allocate( width * 4 /* 4 bytes in f32 */);
         for (int i = 0; i < width; i++){
-            f32* cdf = &conditional_cdfs[i*height];
-            cdf[0] = 0;
+            // f32* cdf = &conditional_cdfs[i*height];
+            // cdf[0] = 0;
             for (int j = 1; j < height + 1; j++){
-                cdf[j] = cdf[j - 1] + distribution_data[(j*width + i)] * conditional_minmax_delta / height;   // Integral of pdf distribution up to j
+                conditional_cdfs[((j)*width + i)] = conditional_cdfs[((j-1)*width + i)] + distribution_data[((j-1)*width + i)] * conditional_minmax_delta / height;   // Integral of pdf distribution up to j
             }
 
-            full_conditional_distribution_integrals[i] = cdf[height]; // Full Integral of pdf distribution [0, height + 1]
+            full_conditional_distribution_integrals[i] = conditional_cdfs[((height)*width + i)]; // Full Integral of pdf distribution [0, height + 1]
             marginal_min = (full_conditional_distribution_integrals[i] < marginal_min) ? full_conditional_distribution_integrals[i] : marginal_min;
             marginal_max = (full_conditional_distribution_integrals[i] > marginal_max) ? full_conditional_distribution_integrals[i] : marginal_max;
 
             if (full_conditional_distribution_integrals[i] == 0){     // No luminance this column, fill in with uniform distribution ( linear cdf )
                 for (int j = 1; j < height + 1; j++){
-                    cdf[j] = ((float)j) / height;
+                    conditional_cdfs[((j)*width + i)] = ((float)j) / height;
                 }
             } else {
                 for (int j = 1; j < height + 1; j++){     // Normalize CDF
-                    cdf[j] /= full_conditional_distribution_integrals[i];
+                    conditional_cdfs[((j)*width + i)] /= full_conditional_distribution_integrals[i];
                 }
             }
 

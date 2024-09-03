@@ -32,7 +32,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     // Reinhert
     // color = apply_reinhert(color);
-    color *= 0.4;
+    // color *= 0.4;
 
     // ACES
     color = apply_aces_film_curve(color);

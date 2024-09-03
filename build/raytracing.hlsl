@@ -110,6 +110,45 @@ float3 get_rand_float3(inout uint u){
     return rand;
 }
 
+bool same_hemisphere(float3 a, float3 b){
+    return (a.y * b.y) > 0;
+}
+
+float sqr(float a){
+    return a * a;
+}
+
+// Functions for spherical paramerterization of vector w:
+float cos_theta(float3 w){
+    return w.y;
+}
+
+float cos_2_theta(float3 w){
+    return w.y * w.y;
+}
+
+float sin_2_theta(float3 w){
+    return max(0, 1-cos_2_theta(w));
+}
+
+float sin_theta(float3 w){
+    return sqrt(sin_2_theta(w));
+}
+
+float tan_2_theta(float3 w){
+    return sin_2_theta(w) / cos_2_theta(w);
+}
+
+float cos_phi(float3 w){
+    float _sin_theta = sin_theta(w);
+    return (_sin_theta == 0) ? 0 : clamp(w.x / _sin_theta, -1, 1);
+}
+
+float sin_phi(float3 w){
+    float _sin_theta = sin_theta(w);
+    return (_sin_theta == 0) ? 0 : clamp(w.z / _sin_theta, -1, 1);
+}
+
 float3 EnvMap_ImageLe(float2 uv){
     
     Texture2D environment_texture = texture_2d_table[env_map_index.texture_index];
@@ -251,20 +290,21 @@ Light_Sample EnvMap_SampleLi(float3 current_point, float2 u){
     float map_PDF = 1;
     
     // Sample the luminance PDF. This ensures samples are mostly taken from bright areas.
-    float2 uv = sample_env_luminance_distribution(u, map_PDF);
+    // float2 uv = sample_env_luminance_distribution(u, map_PDF);
     // map_PDF = 1;
 
     // Just a random sample, optionally forced to face upwards
-    // float2 uv = u;
+    float2 uv = u;
     float3 w_light = square_coord_to_sphere_coord(uv);
 
     // // Flip ray to only face upwards
-    // w_light.y = abs(w_light.y);
-    // uv = sphere_coord_to_square_coord(w_light);
+    w_light.y = abs(w_light.y);
+    uv = sphere_coord_to_square_coord(w_light);
 
     // float3 wi = render_from_light(w_light);  // This is where we would transform the unit vector from light space to "render" space
     float3 wi = w_light;
     float pdf = map_PDF / (4 * PI);
+    pdf *= 2;
 
     // Create Ray
     RayDesc ray;
@@ -336,6 +376,7 @@ float abs_cos_theta(float3 w){
 struct BSDF_Sample {
     float3 sampled_light;
     float3 wi;
+    float3 ks;
     float  pdf;
 };
 
@@ -381,6 +422,214 @@ BSDF_Sample BxDF_diffuse_sample_f(float3 wo, float3 albedo, float2 random_u, Hit
 
 float BxDF_diffuse_pdf(float3 wo, float3 wi){
     return cosign_hemisphere_pdf(abs_cos_theta(wi));
+}
+
+/////////////////////////////////////////////
+// Torrance-Sparrow BRDF Sampling
+/////////////////////////////////////////////
+
+// These are the transformations of the "microfacets", or tiny ellipsoidal shapes used to model a surface
+// 1/alpha_x, 1/alpha_y = 0
+// alpha_x, alpha_y ~~ 0 == ellipsoid stretched to flat surface, approximates perfectly specular material
+// alpha_x, alpha_y ~~ 3 == ellipsoid are large enough to introduce enough normal variation to make the surface apear rough
+// when alpha_x == alpha_y, the surface is isotropic.
+// A microfacet 
+
+// Does the same thing as sample_uniform_disk_concentric, just with a different mapping. Also no branch.
+float2 sample_uniform_disk_polar(float2 u){
+    float r = sqrt(u[0]);
+    float theta = 2 * PI * u[1];
+    return float2(r * cos(theta), r * sin(theta));
+}
+
+// Describes the ratio of light that gets reflected over the light that gets refracted
+// F0 is the base reflectivity of the surface
+// https://en.wikipedia.org/wiki/Schlick%27s_approximation
+float3 fresnel_schlick_aprox(float cosTheta, float3 F0){
+    return F0 + (float3(1.0,1.0,1.0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+#define ROUGHNESS 0.001
+
+// Sample normal at a microfacet ( TrowbridgeReitz )
+// PBR book section 9.6
+float3 TR_sample_wm(float3 w, float2 u){
+    float alpha_x = ROUGHNESS, alpha_y = ROUGHNESS;
+    float3 wh = normalize(float3(alpha_x * w.x, alpha_y * w.y, w.z));               /// CHECK THIS FOR ERRORS. SWAPPING Y and Z from book
+    if(wh.z < 0){
+        wh = -wh;
+    }
+    float3 t1 = (w.z < 0.9999f ? normalize(cross(float3(0., 0., 1.), wh)) : float3(1, 0, 0));
+    // float3 t1 = normalize(cross(float3(0., 0., 1.), wh));
+    float3 t2 = cross(wh, t1);
+
+    float2 p = sample_uniform_disk_polar(u);
+
+    // Affine transformation of the z interval ( ? )
+    float h = sqrt(1- (p.x * p.x));
+    p.y = lerp(h, p.y, (1 + wh.z) / 2);
+    float pz = sqrt(max(0, 1 - (pow(p.x,2) + pow(p.y,2))));
+    float3 nh = p.x * t1 + p.y * t2 + pz * wh;
+    nh = normalize(float3(alpha_x * nh.x, alpha_y * nh.y, nh.z));
+    return nh;//max(0.000001, nh.z)));
+}
+
+// Analytic solution of the masking function for Trowbridge-Reitz distribution:
+float TR_lambda(float3 w){
+    float alpha_x = ROUGHNESS, alpha_y = ROUGHNESS;
+    float tan2theta = tan_2_theta(w);
+    if (isinf(tan2theta) ) return 0.;
+    float alpha2 = sqr(cos_phi(w) * alpha_x) + sqr(sin_phi(w) * alpha_y);        // !!!!!!!!!!!!!!!!!! This is probably not neede ( only used for anisotropic materials )
+                                                                                 // alpha should just be the surface roughness...
+    return (sqrt(1 + alpha2 * tan2theta) - 1) / 2;
+}
+
+// Density of microfacet normals
+float TR_D(float3 wm) {
+    float alpha_x = ROUGHNESS, alpha_y = ROUGHNESS;
+    float tan2theta = tan_2_theta(wm);
+    if(isinf(tan2theta)) return 0;
+    float cos4theta = sqr(cos_2_theta(wm));
+    float e = tan2theta * (sqr(cos_phi(wm) / alpha_x) + 
+                           sqr(sin_phi(wm) / alpha_y));
+    return 1 / (PI * alpha_x * alpha_y * cos4theta * sqr(1 * e));
+}
+
+// Geomtery Masking and Shadowing
+float TR_G(float3 wo, float3 wi) {
+    return 1 / (1 + TR_lambda(wo) + TR_lambda(wi));
+}
+
+// Density of visible microfacet normals
+float TR_D(float3 w, float3 wm) {
+    // Geometry Masking function:
+    float G1 = 1 / (1 + TR_lambda(w));
+    return G1  / abs_cos_theta(w) * TR_D(wm) * abs(dot(w, wm));
+}
+
+// Probability that a microfacet normal was selected
+float TR_pdf(float3 w, float3 wm) {
+    return TR_D(w, wm);
+}
+
+float3 BxDF_TS_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info){
+    // Create Tangent-Bitangent-Normal matrix to convert Tangent Space normal to world space normal
+    // https://stackoverflow.com/questions/16555669/hlsl-normal-mapping-matrix-multiplication
+    float3 w_Per_Vertex_Normal  = hit_info.n;
+    float3 w_Per_Vertex_Tangent = hit_info.t;
+    
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Gram - Schmidt process
+    // Re Orthoganalizes the tangent vector ( ensures 90* between Normal and Tangent)
+    // Vectors could be slightly off of 90*
+    // Might be more useful in the pixel shader if we built a TBN matrix there, after interpolating tangent and normal through rasterization
+    // 
+    // Scale Normal by cos(theta), then line between scaled normal and tangent is orthoganal to original normal. Subtract tangent to get new tangent
+    w_Per_Vertex_Tangent = normalize(w_Per_Vertex_Tangent - dot(w_Per_Vertex_Tangent, w_Per_Vertex_Normal) * w_Per_Vertex_Normal );
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    float3 w_Per_Vertex_Bitangent = cross(w_Per_Vertex_Normal, w_Per_Vertex_Tangent) * float3(-1.0, -1.0, -1.0);// * -IN.tangent_handidness;  // Need to multiplay by (negative) tangent handidness to correct for handidness of textures tangent space and DirectX UV space
+
+    float3x3 TBN = float3x3( normalize(w_Per_Vertex_Tangent), normalize(w_Per_Vertex_Bitangent), normalize(w_Per_Vertex_Normal) );
+    float3x3 inv_TBN = transpose(TBN);
+
+    wo = normalize(mul(wo, inv_TBN));
+    wi = normalize(mul(wi, inv_TBN));
+
+    float cosTheta_o = abs(cos_theta(wo));
+    float cosTheta_i = abs(cos_theta(wi));
+    if(cosTheta_o == 0. || cosTheta_i == 0.) return float3(0., 0., 0.);
+    float3 wm = wi + wo;
+    if((sqr(wm.x) + sqr(wm.y) + sqr(wm.z)) == 0) return float3(0., 0., 0.);
+    wm = normalize(wm);
+
+    float3 base_metallic   = 0.2;  // TODO SHOULD BE SAMPLED FROM TEXTURE
+    float3 F0 = float3(0.04, 0.04, 0.04); 
+    F0 = lerp(F0, albedo, base_metallic);
+    float3 F = fresnel_schlick_aprox(cosTheta_o, F0);
+
+
+    return TR_D(wm) * F * TR_G(wo, wi) / (4 * cosTheta_i * cosTheta_o);
+
+}
+
+BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info hit_info){
+    BSDF_Sample bsdf_sample; 
+    bsdf_sample.pdf = 0.;
+    bsdf_sample.sampled_light = float3(0., 0., 0.);
+    bsdf_sample.wi = float3(0., 0., 0.);
+
+    // Create Tangent-Bitangent-Normal matrix to convert Tangent Space normal to world space normal
+    // https://stackoverflow.com/questions/16555669/hlsl-normal-mapping-matrix-multiplication
+    float3 w_Per_Vertex_Normal  = hit_info.n;
+    float3 w_Per_Vertex_Tangent = hit_info.t;
+    
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Gram - Schmidt process
+    // Re Orthoganalizes the tangent vector ( ensures 90* between Normal and Tangent)
+    // Vectors could be slightly off of 90*
+    // Might be more useful in the pixel shader if we built a TBN matrix there, after interpolating tangent and normal through rasterization
+    // 
+    // Scale Normal by cos(theta), then line between scaled normal and tangent is orthoganal to original normal. Subtract tangent to get new tangent
+    w_Per_Vertex_Tangent = normalize(w_Per_Vertex_Tangent - dot(w_Per_Vertex_Tangent, w_Per_Vertex_Normal) * w_Per_Vertex_Normal );
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    float3 w_Per_Vertex_Bitangent = cross(w_Per_Vertex_Normal, w_Per_Vertex_Tangent) * float3(-1.0, -1.0, -1.0);// * -IN.tangent_handidness;  // Need to multiplay by (negative) tangent handidness to correct for handidness of textures tangent space and DirectX UV space
+
+    float3x3 TBN = float3x3( normalize(w_Per_Vertex_Tangent), normalize(w_Per_Vertex_Bitangent), normalize(w_Per_Vertex_Normal) );
+    float3x3 inv_TBN = transpose(TBN);
+
+    wo = normalize(mul(wo, inv_TBN));
+    // bool flipped_wo = false;
+    // if(wo.z < 0){
+    //     wo = -wo;
+    //     flipped_wo = true;
+    // }
+    // wm = sampled microfacet normal
+    // wo = light exiting the microfacet, on the way to the camera ( somehow )
+    // wi = light ray entering the microfact (directly or indirectly) from a light source
+
+    // Sample microfacet normal + compute reflected direction:
+    float3 wm = TR_sample_wm(wo, random_u);
+    // if(flipped_wo){
+    //     wo = -wo;
+    // }
+    // float3 wi = reflect(wo, wm);
+
+    float3 wi = -wo + 2 * dot(wo, wm) * wm;
+    // wi.y = -wi.y;
+    // wi.z = -wi.z;
+    wi = normalize(wi);
+
+    //if(!same_hemisphere(wo, wi)) return bsdf_sample;
+
+    // Compute PDF for microfact reflection
+    // Probability that a wi vector was selected. (basicly TR_pdf adjusted)
+    float pdf = TR_pdf(wo, wm) / (4 * abs(dot(wo, wm)));
+
+    float cosTheta_o = abs(cos_theta(wo));
+    float cosTheta_i = abs(cos_theta(wi));
+
+    // Fresnel Factor for conductor BRDF:
+    float3 base_metallic   = 0.2;  // TODO SHOULD BE SAMPLED FROM TEXTURE
+
+    float3 F0 = float3(0.04, 0.04, 0.04); 
+    F0 = lerp(F0, albedo, base_metallic);
+
+    float3 F = fresnel_schlick_aprox(cosTheta_o, F0);
+
+    float3 specular = TR_D(wm) * F * TR_G(wo, wi) / (4 * cosTheta_i * cosTheta_o);
+
+    bsdf_sample.pdf = pdf;
+    bsdf_sample.sampled_light = specular;
+    bsdf_sample.wi = normalize(mul(wi, TBN));
+    bsdf_sample.ks = F;
+
+    return bsdf_sample;
+}
+
+float BxDF_TS_pdf(float3 wo, float3 wi){
+    return 1.;
 }
 
 bool IsInsideViewport(float2 p, Viewport viewport)
@@ -447,7 +696,7 @@ void MyRaygenShader()
     payload.color = float4(0.0, 0.0, 0.0, 0);
     payload.random_u = random_u;
 
-    static const uint SAMPLE_COUNT = 10;
+    static const uint SAMPLE_COUNT = 20;
     RayDesc ray;
     for(uint i = 0; i < SAMPLE_COUNT; i++){
 
@@ -627,13 +876,14 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     // Texture2D roughness_metallic_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 2)];
 
     float4 albedo_sample = albedo_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy);
-    float3 f = BxDF_diffuse_f(wo, env_light_sample.wi, albedo_sample.rgb) * abs(dot(env_light_sample.wi, hit_info.n));
+    float3 f = BxDF_TS_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info) * abs(dot(env_light_sample.wi, hit_info.n));
 
     if(!env_light_sample.occluded)
         payload.color.rgb += (f * payload.beta * env_light_sample.L) / (1 * env_light_sample.pdf);// payload.beta * f * env_light_sample.L / ( 1 * env_light_sample.pdf );
 
     // Sample outgoing direction at intersecion to continue path
-    BSDF_Sample bsdf_sample = BxDF_diffuse_sample_f(wo, albedo_sample.rgb, u, hit_info);
+    u.xy = get_rand_float3(payload.random_u).xy;
+    BSDF_Sample bsdf_sample = BxDF_TS_sample_f(wo, albedo_sample.rgb, u, hit_info);
 
     payload.beta *= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.n) / bsdf_sample.pdf);
     // pbrt handles whether the ray was specular or not
@@ -646,7 +896,7 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     ray.TMax = 100000.0;
 
     // Trace the bound scene with ray created above
-    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 2)
+    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 5)
         TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
     return;
 

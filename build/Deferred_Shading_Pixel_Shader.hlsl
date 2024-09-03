@@ -89,11 +89,15 @@ float GeometrySchlickGGX(float NdotV, float roughness)
 }
 
 // Need to calc Geometry function for View direction and light direction, since both can be occluded
+// Masking-Shadow function
 float GeometrySmith(float3 N, float3 V, float3 L, float roughness)
 {
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
+
+    // Masking 
     float ggx2  = GeometrySchlickGGX(NdotV, roughness);
+    // Shadowing 
     float ggx1  = GeometrySchlickGGX(NdotL, roughness);
 	
     return ggx1 * ggx2;
