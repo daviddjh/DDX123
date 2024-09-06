@@ -449,12 +449,14 @@ float3 fresnel_schlick_aprox(float cosTheta, float3 F0){
     return F0 + (float3(1.0,1.0,1.0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-#define ROUGHNESS 0.1
+// #define ROUGHNESS 0.01
+// #define METALLIC  0.7
 
 // Sample normal at a microfacet ( TrowbridgeReitz )
 // PBR book section 9.6
-float3 TR_sample_wm(float3 w, float2 u){
-    float alpha_x = ROUGHNESS, alpha_y = ROUGHNESS;
+float3 TR_sample_wm(float3 w, float2 u, float roughness){
+    roughness = pow(roughness, 2);
+    float alpha_x = roughness, alpha_y = roughness;
     float3 wh = normalize(float3(alpha_x * w.x, alpha_y * w.y, w.z));               /// CHECK THIS FOR ERRORS. SWAPPING Y and Z from book
     if(wh.z < 0){
         wh = -wh;
@@ -475,8 +477,8 @@ float3 TR_sample_wm(float3 w, float2 u){
 }
 
 // Analytic solution of the masking function for Trowbridge-Reitz distribution:
-float TR_lambda(float3 w){
-    float alpha_x = ROUGHNESS, alpha_y = ROUGHNESS;
+float TR_lambda(float3 w, float roughness){
+    float alpha_x = roughness, alpha_y = roughness;
     float tan2theta = tan_2_theta(w);
     if (isinf(tan2theta) ) return 0.;
     float alpha2 = sqr(cos_phi(w) * alpha_x) + sqr(sin_phi(w) * alpha_y);        // !!!!!!!!!!!!!!!!!! This is probably not neede ( only used for anisotropic materials )
@@ -485,8 +487,8 @@ float TR_lambda(float3 w){
 }
 
 // Density of microfacet normals
-float TR_D(float3 wm) {
-    float alpha_x = ROUGHNESS, alpha_y = ROUGHNESS;
+float TR_D(float3 wm, float roughness) {
+    float alpha_x = roughness, alpha_y = roughness;
     float tan2theta = tan_2_theta(wm);
     if(isinf(tan2theta)) return 0;
     float cos4theta = sqr(cos_2_theta(wm));
@@ -496,23 +498,23 @@ float TR_D(float3 wm) {
 }
 
 // Geomtery Masking and Shadowing
-float TR_G(float3 wo, float3 wi) {
-    return 1 / (1 + TR_lambda(wo) + TR_lambda(wi));
+float TR_G(float3 wo, float3 wi, float roughness) {
+    return 1 / (1 + TR_lambda(wo, roughness) + TR_lambda(wi, roughness));
 }
 
 // Density of visible microfacet normals
-float TR_D(float3 w, float3 wm) {
+float TR_D_vis(float3 w, float3 wm, float roughness) {
     // Geometry Masking function:
-    float G1 = 1 / (1 + TR_lambda(w));
-    return G1  / abs_cos_theta(w) * TR_D(wm) * abs(dot(w, wm));
+    float G1 = 1 / (1 + TR_lambda(w, roughness));
+    return G1  / abs_cos_theta(w) * TR_D(wm, roughness) * abs(dot(w, wm));
 }
 
 // Probability that a microfacet normal was selected
-float TR_pdf(float3 w, float3 wm) {
-    return TR_D(w, wm);
+float TR_pdf(float3 w, float3 wm, float roughness) {
+    return TR_D_vis(w, wm, roughness);
 }
 
-float3 BxDF_TS_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info){
+float3 BxDF_TS_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info, float metallic, float roughness, inout float3 F){
     // Create Tangent-Bitangent-Normal matrix to convert Tangent Space normal to world space normal
     // https://stackoverflow.com/questions/16555669/hlsl-normal-mapping-matrix-multiplication
     float3 w_Per_Vertex_Normal  = hit_info.n;
@@ -543,17 +545,15 @@ float3 BxDF_TS_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info){
     if((sqr(wm.x) + sqr(wm.y) + sqr(wm.z)) == 0) return float3(0., 0., 0.);
     wm = normalize(wm);
 
-    float3 base_metallic   = 0.0;  // TODO SHOULD BE SAMPLED FROM TEXTURE
     float3 F0 = float3(0.04, 0.04, 0.04); 
-    F0 = lerp(F0, albedo, base_metallic);
-    float3 F = fresnel_schlick_aprox(cosTheta_o, F0);
+    F0 = lerp(F0, albedo, metallic);
+    F = fresnel_schlick_aprox(cosTheta_o, F0);
 
-
-    return TR_D(wm) * F * TR_G(wo, wi) / (4 * cosTheta_i * cosTheta_o);
+    return TR_D(wm, roughness) * F * TR_G(wo, wi, roughness) / (4 * cosTheta_i * cosTheta_o);
 
 }
 
-BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info hit_info){
+BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info hit_info, float metallic, float roughness){
     BSDF_Sample bsdf_sample; 
     bsdf_sample.pdf = 0.;
     bsdf_sample.sampled_light = float3(0., 0., 0.);
@@ -590,7 +590,7 @@ BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info
     // wi = light ray entering the microfact (directly or indirectly) from a light source
 
     // Sample microfacet normal + compute reflected direction:
-    float3 wm = TR_sample_wm(wo, random_u);
+    float3 wm = TR_sample_wm(wo, random_u, roughness);
     // if(flipped_wo){
     //     wo = -wo;
     // }
@@ -605,20 +605,18 @@ BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info
 
     // Compute PDF for microfact reflection
     // Probability that a wi vector was selected. (basicly TR_pdf adjusted)
-    float pdf = TR_pdf(wo, wm) / (4 * abs(dot(wo, wm)));
+    float pdf = TR_pdf(wo, wm, roughness) / (4 * abs(dot(wo, wm)));
 
     float cosTheta_o = abs(cos_theta(wo));
     float cosTheta_i = abs(cos_theta(wi));
 
     // Fresnel Factor for conductor BRDF:
-    float3 base_metallic   = 0.0;  // TODO SHOULD BE SAMPLED FROM TEXTURE
-
     float3 F0 = float3(0.04, 0.04, 0.04); 
-    F0 = lerp(F0, albedo, base_metallic);
+    F0 = lerp(F0, albedo, metallic);
 
     float3 F = fresnel_schlick_aprox(cosTheta_o, F0);
 
-    float3 specular = TR_D(wm) * F * TR_G(wo, wi) / (4 * cosTheta_i * cosTheta_o);
+    float3 specular = TR_D(wm, roughness) * F * TR_G(wo, wi, roughness) / (4 * cosTheta_i * cosTheta_o);
 
     bsdf_sample.pdf = pdf;
     bsdf_sample.sampled_light = specular;
@@ -630,6 +628,42 @@ BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info
 
 float BxDF_TS_pdf(float3 wo, float3 wi){
     return 1.;
+}
+
+
+
+// Cook - Torrance BRDF
+// Combine specular and diffuse brdfs. Use Schlick's Fresnel as ratio between diffuse and specular
+float3 BxDF_CT_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info, float metallic, float roughness){
+
+    float3 F;
+    float3 specular = BxDF_TS_f(wo, wi, albedo, hit_info, metallic, roughness, F);
+
+    float3 diffuse = BxDF_diffuse_f(wo, wi, albedo);
+
+    // Fresnel gives us ratio of specular light
+    float3 kS = F;
+    // Diffuse is whatever is left
+    float3 kD = float3(1.0, 1.0, 1.0) - kS;
+
+    // Metalic materials dont refract..
+    kD *= 1.0 - metallic;
+
+    // Final Cook Torrance Reflectance Equation
+    return (kD * diffuse + specular);
+}
+
+// Cook - Torrance BRDF
+// Randomly sample either diffuse wi or specular wi. Maybe change this to a better way of sampling in the future
+BSDF_Sample BxDF_CT_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info hit_info){
+
+    BSDF_Sample bsdf_sample; 
+    bsdf_sample.pdf = 0.;
+    bsdf_sample.sampled_light = float3(0., 0., 0.);
+    bsdf_sample.wi = float3(0., 0., 0.);
+
+    return bsdf_sample;
+
 }
 
 bool IsInsideViewport(float2 p, Viewport viewport)
@@ -696,7 +730,7 @@ void MyRaygenShader()
     payload.color = float4(0.0, 0.0, 0.0, 0);
     payload.random_u = random_u;
 
-    static const uint SAMPLE_COUNT = 15;
+    static const uint SAMPLE_COUNT = 20;
     RayDesc ray;
     for(uint i = 0; i < SAMPLE_COUNT; i++){
 
@@ -872,20 +906,37 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     Hit_Info hit_info = get_hit_info(attr.barycentrics);
 
     Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3)];
-    // Texture2D normal_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 1)];
-    // Texture2D roughness_metallic_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 2)];
+    Texture2D normal_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 1)];
+    Texture2D roughness_metallic_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 2)];
 
     float4 albedo_sample = albedo_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy);
-    float3 f = BxDF_TS_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info) * abs(dot(env_light_sample.wi, hit_info.n));
+    float4 normal_sample = normal_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy);
+    // hit_info.n = normal_sample.xyz;
+    float4 roughness_metallic_sample = roughness_metallic_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy);
+    float metallic = roughness_metallic_sample.r;
+    float roughness = roughness_metallic_sample.g;//pow(roughness_metallic_sample.g, 2);
+    //roughness = pow(roughness_metallic_sample.g, 2);
+    //roughness = 1. - roughness;
+
+    float F;
+    float3 f = BxDF_CT_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info, metallic, roughness)  * abs(dot(env_light_sample.wi, hit_info.n));//);
+    //float3 f = BxDF_diffuse_f(wo, env_light_sample.wi, albedo_sample.rgb) * abs(dot(env_light_sample.wi, hit_info.n));
 
     if(!env_light_sample.occluded)
         payload.color.rgb += (f * payload.beta * env_light_sample.L) / (1 * env_light_sample.pdf);// payload.beta * f * env_light_sample.L / ( 1 * env_light_sample.pdf );
 
     // Sample outgoing direction at intersecion to continue path
-    u.xy = get_rand_float3(payload.random_u).xy;
-    BSDF_Sample bsdf_sample = BxDF_TS_sample_f(wo, albedo_sample.rgb, u, hit_info);
+    // u.xy = get_rand_float3(payload.random_u).xy;
+    BSDF_Sample bsdf_sample;
+    if(u.x > 0.5){
+        u.xy = get_rand_float3(payload.random_u).xy;
+        bsdf_sample = BxDF_TS_sample_f(wo, albedo_sample.rgb, u, hit_info, metallic, roughness);
+    } else {
+        u.xy = get_rand_float3(payload.random_u).xy;
+        bsdf_sample = BxDF_diffuse_sample_f(wo, albedo_sample.rgb, u, hit_info);
+    }
 
-    payload.beta *= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.n) / bsdf_sample.pdf);
+    payload.beta *= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.n) / bsdf_sample.pdf );//* 0.5);
     // pbrt handles whether the ray was specular or not
 
     // Create and trace new ray
@@ -896,7 +947,7 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     ray.TMax = 100000.0;
 
     // Trace the bound scene with ray created above
-    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 5)
+    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 2)
         TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
     return;
 

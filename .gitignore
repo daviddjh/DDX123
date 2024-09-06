@@ -6,6 +6,7 @@
 *.cap
 *.10x
 *.wpix
+*.rdi
 
 # Build Extras
 *.asm
