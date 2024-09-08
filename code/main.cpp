@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <random>
+#include <stdexcept>
 #include "timeapi.h"
 #include <Wincrypt.h>
 
@@ -1886,6 +1887,8 @@ WinMain(HINSTANCE hInstance,
         LPSTR     lpCmdLine,
         int       nCmdShow)
 {
+    try {
+
     WNDCLASSEX wndclass = {};
     
     /*
@@ -2000,6 +2003,11 @@ WinMain(HINSTANCE hInstance,
     */
 
     CoUninitialize();
+
+    // Catch all exceptions
+    } catch (const std::exception& e){
+        MessageBoxA(NULL, e.what(), "DDX123 Excpetion!", MB_ICONERROR);
+    }
 
     return 0;
 }
