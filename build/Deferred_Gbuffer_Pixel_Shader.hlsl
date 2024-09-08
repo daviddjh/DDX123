@@ -88,7 +88,7 @@ PixelShaderOutput main(PixelShaderInput IN) {
 
         float3 rm_texture_color = texture_2d_table[material_data.roughness_metallic_index].Sample(sampler_1, UV).xyz;
         roughness = rm_texture_color.g;
-        metallic = rm_texture_color.r;
+        metallic = rm_texture_color.b;
 
     } else {
 
