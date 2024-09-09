@@ -168,45 +168,6 @@ float2 sphere_coord_to_square_coord(float3 sphere_coords){
     float u = 0.5f + (atan2(sphere_coords.z, sphere_coords.x) / (2.0f * PI));
     float v = 0.5f - (asin(sphere_coords.y) / PI);
     return float2(u,v);
-
-
-    // float x = abs(sphere_coords.x);
-    // float y = abs(sphere_coords.y);
-    // float z = abs(sphere_coords.z);
-
-    // // compute radius r
-    // float r = max(0, sqrt(1 - z));
-
-    // // compute argument to atan
-    // float a = max(x, y);
-    // float b = min(x, y);
-    // b = a == 0 ? 0 : b / a;
-
-    // // SLOW - pbr book used a polynomial aproximation
-    // float phi = atan(b)*2/PI;
-
-    // // Extenc phi if input is in the range 45 - 90 degrees
-    // if(x < y){
-    //     phi = 1 - phi;
-    // }
-
-    // float v = phi * r;
-    // float u = r - v;
-
-    // // if coords in southern hemisphere, mirror u,v
-    // if (sphere_coords.z < 0){
-    //     float temp = u;
-    //     u = v;
-    //     v = temp;
-    //     u = 1 - u;
-    //     v = 1 - v;
-    // }
-
-    // u = copy_sign(u, sphere_coords.x);
-    // v = copy_sign(v, sphere_coords.y);
-
-    // // Transform from [-1,1] to [0,1]
-    // return float2(0.5 * (u + 1), 0.5 * (v + 1));
 }
 
 // From: https://www.pbr-book.org/4ed/Geometry_and_Transformations/Spherical_Geometry
@@ -221,27 +182,6 @@ float3 square_coord_to_sphere_coord(float2 square_coords){
     float z = sin(phi) * sin(theta);
 
     return float3(x, y, z);
-
-    // // convert to [-1, 1], then compute abs
-    // float u = square_coords.x * 2 - 1;
-    // float v = square_coords.y * 2 - 1;
-
-    // float up = abs(u);
-    // float vp = abs(v); 
-
-    // // Compute radius r for square to sphere mapping
-    // float signed_distance = 1 - (up + vp);
-    // float d = abs(signed_distance);
-    // float r = 1 - d;
-
-    // // Compute phi for square to sphere mapping. accunts for the 45deg rotation
-    // float phi = ( r == 0 ? 1 : (vp - up) / r + 1) * PI / 4;
-
-    // float z = copy_sign(1 - sqrt(r), signed_distance);
-    // float cos_phi = copy_sign(cos(phi), u);
-    // float sin_phi = copy_sign(sin(phi), v);
-    // return float3(cos_phi * r * max(0, sqrt(2 - sqrt(r))),
-    //               sin_phi * r * max(0, sqrt(2 - sqrt(r))), z);
 }
 
 float2 sample_env_luminance_distribution(float2 u, inout float map_PDF){
@@ -415,7 +355,6 @@ BSDF_Sample BxDF_diffuse_sample_f(float3 wo, float3 albedo, float2 random_u, Hit
     float3 w_Per_Vertex_Bitangent = cross(w_Per_Vertex_Normal, w_Per_Vertex_Tangent) * -hit_info.t_handedness;  // Need to multiplay by (negative) tangent handidness to correct for handidness of textures tangent space and DirectX UV space
 
     float3x3 TBN = float3x3( normalize(w_Per_Vertex_Tangent), normalize(w_Per_Vertex_Bitangent), normalize(w_Per_Vertex_Normal) );
-    // TBN = transpose( TBN );
 
     bsdf_sample.wi = mul(bsdf_sample.wi, TBN);
 
@@ -426,16 +365,15 @@ float BxDF_diffuse_pdf(float3 wo, float3 wi){
     return cosign_hemisphere_pdf(abs_cos_theta(wi));
 }
 
-/////////////////////////////////////////////
-// Torrance-Sparrow BRDF Sampling
-/////////////////////////////////////////////
+//////////////////////////////////////////////////
+// Torrance-Sparrow Normal Sampling
+//////////////////////////////////////////////////
 
 // These are the transformations of the "microfacets", or tiny ellipsoidal shapes used to model a surface
 // 1/alpha_x, 1/alpha_y = 0
 // alpha_x, alpha_y ~~ 0 == ellipsoid stretched to flat surface, approximates perfectly specular material
-// alpha_x, alpha_y ~~ 3 == ellipsoid are large enough to introduce enough normal variation to make the surface apear rough
+// alpha_x, alpha_y ~~ 0.3 == ellipsoid are large enough to introduce enough normal variation to make the surface apear rough
 // when alpha_x == alpha_y, the surface is isotropic.
-// A microfacet 
 
 // Does the same thing as sample_uniform_disk_concentric, just with a different mapping. Also no branch.
 float2 sample_uniform_disk_polar(float2 u){
@@ -451,9 +389,6 @@ float3 fresnel_schlick_aprox(float cosTheta, float3 F0){
     return F0 + (float3(1.0,1.0,1.0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-// #define ROUGHNESS 0.01
-// #define METALLIC  0.7
-
 // Sample normal at a microfacet ( TrowbridgeReitz )
 // PBR book section 9.6
 float3 TR_sample_wm(float3 w, float2 u, float roughness){
@@ -464,7 +399,6 @@ float3 TR_sample_wm(float3 w, float2 u, float roughness){
         wh = -wh;
     }
     float3 t1 = (w.z < 0.9999f ? normalize(cross(float3(0., 0., 1.), wh)) : float3(1, 0, 0));
-    // float3 t1 = normalize(cross(float3(0., 0., 1.), wh));
     float3 t2 = cross(wh, t1);
 
     float2 p = sample_uniform_disk_polar(u);
@@ -582,28 +516,18 @@ BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info
     float3x3 inv_TBN = transpose(TBN);
 
     wo = normalize(mul(wo, inv_TBN));
-    // bool flipped_wo = false;
-    // if(wo.z < 0){
-    //     wo = -wo;
-    //     flipped_wo = true;
-    // }
+
     // wm = sampled microfacet normal
     // wo = light exiting the microfacet, on the way to the camera ( somehow )
     // wi = light ray entering the microfact (directly or indirectly) from a light source
 
     // Sample microfacet normal + compute reflected direction:
     float3 wm = TR_sample_wm(wo, random_u, roughness);
-    // if(flipped_wo){
-    //     wo = -wo;
-    // }
-    // float3 wi = reflect(wo, wm);
 
+    // Reflect
     float3 wi = -wo + 2 * dot(wo, wm) * wm;
-    // wi.y = -wi.y;
-    // wi.z = -wi.z;
-    wi = normalize(wi);
 
-    //if(!same_hemisphere(wo, wi)) return bsdf_sample;
+    wi = normalize(wi);
 
     // Compute PDF for microfact reflection
     // Probability that a wi vector was selected. (basicly TR_pdf adjusted)
@@ -628,12 +552,6 @@ BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info
     return bsdf_sample;
 }
 
-float BxDF_TS_pdf(float3 wo, float3 wi){
-    return 1.;
-}
-
-
-
 // Cook - Torrance BRDF
 // Combine specular and diffuse brdfs. Use Schlick's Fresnel as ratio between diffuse and specular
 float3 BxDF_CT_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info, float metallic, float roughness){
@@ -645,27 +563,15 @@ float3 BxDF_CT_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info, float m
 
     // Fresnel gives us ratio of specular light
     float3 kS = F;
+
     // Diffuse is whatever is left
     float3 kD = float3(1.0, 1.0, 1.0) - kS;
 
-    // Metalic materials dont refract..
+    // Metalic materials dont refract
     kD *= 1.0 - metallic;
 
     // Final Cook Torrance Reflectance Equation
     return (kD * diffuse + specular);
-}
-
-// Cook - Torrance BRDF
-// Randomly sample either diffuse wi or specular wi. Maybe change this to a better way of sampling in the future
-BSDF_Sample BxDF_CT_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info hit_info){
-
-    BSDF_Sample bsdf_sample; 
-    bsdf_sample.pdf = 0.;
-    bsdf_sample.sampled_light = float3(0., 0., 0.);
-    bsdf_sample.wi = float3(0., 0., 0.);
-
-    return bsdf_sample;
-
 }
 
 bool IsInsideViewport(float2 p, Viewport viewport)
@@ -745,11 +651,6 @@ void MyRaygenShader()
 
     }
 
-    // ray = create_camera_ray(pixel_xy, random_u);
-    // payload.beta = 1.0;
-    // payload.just_hit = 0;
-    // payload.recursion_depth = 0;
-    // TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
     // Write the raytraced color to the output texture.
     float3 output_color = payload.color.rgb / SAMPLE_COUNT;
     texture_2d_uav_table[output_texture_index.texture_index][pixel_xy]= float4(output_color, 1);
@@ -886,13 +787,10 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
 
     float2 u; // Random Vector -> TODO
     float3 ray_index = DispatchRaysIndex();
-    // u.x = asfloat(pcg_hash(asint(ray_index.x)));
-    // u.y = asfloat(pcg_hash(asint(ray_index.y)));
     u.xy = get_rand_float3(payload.random_u).xy;
-    // u.y = pcg_hash_prng(payload.random_u);
+
     float L = 0;
     float beta = payload.beta;
-
 
     // Account for emissive surface if light was not sampled
     // End Path if maximum depth rendered
@@ -944,16 +842,12 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     float3 delta = hit_info.wn - hit_info.n;
     hit_info.n = hit_info.wn;
     //hit_info.t += delta;
-    //roughness = roughness * 0.3;
-    //roughness = pow(roughness_metallic_sample.g, 2);
-    //roughness = 1. - roughness;
 
     float F;
     float3 f = BxDF_CT_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info, metallic, roughness) * abs(dot(env_light_sample.wi, hit_info.wn));//);
-    // float3 f = BxDF_diffuse_f(wo, env_light_sample.wi, albedo_sample.rgb) * abs(dot(env_light_sample.wi, hit_info.wn));
 
     if(!env_light_sample.occluded)
-        payload.color.rgb += (f * payload.beta * env_light_sample.L) / (1 * env_light_sample.pdf);// payload.beta * f * env_light_sample.L / ( 1 * env_light_sample.pdf );
+        payload.color.rgb += (f * payload.beta * env_light_sample.L) / (1 * env_light_sample.pdf);;
 
     // Sample outgoing direction at intersecion to continue path
     u.xy = get_rand_float3(payload.random_u).xy;
@@ -966,8 +860,7 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
         bsdf_sample = BxDF_diffuse_sample_f(wo, albedo_sample.rgb, u, hit_info);
     }
 
-    payload.beta *= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.wn) / bsdf_sample.pdf );//* 0.5);
-    // pbrt handles whether the ray was specular or not
+    payload.beta *= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.wn) / bsdf_sample.pdf );
 
     // Create and trace new ray
     RayDesc ray;
