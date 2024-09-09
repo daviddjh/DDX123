@@ -496,7 +496,7 @@ float TR_D(float3 wm, float roughness) {
     float cos4theta = sqr(cos_2_theta(wm));
     float e = tan2theta * (sqr(cos_phi(wm) / alpha_x) + 
                            sqr(sin_phi(wm) / alpha_y));
-    return 1 / (PI * alpha_x * alpha_y * cos4theta * sqr(1 * e));
+    return 1 / (PI * alpha_x * alpha_y * cos4theta * sqr(1 + e));
 }
 
 // Geomtery Masking and Shadowing
