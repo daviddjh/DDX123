@@ -1907,13 +1907,14 @@ namespace d_dx12 {
 
             // Optional?
             dxil_lib_subobject->DefineExport(L"MyRaygenShader");
-            dxil_lib_subobject->DefineExport(L"MySimplePathTracer");
+            //dxil_lib_subobject->DefineExport(L"MyPathTracer");
+            dxil_lib_subobject->DefineExport(L"MyPathTracer");
             dxil_lib_subobject->DefineExport(L"MyMissShader");
 
             // Specifies shaders to use wwhen a triangle intersects geo
             // Different geo can have different hit groups
             CD3DX12_HIT_GROUP_SUBOBJECT* hit_group_subobject = raytracing_pipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
-            hit_group_subobject->SetClosestHitShaderImport(L"MySimplePathTracer");
+            hit_group_subobject->SetClosestHitShaderImport(L"MyPathTracer");
             hit_group_subobject->SetHitGroupExport(L"MyHitGroup");
             hit_group_subobject->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
 

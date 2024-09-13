@@ -56,6 +56,7 @@ struct RayPayload
     uint   just_hit;
     uint   recursion_depth;
     uint   random_u;
+    float  p_b;
 };
 struct Viewport
 {
@@ -224,7 +225,7 @@ float2 sample_env_luminance_distribution(float2 u, inout float map_PDF){
     //return u;
 }
 
-Light_Sample EnvMap_SampleLi(float3 current_point, float2 u){
+Light_Sample EnvMap_SampleLi(Hit_Info hit_info, float2 u){
 
     Light_Sample light_sample;
 
@@ -248,9 +249,15 @@ Light_Sample EnvMap_SampleLi(float3 current_point, float2 u){
     float pdf = map_PDF / (4 * PI);
     pdf *= 2;
 
+    // Compute ray origin offset
+    float3 offset = float3(0.001, 0.001, 0.001) * hit_info.n;
+    if(dot(wi,hit_info.n) < 0){
+        offset = -offset;
+    }
+
     // Create Ray
     RayDesc ray;
-    ray.Origin = current_point.xyz;
+    ray.Origin = hit_info.p.xyz + offset;
     ray.Direction = wi;
     ray.TMin = 0.001;
     ray.TMax = 100000.0;
@@ -266,7 +273,7 @@ Light_Sample EnvMap_SampleLi(float3 current_point, float2 u){
 
     if (payload.color.x == 0){
         light_sample.L = EnvMap_ImageLe(uv);
-        light_sample.p = current_point + (wi * 2 * scene_radius);
+        light_sample.p = hit_info.p.xyz + (wi * 2 * scene_radius);
         light_sample.pdf = pdf;
         light_sample.wi = wi;
         light_sample.occluded = 0;
@@ -313,6 +320,13 @@ float3 cosign_hemisphere_pdf (float cos_theta){
 
 float abs_cos_theta(float3 w){
     return abs(w.z);
+}
+
+// https://www.pbr-book.org/4ed/Monte_Carlo_Integration/Improving_Efficiency#MultipleImportanceSampling
+float power_huristic(float nf, float fpdf, float ng, float gpdf){
+    float f = nf * fpdf;
+    float g = ng * gpdf;
+    return sqr(f) / (sqr(f) + sqr(g));
 }
 
 struct BSDF_Sample {
@@ -448,6 +462,16 @@ float TR_D_vis(float3 w, float3 wm, float roughness) {
 // Probability that a microfacet normal was selected
 float TR_pdf(float3 w, float3 wm, float roughness) {
     return TR_D_vis(w, wm, roughness);
+}
+
+float BxDF_TS_pdf(float3 wo, float3 wi, float roughness)
+{
+    float3 wm = normalize(wo + wi);
+
+    // Compute PDF for microfact reflection
+    // Probability that a wi vector was selected. (basicly TR_pdf adjusted)
+    float pdf = TR_pdf(wo, wm, roughness) / (4 * abs(dot(wo, wm)));
+    return pdf;
 }
 
 float3 BxDF_TS_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info, float metallic, float roughness, inout float3 F){
@@ -620,43 +644,6 @@ RayDesc create_camera_ray(uint2 pixel_xy, inout uint random_u){
 
 }
 
-[shader("raygeneration")]
-void MyRaygenShader()
-{
-
-    // Get Screen Pixel
-    uint2 pixel_xy = DispatchRaysIndex().xy;
-    uint2 texture_loc = pixel_xy % 32;
-
-    Texture2D<uint> random_tex = texture_2d_uint_table[random_tex_index.texture_index];
-    uint random_u = random_tex.Load(float3(texture_loc, 0));
-    random_u *= pixel_xy.x * pixel_xy.y;
-    
-    
-    // Beginning ray payload ( starting color )
-    RayPayload payload; //  = { float4(0.0, 0.0, 0.0, 0), 1.0, 0  };
-    payload.color = float4(0.0, 0.0, 0.0, 0);
-    payload.random_u = random_u;
-
-    static const uint SAMPLE_COUNT = 25;
-    RayDesc ray;
-    for(uint i = 0; i < SAMPLE_COUNT; i++){
-
-        // Create Ray from camera
-        ray = create_camera_ray(pixel_xy, payload.random_u);
-        payload.beta = float3(1.0, 1.0, 1.0);
-        payload.just_hit = 0;
-        payload.recursion_depth = 0;
-        TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
-
-    }
-
-    // Write the raytraced color to the output texture.
-    float3 output_color = payload.color.rgb / SAMPLE_COUNT;
-    texture_2d_uav_table[output_texture_index.texture_index][pixel_xy]= float4(output_color, 1);
-
-    return;
-}
 
 Hit_Info get_hit_info(float2 barycentrics_2) {
     float3 barycentrics = float3(1.f - barycentrics_2.x - barycentrics_2.y, barycentrics_2.x, barycentrics_2.y);
@@ -775,8 +762,9 @@ Hit_Info get_hit_info(float2 barycentrics_2) {
     return hit_info;
 }
 
+
 [shader("closesthit")]
-void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr){
+void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr){
 
     if(payload.just_hit == 1) {
         payload.color.x = 1; 
@@ -802,8 +790,6 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     float3 ray_hit_point = ray_origin + (RayTCurrent() * ray_direction);
 
     float3 wo = -ray_direction;
-
-    Light_Sample env_light_sample = EnvMap_SampleLi(ray_hit_point, u);  
 
     Hit_Info hit_info = get_hit_info(attr.barycentrics);
 
@@ -843,6 +829,137 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     hit_info.n = hit_info.wn;
     //hit_info.t += delta;
 
+    Light_Sample env_light_sample = EnvMap_SampleLi(hit_info, u);  
+    float light_sample_bxdf_pdf = 0.0;
+
+    u.xy = get_rand_float3(payload.random_u).xy;
+    if(u.x > 0.5){
+        light_sample_bxdf_pdf = BxDF_TS_pdf(wo, env_light_sample.wi, roughness);
+    } else {
+        light_sample_bxdf_pdf = BxDF_diffuse_pdf(wo, env_light_sample.wi);
+    }
+
+    float env_light_MIS_weight = power_huristic(1, env_light_sample.pdf, 1, light_sample_bxdf_pdf);
+
+    float F;
+    float3 f = BxDF_CT_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info, metallic, roughness) * abs(dot(env_light_sample.wi, hit_info.wn));//);
+
+    // TODO.....
+    if(!env_light_sample.occluded)
+        payload.color.rgb += payload.beta * (f * env_light_sample.L * env_light_MIS_weight) / (env_light_sample.pdf);;
+
+    // Sample outgoing direction at intersecion to continue path
+    BSDF_Sample bsdf_sample;
+    if(u.y > 0.5){
+        u.xy = get_rand_float3(payload.random_u).xy;
+        bsdf_sample = BxDF_TS_sample_f(wo, albedo_sample.rgb, u, hit_info, metallic, roughness);
+    } else {
+        u.xy = get_rand_float3(payload.random_u).xy;
+        bsdf_sample = BxDF_diffuse_sample_f(wo, albedo_sample.rgb, u, hit_info);
+    }
+
+    payload.beta *= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.wn) / bsdf_sample.pdf );
+    payload.p_b = bsdf_sample.pdf;
+
+    // Compute ray origin offset
+    float3 offset = float3(0.001, 0.001, 0.001) * hit_info.n;
+    if(dot(bsdf_sample.wi,hit_info.n) < 0){
+        offset = -offset;
+    }
+
+    // Create and trace new ray
+    RayDesc ray;
+    ray.Origin = ray_hit_point + offset;
+    ray.Direction = bsdf_sample.wi;
+    ray.TMin = 0.0001;
+    ray.TMax = 100000.0;
+
+    // Russian Roulette
+    u.x = pcg_hash_prng(payload.random_u);
+    float max_value = max(payload.beta.r, max(payload.beta.g, payload.beta.b));
+    if(max_value < 1.0 && payload.recursion_depth > 1){
+        float q = max(0, 1-max_value);
+        if (u.x < q){
+            return;
+        }
+        beta /= 1 - q;
+    }
+
+    // Trace the bound scene with ray created above
+    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 3)
+        TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
+    return;
+
+}
+
+[shader("closesthit")]
+void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr){
+
+    if(payload.just_hit == 1) {
+        payload.color.x = 1; 
+        return;
+    }
+
+    payload.recursion_depth++;
+
+    float2 u; // Random Vector -> TODO
+    float3 ray_index = DispatchRaysIndex();
+    u.xy = get_rand_float3(payload.random_u).xy;
+
+    float L = 0;
+    float beta = payload.beta;
+
+    // Account for emissive surface if light was not sampled
+    // End Path if maximum depth rendered
+    // Get BSDF and skip over medium boundries
+    // Sample direct illumination if sample lights is true
+
+    float3 ray_direction = WorldRayDirection();
+    float3 ray_origin    = WorldRayOrigin();
+    float3 ray_hit_point = ray_origin + (RayTCurrent() * ray_direction);
+
+    float3 wo = -ray_direction;
+
+    Hit_Info hit_info = get_hit_info(attr.barycentrics);
+
+    Texture2D albedo_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3)];
+    Texture2D normal_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 1)];
+    Texture2D roughness_metallic_texture = texture_2d_table[NonUniformResourceIndex(texture_array_begin.texture_index + hit_info.material_id * 3 + 2)];
+
+    float4 albedo_sample = albedo_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy);
+    float3 normal_sample = normal_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy).xyz;
+    normal_sample = normalize((2*normal_sample) - 1);
+    float4 roughness_metallic_sample = roughness_metallic_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy);
+    float metallic = roughness_metallic_sample.b;
+    float roughness = roughness_metallic_sample.g;//1 - roughness_metallic_sample.g;//pow(roughness_metallic_sample.g, 2);
+
+    // Create Tangent-Bitangent-Normal matrix to convert Tangent Space normal to world space normal
+    // https://stackoverflow.com/questions/16555669/hlsl-normal-mapping-matrix-multiplication
+    float3 w_Per_Vertex_Normal  = hit_info.n;
+    float3 w_Per_Vertex_Tangent = hit_info.t;
+    
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Gram - Schmidt process
+    // Re Orthoganalizes the tangent vector ( ensures 90* between Normal and Tangent)
+    // Vectors could be slightly off of 90*
+    // Might be more useful in the pixel shader if we built a TBN matrix there, after interpolating tangent and normal through rasterization
+    // 
+    // Scale Normal by cos(theta), then line between scaled normal and tangent is orthoganal to original normal. Subtract tangent to get new tangent
+    w_Per_Vertex_Tangent = normalize(w_Per_Vertex_Tangent - dot(w_Per_Vertex_Tangent, w_Per_Vertex_Normal) * w_Per_Vertex_Normal );
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    float3 w_Per_Vertex_Bitangent = cross(w_Per_Vertex_Normal, w_Per_Vertex_Tangent) * -hit_info.t_handedness;  // Need to multiplay by (negative) tangent handidness to correct for handidness of textures tangent space and DirectX UV space
+
+    float3x3 TBN = float3x3( normalize(w_Per_Vertex_Tangent), normalize(w_Per_Vertex_Bitangent), normalize(w_Per_Vertex_Normal) );
+
+    //hit_info.wn = mul(TBN, normal_sample.xyz);
+    hit_info.wn = mul(normal_sample.xyz, TBN);
+    float3 delta = hit_info.wn - hit_info.n;
+    hit_info.n = hit_info.wn;
+    //hit_info.t += delta;
+
+    Light_Sample env_light_sample = EnvMap_SampleLi(hit_info, u);  
+
     float F;
     float3 f = BxDF_CT_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info, metallic, roughness) * abs(dot(env_light_sample.wi, hit_info.wn));//);
 
@@ -870,10 +987,48 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     ray.TMax = 100000.0;
 
     // Trace the bound scene with ray created above
-    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 2)
+    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 3)
         TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
     return;
 
+}
+
+[shader("raygeneration")]
+void MyRaygenShader()
+{
+
+    // Get Screen Pixel
+    uint2 pixel_xy = DispatchRaysIndex().xy;
+    uint2 texture_loc = pixel_xy % 32;
+
+    Texture2D<uint> random_tex = texture_2d_uint_table[random_tex_index.texture_index];
+    uint random_u = random_tex.Load(float3(texture_loc, 0));
+    random_u *= pixel_xy.x * pixel_xy.y;
+    
+    
+    // Beginning ray payload ( starting color )
+    RayPayload payload; //  = { float4(0.0, 0.0, 0.0, 0), 1.0, 0  };
+    payload.color = float4(0.0, 0.0, 0.0, 0);
+    payload.random_u = random_u;
+
+    static const uint SAMPLE_COUNT = 20;
+    RayDesc ray;
+    for(uint i = 0; i < SAMPLE_COUNT; i++){
+
+        // Create Ray from camera
+        ray = create_camera_ray(pixel_xy, payload.random_u);
+        payload.beta = float3(1.0, 1.0, 1.0);
+        payload.just_hit = 0;
+        payload.recursion_depth = 0;
+        TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
+
+    }
+
+    // Write the raytraced color to the output texture.
+    float3 output_color = payload.color.rgb / SAMPLE_COUNT;
+    texture_2d_uav_table[output_texture_index.texture_index][pixel_xy]= float4(output_color, 1);
+
+    return;
 }
 
 [shader("closesthit")]
@@ -894,6 +1049,31 @@ void MyClosestHitShader(inout RayPayload payload : SV_RayPayload, in MyAttribute
 
 [shader("miss")]
 void MyMissShader(inout RayPayload payload : SV_RayPayload)
+{
+    if(payload.just_hit == 1) {
+        payload.color.x = 0; 
+        return;
+    }
+
+    float3 ray = WorldRayDirection();
+    if(payload.recursion_depth == 0){
+
+        payload.color.rgb += payload.beta * EnvMap_Le(ray);
+
+    } else {
+
+        float p_l = 
+        /* Probability of picking this light is 1.0 */                    1.0 * 
+        /* PDF of sphere is 1/4PI. We use half of sphere though, so *2 */ (2 / (4 * PI) );
+
+        float w_b = power_huristic(1., payload.p_b, 1., p_l);
+        payload.color.rgb += payload.beta * w_b * EnvMap_Le(ray);
+
+    }
+}
+
+[shader("miss")]
+void MySimpleMissShader(inout RayPayload payload : SV_RayPayload)
 {
     if(payload.just_hit == 1) {
         payload.color.x = 0; 
