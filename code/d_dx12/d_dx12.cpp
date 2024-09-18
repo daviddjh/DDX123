@@ -3754,6 +3754,7 @@ namespace d_dx12 {
 
         ASSERT_LOG(current_bound_shader->type == Shader::TYPE_RAY_TRACE, "Can only call dispatch rays on a DXR shader!");
 
+        // Check whether you've generated the shader tables before calling this function!
         D3D12_DISPATCH_RAYS_DESC dispatchDesc = {
             .RayGenerationShaderRecord = {
                 .StartAddress = current_bound_shader->ray_gen_shader_table->d3d12_resource->GetGPUVirtualAddress(),

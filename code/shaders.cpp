@@ -294,3 +294,28 @@ Shader* create_dxr_rayt_shader()
 
     return create_shader(shader_desc);
 }
+
+Shader* create_restir_dxr_shader()
+{
+
+    DEBUG_LOG("Creating ReSTIR DXR Shader");
+
+    //////////////////////////////////
+    //  Create our shader / PSO
+    //////////////////////////////////
+
+    Shader_Desc shader_desc;
+
+    //////////////////////////////////
+    //  Set compiled shader code
+    //////////////////////////////////
+
+    shader_desc.type = Shader::Shader_Type::TYPE_RAY_TRACE;
+    shader_desc.ray_trace_shader = L"restir_dxr.hlsl";
+
+    /////////////////////////////////////////
+    //  Create PSO using shader reflection
+    /////////////////////////////////////////
+
+    return create_shader(shader_desc);
+}

@@ -45,6 +45,7 @@ struct D_Shaders {
     Shader*           post_processing_shader;
     Shader*           compute_rayt_shader;
     Shader*           dxr_rayt_shader;
+    Shader*           restir_dxr_shader;
 };
 
 struct D_Textures {
@@ -80,6 +81,7 @@ enum D_Render_Passes : u8 {
     DEFERRED_SHADING,
     RAY_TRACING_COMPUTE,
     DXR_RAY_TRACING,
+    RESTIR,
     NUM_RENDER_PASSES
 };
 
@@ -88,6 +90,7 @@ static const char* render_pass_names[NUM_RENDER_PASSES] = {
     "Deffered_Shading",
     "Ray_Tracing_Compute",
     "DXR_Ray_Tracing",
+    "ReSTIR",
 };
 
 struct D_Renderer_Config {
@@ -138,44 +141,25 @@ struct D_Renderer {
 
     HCRYPTPROV   hCryptProv;
 
-    // d_array<Buffer*> blases;
-    // Buffer* tlas;
-    // Buffer* instance_buffer;
-    
-    // struct Geometry_Info {
-    //     u32               vertex_offset;
-    //     u32               index_byte_offset;
-    //     u32               material_id;
-    //     u32               material_flags;
-    //     // DirectX::XMMATRIX model_matrix;
-    // };
-
-    // Span<Geometry_Info> geometry_info;
-    // Buffer*   geometry_info_gpu;
-
-    // struct AccelerationStructureBuffers {
-    //     Microsoft::WRL::ComPtr<ID3D12Resource> pScratch;      // Scratch memory for AS builder
-    //     Microsoft::WRL::ComPtr<ID3D12Resource> pResult;       // Where the AS is
-    //     Microsoft::WRL::ComPtr<ID3D12Resource> pInstanceDesc; // Hold the matrices of the instances
-    // };
-
-    // Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS; // Storage for the bottom Level AS
-
-    // AccelerationStructureBuffers m_topLevelASBuffers;
-
     int  init();
     void render();
-    void render_shadow_map(Command_List* command_list);
-    void forward_render_pass(Command_List* command_list);
-    void deferred_render_pass(Command_List* command_list);
-    void compute_rayt_pass(Command_List* command_list);
-    void dxr_ray_tracing_pass(Command_List* command_list);
     void shutdown();
     void toggle_fullscreen();
     void upload_model_to_gpu(Command_List* command_list, D_Model& test_model);
     void bind_and_draw_model(Command_List* command_list, D_Model* model);
     void calc_acceleration_structure(Command_List* command_list);
     void build_shader_tables(Command_List* command_list, Shader* shader);
+
+    ////////////////////////////////////////////////////////
+    // Passes
+    ////////////////////////////////////////////////////////
+    void render_shadow_map(Command_List* command_list);
+    void forward_render_pass(Command_List* command_list);
+    void deferred_render_pass(Command_List* command_list);
+    void compute_rayt_pass(Command_List* command_list);
+    void dxr_ray_tracing_pass(Command_List* command_list);
+    void restir_pass(Command_List* command_list);
+    ////////////////////////////////////////////////////////
 };
 
 D_Renderer renderer;
@@ -634,6 +618,7 @@ int D_Renderer::init(){
     shaders.post_processing_shader   = create_post_processing_shader();
     shaders.compute_rayt_shader      = create_compute_rayt_shader();
     shaders.dxr_rayt_shader          = create_dxr_rayt_shader();
+    shaders.restir_dxr_shader        = create_restir_dxr_shader();
 
     ////////////////////////////
     //  Create our command list
@@ -644,6 +629,7 @@ int D_Renderer::init(){
 
     // Create shader tables in memory for DXR shaders
     upload_command_list->build_shader_tables(shaders.dxr_rayt_shader);
+    upload_command_list->build_shader_tables(shaders.restir_dxr_shader);
 
     //////////////////////////
     //  Upload our GLTF Model
@@ -799,7 +785,7 @@ int D_Renderer::init(){
     // Load image to CPU
     ScratchImage env_map_scratch_img;
     HRESULT hr = LoadFromHDRFile(L"buikslotermeerplein_4k.hdr", NULL, env_map_scratch_img);
-    // HRESULT hr = LoadFromHDRFile(L"kloofendal_48d_partly_cloudy_puresky_4k.hdr", NULL, env_map_scratch_img);
+    //HRESULT hr = LoadFromHDRFile(L"kloofendal_48d_partly_cloudy_puresky_4k.hdr", NULL, env_map_scratch_img);
     if (FAILED(hr)){
         DEBUG_ERROR("Error Loading Env Map File!");
         exit(0);
@@ -1501,6 +1487,183 @@ void D_Renderer::dxr_ray_tracing_pass(Command_List* command_list){
     }
 }
 
+void D_Renderer::restir_pass(Command_List* command_list){
+
+    ///////////////////////////////////////////
+    // DXR Ray Tracing!
+    ///////////////////////////////////////////
+
+    // Porting code from backend for debug...
+
+    u32 random_data[32 * 32];
+    CryptGenRandom(hCryptProv, 32*32*4, (u8*)&random_data);
+
+    command_list->load_decoded_texture_from_memory(textures.random_tex, (u_ptr)&random_data, false);
+
+    command_list->set_shader(shaders.restir_dxr_shader);
+
+    Descriptor_Handle per_frame_data_handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
+    command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
+    
+    Output_Dimensions output_dimensions         = {config.display_width, config.display_height};
+    Descriptor_Handle output_dimensions_handle  = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+    command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
+
+    // Cant use Constant buffer for geometry vertex offsets because we don't know how many we have.
+    // Constant buffers need to be "Constant". Cant have variable size or anyting. I think the shader/compiler needs to know the size
+    // at compile time.
+    command_list->bind_buffer_read(scene.acceleration_structure.geometry_info, binding_point_string_lookup("geometry_info"));
+
+    command_list->bind_buffer_read(scene.models[0].meshes.ptr[0].vertex_buffer, binding_point_string_lookup("vertex_buffer"));
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC d3d12_index_buffer_srv = {
+        .Format = DXGI_FORMAT_R32_TYPELESS,
+        .ViewDimension = D3D12_SRV_DIMENSION_BUFFER,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .Buffer = {
+            .FirstElement = 0,
+            .NumElements = scene.models[0].meshes.ptr[0].index_buffer->number_of_elements / 2, // 2 because index is 16 bit, and buffer format is 32 bit
+            .StructureByteStride = 0,
+            .Flags = D3D12_BUFFER_SRV_FLAG_RAW
+        }
+    };
+
+    command_list->bind_buffer_read(scene.models[0].meshes.ptr[0].index_buffer, binding_point_string_lookup("index_buffer"), &d3d12_index_buffer_srv);
+    
+    command_list->d3d12_command_list->SetComputeRootShaderResourceView(command_list->current_bound_shader->binding_points[binding_point_string_lookup("scene")].root_signature_index, scene.acceleration_structure.tlas->d3d12_resource->GetGPUVirtualAddress());
+
+    // Need to do this last so it doesn't interfere with Geometry_Info.material_id mapping to above material index.. TODO: find a better solution..
+    Texture_Index output_texture_index = {};
+    output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+
+    Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+    struct Textures_Offset { u32 index; } textures_offset = { resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].texture_table_size };
+    Descriptor_Handle textures_offset_handle = resource_manager.load_dyanamic_frame_data((void*)&textures_offset, sizeof(Textures_Offset), 256);
+    command_list->bind_handle(textures_offset_handle, binding_point_string_lookup("texture_array_begin"));
+
+    // Bind All Materials
+    D_Model* main_model = &scene.models[0];
+    // TODO: EEEEKKKKK shouldn't be here. Need a better way of doing this. Maybe we should bind textures like this for rasterization too?
+    for(int i = 0; i < main_model->materials.nitems; i++){
+        D_Material* material = &main_model->materials.ptr[i];
+
+        // command_list->bind_texture(material->albedo_texture.texture, &resource_manager, 0);
+        u32 bind_point = command_list->bind_texture(material->albedo_texture.texture, &resource_manager, 0);
+
+        if(material->material_flags & MATERIAL_FLAG_NORMAL_TEXTURE){
+            command_list->bind_texture(material->normal_texture.texture, &resource_manager, 0);
+        } else {
+            resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();  // Throw away to keep our Material Slots uniform
+        }
+
+        if(material->material_flags & MATERIAL_FLAG_ROUGHNESSMETALLIC_TEXTURE){
+            command_list->bind_texture(material->roughness_metallic_texture.texture, &resource_manager, 0);
+        } else {
+            resource_manager.online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_texture_handle();  // Throw away to keep our Material Slots uniform
+        }
+    }
+
+    Texture_Index env_map_index = {};
+    env_map_index.texture_index = (unsigned int)command_list->bind_texture(textures.env_map, &resource_manager, 0);
+    Descriptor_Handle env_map_handle = resource_manager.load_dyanamic_frame_data((void*)&env_map_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(env_map_handle, binding_point_string_lookup("env_map_index"));
+
+    Texture_Index random_tex_index = {};
+    random_tex_index.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+    Descriptor_Handle random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(random_tex_handle, binding_point_string_lookup("random_tex_index"));
+
+
+    // Bindings needed for importance sampling the environment map
+    Texture_Index env_conditional_cdfs_index = {};
+    env_conditional_cdfs_index.texture_index = (unsigned int)command_list->bind_texture(textures.env_conditional_cdfs, &resource_manager, 0);
+    Descriptor_Handle env_conditional_cdfs_handle = resource_manager.load_dyanamic_frame_data((void*)&env_conditional_cdfs_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(env_conditional_cdfs_handle, binding_point_string_lookup("env_conditional_cdfs_index"));
+
+    Texture_Index env_luminance_distribution_index = {};
+    env_luminance_distribution_index.texture_index = (unsigned int)command_list->bind_texture(textures.env_luminance_distribution, &resource_manager, 0);
+    Descriptor_Handle env_luminance_distribution_handle = resource_manager.load_dyanamic_frame_data((void*)&env_luminance_distribution_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(env_luminance_distribution_handle, binding_point_string_lookup("env_luminance_distribution_index"));
+
+
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc;
+        srv_desc.Format = DXGI_FORMAT_UNKNOWN;// desc.format;
+        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv_desc.Buffer.FirstElement = 0;
+        srv_desc.Buffer.NumElements = buffers.env_marginal_cdf->number_of_elements;
+        srv_desc.Buffer.StructureByteStride = buffers.env_marginal_cdf->size_of_each_element;
+        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        command_list->bind_buffer_read(buffers.env_marginal_cdf, binding_point_string_lookup("env_marginal_cdf"), &srv_desc);
+    }
+
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc;
+        srv_desc.Format = DXGI_FORMAT_UNKNOWN;// desc.format;
+        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srv_desc.Buffer.FirstElement = 0;
+        srv_desc.Buffer.NumElements = buffers.env_full_conditional_distribution_integrals->number_of_elements;
+        srv_desc.Buffer.StructureByteStride = buffers.env_full_conditional_distribution_integrals->size_of_each_element;
+        srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        command_list->bind_buffer_read(buffers.env_full_conditional_distribution_integrals, binding_point_string_lookup("env_full_conditional_distribution_integrals"), &srv_desc);
+    }
+
+    command_list->bind_constant_buffer(buffers.env_importance_sample_info, binding_point_string_lookup("env_importance_sample_info"));
+
+
+    // Now be bind the texture table to the root signature. 
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_float_table"));
+
+    command_list->dispatch_rays(config.render_width, config.render_height);
+
+
+    //////////////////////////////////////////////////////////
+    // Post Processing
+    //////////////////////////////////////////////////////////
+    {
+        command_list->set_shader(shaders.post_processing_shader);
+
+        command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
+        
+        Texture_Index input_texture_index = {};
+        input_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("input_texture"), true);
+
+        Descriptor_Handle input_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&input_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(input_texture_index_handle, binding_point_string_lookup("input_texture_index"));
+
+        Texture_Index output_texture_index = {};
+        output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+
+        Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+        Post_Processing_Config post_processing_config {
+            .ssao_enabled = false
+        };
+
+        Descriptor_Handle post_processing_config_handle = resource_manager.load_dyanamic_frame_data((void*)&post_processing_config, sizeof(Post_Processing_Config), 256);
+        command_list->bind_handle(post_processing_config_handle, binding_point_string_lookup("post_processing_config"));
+
+        Texture_Index ssao_texture_index = {};
+        ssao_texture_index.texture_index = command_list->bind_texture(textures.ssao_output_texture, &resource_manager, binding_point_string_lookup("ssao_texture"), true);
+
+        Descriptor_Handle ssao_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&ssao_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(ssao_texture_index_handle, binding_point_string_lookup("ssao_texture_index"));
+
+        // Now be bind the texture table to the root signature. 
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+        command_list->dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
+    }
+}
+
 void D_Renderer::render(){
     {
 
@@ -1607,6 +1770,12 @@ void D_Renderer::render(){
             command_list->transition_texture(textures.main_output_target, D3D12_RESOURCE_STATE_RENDER_TARGET);
             command_list->set_render_targets(1, &textures.main_output_target, nullptr);
             break;
+        case D_Render_Passes::RESTIR:
+            // ReSTIR pass
+            restir_pass(command_list);
+            command_list->transition_texture(textures.main_output_target, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            command_list->set_render_targets(1, &textures.main_output_target, nullptr);
+            break;
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1635,9 +1804,11 @@ void D_Renderer::render(){
     ImGui::Text("Space Bar - Full Screen Toggle");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
+#if 0
     ImGui::SliderFloat3("Light Position", &this->per_frame_data.light_position.x, -10., 10);
     ImGui::DragFloat3("Light Color", &this->per_frame_data.light_color.x);
     ImGui::SliderFloat("Camera FOV", &this->camera.fov, 35., 120.);
+#endif
     // Combo box for choosing which render pass to use
     // Copied from imgui_demo.cpp
     if (ImGui::BeginCombo("Render Pass", render_pass_names[config.render_pass], /*flags*/ 0))

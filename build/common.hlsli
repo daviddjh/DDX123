@@ -1,3 +1,6 @@
+#ifndef __COMMON__
+#define __COMMON__
+
 //////////////////////////////////
 // COMMON DEFINES
 //////////////////////////////////
@@ -24,6 +27,18 @@ static const float INV_PI = 0.31830988618379067154;
 
 #include "../code/constant_buffers.h"
 
+struct Hit_Info {
+    float2 uv;
+    float3 p;
+    float3 n;
+    float3 wn;
+    float3 t;
+    float  t_handedness;
+    uint material_id;
+    float2 ddx;
+    float2 ddy;
+};
+
 //////////////////////////////////
 // COMMON BINDINGS
 //////////////////////////////////
@@ -37,3 +52,5 @@ Texture2D<uint>                texture_2d_uint_table[] : register(t0, Tex2DUintS
 Texture2D<float>               texture_2d_float_table[]: register(t0, Tex2DFloatSpace);
 RWTexture2D<float4>            texture_2d_uav_table[]  : register(u0, Tex2DUAVSpace);
 ConstantBuffer<Per_Frame_Data> per_frame_data          : register(b10, CommonSpace);
+
+#endif // __COMMON__

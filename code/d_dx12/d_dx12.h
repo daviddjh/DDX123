@@ -75,10 +75,10 @@ namespace d_dx12 {
 
         Binding_Point binding_points[BINDING_POINT_INDEX_COUNT];
 
-        Buffer* ray_gen_shader_table;
+        Buffer* ray_gen_shader_table = NULL;
         ID3D12Resource* ray_gen_shader_table_resource;
-        Buffer* hit_group_shader_table;
-        Buffer* miss_shader_table;
+        Buffer* hit_group_shader_table = NULL;
+        Buffer* miss_shader_table = NULL;
 
         void d_dx12_release();
 
