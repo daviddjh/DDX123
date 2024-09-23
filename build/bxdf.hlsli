@@ -77,7 +77,7 @@ float3 fresnel_schlick_aprox(float cosTheta, float3 F0){
 float3 TR_sample_wm(float3 w, float2 u, float roughness){
     roughness = pow(roughness, 2);
     float alpha_x = roughness, alpha_y = roughness;
-    float3 wh = normalize(float3(alpha_x * w.x, alpha_y * w.y, w.z));               /// CHECK THIS FOR ERRORS. SWAPPING Y and Z from book
+    float3 wh = normalize(float3(alpha_x * w.x, alpha_y * w.y, w.z));
     if(wh.z < 0){
         wh = -wh;
     }
@@ -111,9 +111,9 @@ float TR_D(float3 wm, float roughness) {
     float tan2theta = tan_2_theta(wm);
     if(isinf(tan2theta)) return 0;
     float cos4theta = sqr(cos_2_theta(wm));
-    float e = tan2theta * (sqr(cos_phi(wm) / alpha_x) + 
-                           sqr(sin_phi(wm) / alpha_y));
-    return 1 / (PI * alpha_x * alpha_y * cos4theta * sqr(1 + e));
+    float e = tan2theta * (sqr(cos_phi(wm) / alpha_x + 0.0001f) + 
+                           sqr(sin_phi(wm) / alpha_y + 0.0001f));
+    return 1 / (PI * alpha_x * alpha_y * cos4theta * sqr(1 + e) + 0.0001f);
 }
 
 // Geomtery Masking and Shadowing
@@ -125,7 +125,7 @@ float TR_G(float3 wo, float3 wi, float roughness) {
 float TR_D_vis(float3 w, float3 wm, float roughness) {
     // Geometry Masking function:
     float G1 = 1 / (1 + TR_lambda(w, roughness));
-    return G1  / abs_cos_theta(w) * TR_D(wm, roughness) * abs(dot(w, wm));
+    return G1  / abs_cos_theta(w) * TR_D(wm, roughness) * abs(dot(w, wm)) + 0.0001f;
 }
 
 // Probability that a microfacet normal was selected
@@ -139,7 +139,7 @@ float BxDF_TS_pdf(float3 wo, float3 wi, float roughness)
 
     // Compute PDF for microfact reflection
     // Probability that a wi vector was selected. (basicly TR_pdf adjusted)
-    float pdf = TR_pdf(wo, wm, roughness) / (4 * abs(dot(wo, wm)));
+    float pdf = TR_pdf(wo, wm, roughness) / (4 * abs(dot(wo, wm))) + 0.0001f;
     return pdf;
 }
 
@@ -178,7 +178,7 @@ float3 BxDF_TS_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info, float m
     F0 = lerp(F0, albedo, metallic);
     F = fresnel_schlick_aprox(cosTheta_o, F0);
 
-    return TR_D(wm, roughness) * F * TR_G(wo, wi, roughness) / (4 * cosTheta_i * cosTheta_o);
+    return TR_D(wm, roughness) * F * TR_G(wo, wi, roughness) / (4 * cosTheta_i * cosTheta_o) + 0.0001;
 
 }
 
@@ -235,7 +235,7 @@ BSDF_Sample BxDF_TS_sample_f(float3 wo, float3 albedo, float2 random_u, Hit_Info
 
     float3 F = fresnel_schlick_aprox(cosTheta_o, F0);
 
-    float3 specular = TR_D(wm, roughness) * F * TR_G(wo, wi, roughness) / (4 * cosTheta_i * cosTheta_o);
+    float3 specular = TR_D(wm, roughness) * F * TR_G(wo, wi, roughness) / (4 * cosTheta_i * cosTheta_o) + 0.0001f;
 
     bsdf_sample.pdf = pdf;
     bsdf_sample.sampled_light = specular;

@@ -4,6 +4,17 @@
 #include "common.hlsli"
 #include "math.hlsli"
 
+void update_reservoir(inout Reservoir reservoir, float3 sample_y, float weight, float p_hat_sample, float rand){
+
+    reservoir.sum_of_weights += weight;
+    reservoir.sample_count += 1;//min(light_samples.sample_count + 1, 20);
+    if (rand < (weight / reservoir.sum_of_weights)){
+        reservoir.sample = sample_y;
+        reservoir.p_hat_sample = p_hat_sample;
+    }
+
+}
+
 // from: https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
 float pcg_hash(uint input)
 {

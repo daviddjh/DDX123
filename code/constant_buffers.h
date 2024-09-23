@@ -94,6 +94,29 @@ ALIGN_STRUCT struct Env_Map_Importance_Sample_Info {
     uint height;
 };
 
+struct Reservoir {
+    float3 sample;         // Sample
+    float  sum_of_weights; // w_sum
+    int    sample_count;   // M
+    float  W;
+    float  p_hat_sample;
+};
+
+struct Temporal_Buffer {
+    Reservoir reservoir[30];
+};
+
+ALIGN_STRUCT struct ReSTIR_DI_Current_Frame_Evaulation_Vars {
+    Reservoir reservoir;
+    float3 wo;
+    float3 albedo_rgb;
+    float3 normal;
+    float3 tangent;
+    float tangent_handedness;
+    float metallic;
+    float roughness;
+};
+
 #ifdef __cplusplus
 #undef float2
 #undef float3

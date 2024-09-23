@@ -6,7 +6,7 @@
 #include "third_party/d3dx12.h"
 
 #define NUM_DESCRIPTOR_RANGES_IN_TABLE 1
-#define DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE 200
+#define DEFAULT_UNBOUND_DESCRIPTOR_TABLE_SIZE 400
 #define NUM_BACK_BUFFERS 2
 #define IS_BOUND_ONLINE_TABLE_SIZE 500
 
@@ -250,7 +250,8 @@ namespace d_dx12 {
             USAGE_VERTEX_BUFFER,
             USAGE_INDEX_BUFFER,
             USAGE_CONSTANT_BUFFER,
-            USAGE_SHADER_RESOURCE
+            USAGE_SHADER_RESOURCE,
+            USAGE_READ_WRITE,
         };
 
         Microsoft::WRL::ComPtr<ID3D12Resource2>   d3d12_resource;
@@ -391,6 +392,7 @@ namespace d_dx12 {
         void bind_constant_buffer(Buffer* buffer, u32 binding_point);
         void bind_buffer_read(Buffer* buffer, u32 binding_point, D3D12_SHADER_RESOURCE_VIEW_DESC* srv_desc = NULL);
         void bind_buffer_write(Buffer* buffer, u32 binding_point);
+        void clear_uav_buffer(Buffer* buffer, u32 binding_point);
 
         void bind_constant_arguments(void* data, u16 num_32bit_values_to_set, u32  parameter_name);
         void bind_online_descriptor_heap_texture_table(Resource_Manager* resource_manager, u32 binding_point);

@@ -5,6 +5,8 @@
 #include "bxdf.hlsli"
 #include "color_space.hlsli"
 
+RWStructuredBuffer<ReSTIR_DI_Current_Frame_Evaulation_Vars> restir_di_current_frame_reservoir_buffer : register(u1, ComputeSpace);
+
 RaytracingAccelerationStructure scene : register(t0, space0);
 
 ConstantBuffer<Texture_Index> output_texture_index  : register(b0, ComputeSpace);
@@ -18,6 +20,7 @@ ConstantBuffer<Texture_Index>   env_luminance_distribution_index : register(b6, 
 
 Buffer<float> env_marginal_cdf                            : register(t1, ComputeSpace);
 Buffer<float> env_full_conditional_distribution_integrals : register(t2, ComputeSpace);
+
 
 ConstantBuffer<Env_Map_Importance_Sample_Info> env_importance_sample_info : register(b9, ComputeSpace);
 
@@ -276,6 +279,17 @@ Hit_Info get_hit_info(float2 barycentrics_2) {
     hit_info.t = tangent.xyz;
     hit_info.t_handedness = tangent.w;
     hit_info.t  = normalize(hit_info.t);
+
+    // This checks if N and T are in the same direction. If they are, generate a new T
+    if (abs(dot(hit_info.n, hit_info.t)) > 0.9999f || length(hit_info.t < 0.001f)){
+        float3 up = (abs(hit_info.n.y) < 0.9999f) ? float3(0, 1, 0) : float3(0,0,1);
+        hit_info.t = normalize(cross(hit_info.n, up));
+    }
+
+    if(!hit_info.t_handedness){
+        hit_info.t_handedness = 1;
+    }
+
     hit_info.material_id = g_info.material_id;
 
     /////////////////////////////////////////////
@@ -393,7 +407,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     normal_sample = normalize((2*normal_sample) - 1);
     float4 roughness_metallic_sample = roughness_metallic_texture.SampleGrad(sampler_1, hit_info.uv, hit_info.ddx, hit_info.ddy);
     float metallic = roughness_metallic_sample.b;
-    float roughness = roughness_metallic_sample.g;//1 - roughness_metallic_sample.g;//pow(roughness_metallic_sample.g, 2);
+    float roughness = roughness_metallic_sample.g + 0.0001f;//1 - roughness_metallic_sample.g;//pow(roughness_metallic_sample.g, 2);
 
     // Create Tangent-Bitangent-Normal matrix to convert Tangent Space normal to world space normal
     // https://stackoverflow.com/questions/16555669/hlsl-normal-mapping-matrix-multiplication
@@ -420,24 +434,113 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     hit_info.n = hit_info.wn;
     //hit_info.t += delta;
 
-    Light_Sample env_light_sample = EnvMap_SampleLi(hit_info, u);  
-    float light_sample_bxdf_pdf = 0.0;
+    Reservoir light_samples;
+    light_samples.sample         = float3(0,0,0);
+    light_samples.W              = 0;
+    light_samples.sum_of_weights = 0;
+    light_samples.sample_count   = 0;
+    light_samples.p_hat_sample   = 0;
 
-    u.xy = get_rand_float3(payload.random_u).xy;
-    if(u.x > 0.5){
-        light_sample_bxdf_pdf = BxDF_TS_pdf(wo, env_light_sample.wi, roughness);
-    } else {
-        light_sample_bxdf_pdf = BxDF_diffuse_pdf(wo, env_light_sample.wi);
+    for(int i = 0; i < 100; i++){
+
+        u.xy = get_rand_float3(payload.random_u).xy;
+
+        Light_Sample light_sample;
+
+        // TODO: sample uv from a distribution over the image:
+        float map_PDF = 1;
+        
+        // Sample the luminance PDF. This ensures samples are mostly taken from bright areas.
+        // float2 uv = sample_env_luminance_distribution(u, map_PDF);
+        // map_PDF = 1;
+
+        // Just a random sample, optionally forced to face upwards
+        float2 uv = u;
+        float3 w_light = square_coord_to_sphere_coord(uv);
+
+        // // Flip ray to only face upwards
+        w_light.y = abs(w_light.y);
+        uv = sphere_coord_to_square_coord(w_light);
+
+        float3 wi = w_light;
+        float pdf = map_PDF / (4 * PI);
+        pdf *= 2;
+
+        float light_sample_bxdf_pdf = 0.0;
+        float3 f = 0.0;
+
+        u.xy = get_rand_float3(payload.random_u).xy;
+        if(u.x > 0.5){
+            light_sample_bxdf_pdf = BxDF_TS_pdf(wo, wi, roughness);
+        } else {
+            light_sample_bxdf_pdf = BxDF_diffuse_pdf(wo, wi);
+        }
+
+        float env_light_MIS_weight = power_huristic(1, pdf, 1, light_sample_bxdf_pdf);
+        //float p_hat  = (env_light_MIS_weight) / (pdf); 
+        float p_hat  = env_light_MIS_weight / pdf; 
+        float weight = p_hat / pdf;
+
+        float rand = pcg_hash_prng(payload.random_u);
+
+        update_reservoir(light_samples, wi, weight, p_hat, rand);
     }
 
-    float env_light_MIS_weight = power_huristic(1, env_light_sample.pdf, 1, light_sample_bxdf_pdf);
+    Light_Sample env_light_sample;
+    float3 f = float3(0,0,0);
+    {
+        light_samples.W = (1./light_samples.p_hat_sample) * ((1./float(light_samples.sample_count)) * light_samples.sum_of_weights);
 
-    float F;
-    float3 f = BxDF_CT_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info, metallic, roughness) * abs(dot(env_light_sample.wi, hit_info.wn));//);
+        float2 uv = sphere_coord_to_square_coord(light_samples.sample);
 
-    // TODO.....
-    if(!env_light_sample.occluded)
-        payload.color.rgb += payload.beta * (f * env_light_sample.L * env_light_MIS_weight) / (env_light_sample.pdf);;
+        // Compute ray origin offset
+        float3 offset = float3(0.001, 0.001, 0.001) * hit_info.n;
+        if(dot(light_samples.sample, hit_info.n) < 0){
+            offset = -offset;
+        }
+
+        // Create Ray
+        RayDesc ray;
+        ray.Origin = hit_info.p.xyz + offset;
+        ray.Direction = light_samples.sample;
+        ray.TMin = 0.001;
+        ray.TMax = 100000.0;
+
+        // Trace the bound scene with ray created above
+        RayPayload payload; //= { float4(1.0, 0.0, 0.0, 0), 0, 1};
+        payload.color = float4(1.0, 0.0, 0.0, 0);
+        payload.beta = 0;
+        payload.just_hit = 1;
+        payload.recursion_depth = 0;
+        TraceRay(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
+
+        if (payload.color.x == 0){
+            env_light_sample.L = EnvMap_ImageLe(uv);
+            env_light_sample.p = hit_info.p.xyz + (light_samples.sample * 2 * scene_radius);
+            env_light_sample.wi = light_samples.sample;
+            env_light_sample.occluded = 0;
+        } else {
+            env_light_sample.occluded = 1;
+        }
+
+        if(!env_light_sample.occluded){
+            f = BxDF_CT_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info, metallic, roughness) * abs(dot(env_light_sample.wi, hit_info.wn));
+        } else {
+            light_samples.W = 0;
+            light_samples.sum_of_weights = 0;
+            light_samples.sample_count = 0;
+        }
+    }
+
+    //payload.color.rgb += payload.beta * (env_light_sample.L * f) * light_samples.W;// * light_samples.W; //(f * env_light_sample.L * env_light_MIS_weight) / (env_light_sample.pdf);
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].reservoir = light_samples;
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].wo = wo;
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].albedo_rgb = albedo_sample.rgb;
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].normal = hit_info.n;
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].tangent = hit_info.t;
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].tangent_handedness = hit_info.t_handedness;
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].metallic = metallic;
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].roughness = roughness;
 
     // Sample outgoing direction at intersecion to continue path
     BSDF_Sample bsdf_sample;
@@ -477,7 +580,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     }
 
     // Trace the bound scene with ray created above
-    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 3)
+    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 1)
         TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
     return;
 
@@ -590,6 +693,7 @@ void MyRaygenShader()
 
     // Get Screen Pixel
     uint2 pixel_xy = DispatchRaysIndex().xy;
+    uint2 dim_xy = DispatchRaysDimensions().xy;
     uint2 texture_loc = pixel_xy % 32;
 
     Texture2D<uint> random_tex = texture_2d_uint_table[random_tex_index.texture_index];
@@ -616,8 +720,10 @@ void MyRaygenShader()
     }
 
     // Write the raytraced color to the output texture.
-    float3 output_color = payload.color.rgb / SAMPLE_COUNT;
-    texture_2d_uav_table[output_texture_index.texture_index][pixel_xy]= float4(output_color, 1);
+
+    float3 ray_sample   = payload.color.rgb / float(SAMPLE_COUNT);
+
+    //texture_2d_uav_table[output_texture_index.texture_index][pixel_xy] = float4(ray_sample, 1);
 
     return;
 }

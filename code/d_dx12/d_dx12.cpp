@@ -1920,7 +1920,7 @@ namespace d_dx12 {
 
             // Defines maximum payload and attribute size in bytes for RT shaders
             CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT* shader_config_subobject = raytracing_pipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-            u32 payload_size = 44;   // color + hit bool + beta + random + recursion
+            u32 payload_size = 52;   // color + hit bool + beta + random + recursion + p_b + weight
             u32 attribute_size = sizeof(float) * 2; // barycentrics
             shader_config_subobject->Config(payload_size, attribute_size);
 
@@ -2804,6 +2804,52 @@ namespace d_dx12 {
             }
             break;
 
+            case(Buffer::USAGE::USAGE_READ_WRITE):
+            {
+                // Should I get a descriptor handle here? It's offline so it should be fine?
+                buffer->offline_descriptor_handle = this->offline_cbv_srv_uav_descriptor_heap.get_next_handle();
+
+                // Not sure where to find this, just showed up in an error...
+                // Guess we need to align CB size to 256
+                // Old NVidia requirement?
+                // u16 alignment = 256;
+                // u32 remainder = total_size % alignment;
+                // u32 aligned_total_size = total_size + (alignment - remainder);
+                buffer->aligned_total_size = AlignPow2Up(total_size, 256);
+                // TODO: Remove above
+
+                // Create the resource in the buffer
+                D3D12_HEAP_PROPERTIES heap_prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+                //D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC::Buffer(aligned_total_size);
+                D3D12_RESOURCE_DESC resource_desc = CD3DX12_RESOURCE_DESC( D3D12_RESOURCE_DIMENSION_BUFFER, 0, buffer->aligned_total_size,
+                                                        1, 1, 1, DXGI_FORMAT_UNKNOWN, 1, 0, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, desc.flags | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+                d3d12_device->CreateCommittedResource(
+                    &heap_prop,
+                    D3D12_HEAP_FLAG_NONE,
+                    &resource_desc,
+                    buffer->state,
+                    nullptr,
+                    IID_PPV_ARGS(buffer->d3d12_resource.GetAddressOf())
+                );
+
+                #ifdef DEBUG
+                buffer->d3d12_resource->SetName(name);
+                #endif
+
+                D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc;
+                uav_desc.Format                      = DXGI_FORMAT_UNKNOWN;
+                uav_desc.ViewDimension               = D3D12_UAV_DIMENSION_BUFFER;
+                uav_desc.Buffer.FirstElement         = 0;
+                uav_desc.Buffer.NumElements          = desc.number_of_elements;
+                uav_desc.Buffer.StructureByteStride  = desc.size_of_each_element;
+                uav_desc.Buffer.Flags                = D3D12_BUFFER_UAV_FLAG_NONE;
+                uav_desc.Buffer.CounterOffsetInBytes = 0;
+                
+                d3d12_device->CreateUnorderedAccessView(buffer->d3d12_resource.Get(), NULL, &uav_desc, buffer->offline_descriptor_handle.cpu_descriptor_handle);
+
+            }
+            break;
         }
 
         return buffer;
@@ -3395,6 +3441,40 @@ namespace d_dx12 {
 
         // Bind to root sig
         bind_handle(online_handle, binding_point);
+    }
+
+    void Command_List::clear_uav_buffer(Buffer* buffer, u32 binding_point){
+
+        // Create offline buffer if we haven't created one yet
+        if(buffer->uav_descriptor_handle.cpu_descriptor_handle.ptr == 0){
+
+            buffer->uav_descriptor_handle = resource_manager->offline_cbv_srv_uav_descriptor_heap.get_next_handle();
+
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {
+                .Format = buffer->format,
+                .ViewDimension = D3D12_UAV_DIMENSION_BUFFER,
+                .Buffer = {
+                    .FirstElement = 0,
+                    .NumElements  = buffer->number_of_elements,
+                    .StructureByteStride = buffer->size_of_each_element,
+                    .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
+                }
+
+            };
+
+            d3d12_device->CreateUnorderedAccessView(buffer->d3d12_resource.Get(), NULL, &uav_desc, buffer->uav_descriptor_handle.cpu_descriptor_handle);
+        }
+
+        // Get an online handle
+        Descriptor_Handle online_handle = resource_manager->online_cbv_srv_uav_descriptor_heap[current_backbuffer_index].get_next_handle();
+
+        // Bind the offline srv
+        d3d12_device->CopyDescriptorsSimple(1, online_handle.cpu_descriptor_handle, buffer->uav_descriptor_handle.cpu_descriptor_handle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        u32 clear_value[4] = {0, 0, 0, 0};
+
+        d3d12_command_list->ClearUnorderedAccessViewUint(online_handle.gpu_descriptor_handle, buffer->uav_descriptor_handle.cpu_descriptor_handle, buffer->d3d12_resource.Get(), clear_value, 0, NULL);
+
     }
 
     void Command_List::bind_buffer(Buffer* buffer, Resource_Manager* resource_manager, u32 binding_point_index, bool write){

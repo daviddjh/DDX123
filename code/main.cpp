@@ -46,6 +46,7 @@ struct D_Shaders {
     Shader*           compute_rayt_shader;
     Shader*           dxr_rayt_shader;
     Shader*           restir_dxr_shader;
+    Shader*           restir_temporal;
 };
 
 struct D_Textures {
@@ -74,6 +75,8 @@ struct D_Buffers{
     Buffer*           env_marginal_cdf;
     Buffer*           env_full_conditional_distribution_integrals;
     Buffer*           env_importance_sample_info;
+    Buffer*           restir_di_current_frame_reservoir_buffer;
+    Buffer*           prev_frame_reservoir_buffer;
 };
 
 enum D_Render_Passes : u8 {
@@ -96,7 +99,7 @@ static const char* render_pass_names[NUM_RENDER_PASSES] = {
 struct D_Renderer_Config {
     bool fullscreen_mode = false;
     bool imgui_demo      = false;         
-    u8   render_pass     = D_Render_Passes::DXR_RAY_TRACING;
+    u8   render_pass     = D_Render_Passes::RESTIR;
 
     #ifdef d_4k
     u16 display_width  = 3840;
@@ -116,7 +119,6 @@ struct Vertex {
     XMFLOAT3 position;
     XMFLOAT4 color;
 };
-
 
 // Global Vars, In order of creation
 struct D_Renderer {
@@ -168,7 +170,7 @@ Memory_Arena *per_scene_arena;
 Memory_Arena *lifetime_arena;
 bool application_is_initialized = false;
 
-#define MAX_TICK_SAMPLES 20
+#define MAX_TICK_SAMPLES 400
 int tick_index = 0;
 double tick_sum = 0.;
 double *tick_list = NULL;
@@ -619,6 +621,7 @@ int D_Renderer::init(){
     shaders.compute_rayt_shader      = create_compute_rayt_shader();
     shaders.dxr_rayt_shader          = create_dxr_rayt_shader();
     shaders.restir_dxr_shader        = create_restir_dxr_shader();
+    shaders.restir_temporal          = create_restir_temporal_shader();
 
     ////////////////////////////
     //  Create our command list
@@ -924,7 +927,24 @@ int D_Renderer::init(){
         env_map_sample_info.height = height;
 
         upload_command_list->load_buffer(buffers.env_importance_sample_info, (u8*)&env_map_sample_info, sizeof(Env_Map_Importance_Sample_Info), 256);
-        
+
+        ///////////////////////////////////////////////
+        // ReSTIR Buffers
+        ///////////////////////////////////////////////
+
+        Buffer_Desc restir_di_current_frame_reservoir_buffer_desc          = {};
+        restir_di_current_frame_reservoir_buffer_desc.number_of_elements   = config.render_width * config.render_height;
+        restir_di_current_frame_reservoir_buffer_desc.size_of_each_element = sizeof(ReSTIR_DI_Current_Frame_Evaulation_Vars);
+        restir_di_current_frame_reservoir_buffer_desc.usage                = Buffer::USAGE::USAGE_READ_WRITE;
+        restir_di_current_frame_reservoir_buffer_desc.format               = DXGI_FORMAT_UNKNOWN;
+        buffers.restir_di_current_frame_reservoir_buffer = resource_manager.create_buffer(L"restir_di_current_frame_reservoir_buffer", restir_di_current_frame_reservoir_buffer_desc);
+
+        Buffer_Desc prev_frame_reservoir_buffer_desc          = {};
+        prev_frame_reservoir_buffer_desc.number_of_elements   = config.render_width * config.render_height;
+        prev_frame_reservoir_buffer_desc.size_of_each_element = sizeof(Reservoir);
+        prev_frame_reservoir_buffer_desc.usage                = Buffer::USAGE::USAGE_READ_WRITE;
+        prev_frame_reservoir_buffer_desc.format               = DXGI_FORMAT_UNKNOWN;
+        buffers.prev_frame_reservoir_buffer = resource_manager.create_buffer(L"prev_frame_reservoir_buffer", prev_frame_reservoir_buffer_desc);
     }
 
     ///////////////////////////
@@ -972,6 +992,8 @@ int D_Renderer::init(){
     Command_List* command_list = direct_command_lists[current_backbuffer_index];
     command_list->reset();
     command_list->calc_acceleration_structure(&scene);
+    // command_list->clear_uav_buffer(buffers.restir_di_current_frame_reservoir_buffer, binding_point_string_lookup("restir_di_current_frame_reservoir_buffer"));
+    // command_list->clear_uav_buffer(buffers.prev_frame_reservoir_buffer, binding_point_string_lookup("prev_frame_reservoir_buffer"));
     command_list->close();
     execute_command_list(command_list);
     flush_gpu();
@@ -1278,10 +1300,6 @@ void D_Renderer::compute_rayt_pass(Command_List* command_list){
     // Compute Ray Tracing!
     //////////////////////////////////////
 
-    //////////////////////////////////////////////////////////
-    // SSAO
-    //////////////////////////////////////////////////////////
-
     command_list->set_shader(shaders.compute_rayt_shader);
 
     Descriptor_Handle per_frame_data_handle = resource_manager.load_dyanamic_frame_data((void*)&this->per_frame_data, sizeof(Per_Frame_Data), 256);
@@ -1529,6 +1547,8 @@ void D_Renderer::restir_pass(Command_List* command_list){
     };
 
     command_list->bind_buffer_read(scene.models[0].meshes.ptr[0].index_buffer, binding_point_string_lookup("index_buffer"), &d3d12_index_buffer_srv);
+
+    command_list->bind_buffer_write(buffers.restir_di_current_frame_reservoir_buffer, binding_point_string_lookup("restir_di_current_frame_reservoir_buffer"));
     
     command_list->d3d12_command_list->SetComputeRootShaderResourceView(command_list->current_bound_shader->binding_points[binding_point_string_lookup("scene")].root_signature_index, scene.acceleration_structure.tlas->d3d12_resource->GetGPUVirtualAddress());
 
@@ -1623,6 +1643,51 @@ void D_Renderer::restir_pass(Command_List* command_list){
 
     command_list->dispatch_rays(config.render_width, config.render_height);
 
+    // Barrier between read and write this buffer
+    //command_list->d3d12_command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(buffers.restir_di_current_frame_reservoir_buffer->d3d12_resource.Get()));
+
+    //////////////////////////////////////////////////////////
+    // Temporal Reservoir Gather
+    //////////////////////////////////////////////////////////
+
+    command_list->set_shader(shaders.restir_temporal);
+
+    //Texture_Index random_tex_index_2 = {};
+    //random_tex_index_2.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+    //Descriptor_Handle random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+
+    // random_tex_index = {};
+    // random_tex_index.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+    // random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(random_tex_handle, binding_point_string_lookup("random_tex_index"));
+    command_list->transition_texture(textures.random_tex, D3D12_RESOURCE_STATE_GENERIC_READ);
+
+    // Output_Dimensions output_dimensions = {config.display_width, config.display_height};
+    // Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+    // output_dimensions         = {config.display_width, config.display_height};
+    // output_dimensions_handle  = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+    command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
+
+    // Texture_Index output_texture_index = {};
+    // output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+    // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+    // output_texture_index = {};
+    output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+    output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+    command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+    command_list->transition_texture(textures.env_map, D3D12_RESOURCE_STATE_GENERIC_READ);
+    command_list->bind_handle(env_map_handle, binding_point_string_lookup("env_map_index"));
+
+    command_list->bind_buffer_read(buffers.restir_di_current_frame_reservoir_buffer, binding_point_string_lookup("restir_di_current_frame_reservoir_buffer"));
+    command_list->bind_buffer_write(buffers.prev_frame_reservoir_buffer, binding_point_string_lookup("prev_frame_reservoir_buffer"));
+
+    // Now be bind the texture table to the root signature. 
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
+    // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_float_table"));
+    command_list->dispatch((int)(config.render_width / 8), (int)(config.render_height / 4), 1);
 
     //////////////////////////////////////////////////////////
     // Post Processing
@@ -1633,7 +1698,8 @@ void D_Renderer::restir_pass(Command_List* command_list){
         command_list->bind_handle(per_frame_data_handle, binding_point_string_lookup("per_frame_data"));
         
         Texture_Index input_texture_index = {};
-        input_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("input_texture"), true);
+        input_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("input_texture"), false);
+        command_list->transition_texture(textures.main_render_target, D3D12_RESOURCE_STATE_GENERIC_READ);
 
         Descriptor_Handle input_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&input_texture_index, sizeof(Texture_Index), 256);
         command_list->bind_handle(input_texture_index_handle, binding_point_string_lookup("input_texture_index"));
@@ -1660,6 +1726,8 @@ void D_Renderer::restir_pass(Command_List* command_list){
         // Now be bind the texture table to the root signature. 
         command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
         command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_float_table"));
         command_list->dispatch((int)(display.display_width / 8), (int)(display.display_height / 4), 1);
     }
 }

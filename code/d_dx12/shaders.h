@@ -34,6 +34,8 @@ const enum Binding_Point_Index : u32 {
     ENV_MARGINAL_CDF,
     ENV_FULL_CONDITIONAL_DISTRIBUTION_INTEGRALS,
     ENV_IMPORTANCE_SAMPLE_INFO,
+    RESTIR_DI_CURRENT_FRAME_RESERVOIR_BUFFER,
+    PREV_FRAME_RESERVOIR_BUFFER,
     BINDING_POINT_INDEX_COUNT,
 };
 
@@ -73,7 +75,9 @@ constexpr const Binding_Point_String_Map binding_point_map[] = {
     {"env_luminance_distribution_index", ENV_LUMINANCE_DISTRIBUTION_INDEX},
     {"env_marginal_cdf", ENV_MARGINAL_CDF},
     {"env_full_conditional_distribution_integrals", ENV_FULL_CONDITIONAL_DISTRIBUTION_INTEGRALS},
-    {"env_importance_sample_info", ENV_IMPORTANCE_SAMPLE_INFO}
+    {"env_importance_sample_info", ENV_IMPORTANCE_SAMPLE_INFO},
+    {"restir_di_current_frame_reservoir_buffer", RESTIR_DI_CURRENT_FRAME_RESERVOIR_BUFFER},
+    {"prev_frame_reservoir_buffer", PREV_FRAME_RESERVOIR_BUFFER}
 };
 
 // Got from: https://stackoverflow.com/questions/27490858/how-can-you-compare-two-character-strings-statically-at-compile-time
