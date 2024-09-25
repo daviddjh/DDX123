@@ -3456,7 +3456,6 @@ namespace d_dx12 {
                 .Buffer = {
                     .FirstElement = 0,
                     .NumElements  = buffer->number_of_elements,
-                    .StructureByteStride = buffer->size_of_each_element,
                     .Flags = D3D12_BUFFER_UAV_FLAG_NONE,
                 }
 

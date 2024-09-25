@@ -164,8 +164,8 @@ float3 BxDF_TS_f(float3 wo, float3 wi, float3 albedo, Hit_Info hit_info, float m
     float3x3 TBN = float3x3( normalize(w_Per_Vertex_Tangent), normalize(w_Per_Vertex_Bitangent), normalize(w_Per_Vertex_Normal) );
     float3x3 inv_TBN = transpose(TBN);
 
-    wo = normalize(mul(wo, inv_TBN));
-    wi = normalize(mul(wi, inv_TBN));
+    wo = normalize(mul(wo, inv_TBN) + 0.00001);
+    wi = normalize(mul(wi, inv_TBN) + 0.00001);
 
     float cosTheta_o = abs(cos_theta(wo));
     float cosTheta_i = abs(cos_theta(wi));

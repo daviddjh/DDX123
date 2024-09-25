@@ -47,6 +47,7 @@ struct D_Shaders {
     Shader*           dxr_rayt_shader;
     Shader*           restir_dxr_shader;
     Shader*           restir_temporal;
+    Shader*           restir_spacial;
 };
 
 struct D_Textures {
@@ -99,6 +100,7 @@ static const char* render_pass_names[NUM_RENDER_PASSES] = {
 struct D_Renderer_Config {
     bool fullscreen_mode = false;
     bool imgui_demo      = false;         
+    bool pause_rendering = false;         
     u8   render_pass     = D_Render_Passes::RESTIR;
 
     #ifdef d_4k
@@ -170,7 +172,7 @@ Memory_Arena *per_scene_arena;
 Memory_Arena *lifetime_arena;
 bool application_is_initialized = false;
 
-#define MAX_TICK_SAMPLES 400
+#define MAX_TICK_SAMPLES 200
 int tick_index = 0;
 double tick_sum = 0.;
 double *tick_list = NULL;
@@ -622,6 +624,7 @@ int D_Renderer::init(){
     shaders.dxr_rayt_shader          = create_dxr_rayt_shader();
     shaders.restir_dxr_shader        = create_restir_dxr_shader();
     shaders.restir_temporal          = create_restir_temporal_shader();
+    shaders.restir_spacial           = create_restir_spacial_shader();
 
     ////////////////////////////
     //  Create our command list
@@ -938,13 +941,15 @@ int D_Renderer::init(){
         restir_di_current_frame_reservoir_buffer_desc.usage                = Buffer::USAGE::USAGE_READ_WRITE;
         restir_di_current_frame_reservoir_buffer_desc.format               = DXGI_FORMAT_UNKNOWN;
         buffers.restir_di_current_frame_reservoir_buffer = resource_manager.create_buffer(L"restir_di_current_frame_reservoir_buffer", restir_di_current_frame_reservoir_buffer_desc);
+        buffers.restir_di_current_frame_reservoir_buffer->state = D3D12_RESOURCE_STATE_COMMON;
 
         Buffer_Desc prev_frame_reservoir_buffer_desc          = {};
         prev_frame_reservoir_buffer_desc.number_of_elements   = config.render_width * config.render_height;
-        prev_frame_reservoir_buffer_desc.size_of_each_element = sizeof(Reservoir);
+        prev_frame_reservoir_buffer_desc.size_of_each_element = sizeof(Temporal_Buffer);
         prev_frame_reservoir_buffer_desc.usage                = Buffer::USAGE::USAGE_READ_WRITE;
         prev_frame_reservoir_buffer_desc.format               = DXGI_FORMAT_UNKNOWN;
         buffers.prev_frame_reservoir_buffer = resource_manager.create_buffer(L"prev_frame_reservoir_buffer", prev_frame_reservoir_buffer_desc);
+        buffers.restir_di_current_frame_reservoir_buffer->state = D3D12_RESOURCE_STATE_COMMON;
     }
 
     ///////////////////////////
@@ -1650,44 +1655,97 @@ void D_Renderer::restir_pass(Command_List* command_list){
     // Temporal Reservoir Gather
     //////////////////////////////////////////////////////////
 
-    command_list->set_shader(shaders.restir_temporal);
+    {
+        command_list->set_shader(shaders.restir_temporal);
 
-    //Texture_Index random_tex_index_2 = {};
-    //random_tex_index_2.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
-    //Descriptor_Handle random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+        //Texture_Index random_tex_index_2 = {};
+        //random_tex_index_2.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+        //Descriptor_Handle random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
 
-    // random_tex_index = {};
-    // random_tex_index.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
-    // random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
-    command_list->bind_handle(random_tex_handle, binding_point_string_lookup("random_tex_index"));
-    command_list->transition_texture(textures.random_tex, D3D12_RESOURCE_STATE_GENERIC_READ);
+        // random_tex_index = {};
+        // random_tex_index.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+        // random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(random_tex_handle, binding_point_string_lookup("random_tex_index"));
+        command_list->transition_texture(textures.random_tex, D3D12_RESOURCE_STATE_GENERIC_READ);
 
-    // Output_Dimensions output_dimensions = {config.display_width, config.display_height};
-    // Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
-    // output_dimensions         = {config.display_width, config.display_height};
-    // output_dimensions_handle  = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
-    command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
+        // Output_Dimensions output_dimensions = {config.display_width, config.display_height};
+        // Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+        // output_dimensions         = {config.display_width, config.display_height};
+        // output_dimensions_handle  = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+        command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
 
-    // Texture_Index output_texture_index = {};
-    // output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
-    // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
-    // output_texture_index = {};
-    output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
-    output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
-    command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+        // Texture_Index output_texture_index = {};
+        // output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+        // output_texture_index = {};
+        output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
 
-    command_list->transition_texture(textures.env_map, D3D12_RESOURCE_STATE_GENERIC_READ);
-    command_list->bind_handle(env_map_handle, binding_point_string_lookup("env_map_index"));
+        command_list->transition_texture(textures.env_map, D3D12_RESOURCE_STATE_GENERIC_READ);
+        command_list->bind_handle(env_map_handle, binding_point_string_lookup("env_map_index"));
 
-    command_list->bind_buffer_read(buffers.restir_di_current_frame_reservoir_buffer, binding_point_string_lookup("restir_di_current_frame_reservoir_buffer"));
-    command_list->bind_buffer_write(buffers.prev_frame_reservoir_buffer, binding_point_string_lookup("prev_frame_reservoir_buffer"));
+        command_list->bind_buffer_write(buffers.restir_di_current_frame_reservoir_buffer, binding_point_string_lookup("restir_di_current_frame_reservoir_buffer"));
+        buffers.restir_di_current_frame_reservoir_buffer->state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        command_list->bind_buffer_write(buffers.prev_frame_reservoir_buffer, binding_point_string_lookup("prev_frame_reservoir_buffer"));
+        buffers.prev_frame_reservoir_buffer->state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
-    // Now be bind the texture table to the root signature. 
-    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
-    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
-    command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
-    // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_float_table"));
-    command_list->dispatch((int)(config.render_width / 8), (int)(config.render_height / 4), 1);
+        // Now be bind the texture table to the root signature. 
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
+        // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_float_table"));
+        command_list->dispatch((int)(config.render_width / 8), (int)(config.render_height / 4), 1);
+    }
+
+    //////////////////////////////////////////////////////////
+    // Spacial Reservoir Gather
+    //////////////////////////////////////////////////////////
+
+    {
+
+        // command_list->d3d12_command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(buffers.restir_di_current_frame_reservoir_buffer->d3d12_resource.Get()));
+        // command_list->d3d12_command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(buffers.prev_frame_reservoir_buffer->d3d12_resource.Get()));
+
+        command_list->set_shader(shaders.restir_spacial);
+
+        //Texture_Index random_tex_index_2 = {};
+        //random_tex_index_2.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+        //Descriptor_Handle random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+
+        // random_tex_index = {};
+        // random_tex_index.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+        // random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(random_tex_handle, binding_point_string_lookup("random_tex_index"));
+
+        // Output_Dimensions output_dimensions = {config.display_width, config.display_height};
+        // Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+        // output_dimensions         = {config.display_width, config.display_height};
+        // output_dimensions_handle  = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+        command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
+
+        // Texture_Index output_texture_index = {};
+        // output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+        // output_texture_index = {};
+        output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+        command_list->bind_handle(env_map_handle, binding_point_string_lookup("env_map_index"));
+
+        //command_list->transition_buffer(buffers.restir_di_current_frame_reservoir_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
+        command_list->transition_buffer(buffers.restir_di_current_frame_reservoir_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        command_list->bind_buffer_read(buffers.restir_di_current_frame_reservoir_buffer, binding_point_string_lookup("restir_di_current_frame_reservoir_buffer"));
+        command_list->bind_buffer_write(buffers.prev_frame_reservoir_buffer, binding_point_string_lookup("prev_frame_reservoir_buffer"));
+
+        // Now be bind the texture table to the root signature. 
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
+        // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_float_table"));
+        command_list->dispatch((int)(config.render_width / 8), (int)(config.render_height / 4), 1);
+    }
 
     //////////////////////////////////////////////////////////
     // Post Processing
@@ -1736,6 +1794,8 @@ void D_Renderer::render(){
     {
 
     PROFILED_SCOPE("CPU_FRAME");
+
+    if(config.pause_rendering) return;
 
     // TODO: Rewrite all of this !!!
     static std::chrono::high_resolution_clock::time_point tp1;
@@ -1869,6 +1929,7 @@ void D_Renderer::render(){
     ImGui::Text("Mouse - Look");
     ImGui::Text("W, A, S, D - Move");
     ImGui::Text("V - VSync on / off");
+    ImGui::Text("X - Pause");
     ImGui::Text("Space Bar - Full Screen Toggle");
     ImGui::Text("FPS: %.3lf", fps);
     ImGui::Text("Frame MS: %.2lf", avg_frame_ms);
@@ -2049,6 +2110,12 @@ LRESULT CALLBACK WindowProcess(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
                         XMVECTOR translation_vector = XMVectorMultiply(XMVector3Normalize(XMVector3Cross(renderer.camera.eye_direction, renderer.camera.up_direction)), XMVectorSet(speed, speed, speed, 0));
                         renderer.camera.eye_position = XMVectorAdd(renderer.camera.eye_position, translation_vector);
                         io.AddInputCharacter(wParam);
+                    }
+                    break;
+
+                    case 'X':
+                    {
+                        renderer.config.pause_rendering = !renderer.config.pause_rendering;
                     }
                     break;
 

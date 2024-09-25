@@ -8,11 +8,16 @@ void update_reservoir(inout Reservoir reservoir, float3 sample_y, float weight, 
 
     reservoir.sum_of_weights += weight;
     reservoir.sample_count += 1;//min(light_samples.sample_count + 1, 20);
-    if (rand < (weight / reservoir.sum_of_weights)){
+    if (rand < (weight / (reservoir.sum_of_weights+0.000001))){
         reservoir.sample = sample_y;
         reservoir.p_hat_sample = p_hat_sample;
     }
 
+}
+
+// https://en.wikipedia.org/wiki/Relative_luminance
+float rgb_to_relative_luminance(float3 rgb){
+    return rgb.r * 0.2126 + rgb.g * 0.7152 + rgb.b * 0.0722;
 }
 
 // from: https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/

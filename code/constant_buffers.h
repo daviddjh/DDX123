@@ -103,10 +103,10 @@ struct Reservoir {
 };
 
 struct Temporal_Buffer {
-    Reservoir reservoir[30];
+    Reservoir reservoirs[30];
 };
 
-ALIGN_STRUCT struct ReSTIR_DI_Current_Frame_Evaulation_Vars {
+struct ReSTIR_DI_Current_Frame_Evaulation_Vars {
     Reservoir reservoir;
     float3 wo;
     float3 albedo_rgb;

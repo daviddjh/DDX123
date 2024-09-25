@@ -1,3 +1,11 @@
+9/24/24
+
+Need to update resource's default state. Just ran into a barrier bug: ResourceBarrier, StateBefore invalid, Barrier array index [0], Incompatible resource state: Resource: 0x00000159263AAB10:'restir_di_current_frame_reservoir_buffer', Subresource Index: [4294967295], Resource State: D3D12_RESOURCE_STATE_UNORDERED_ACCESS(0x8, Promoted from COMMON state), Required State Bits: D3D12_RESOURCE_STATE_COPY_DEST(
+
+Basically, resource was created in a COMMON state, because COPY_DEST is ignored ( and actually warns you about that... )
+Then, resource was upgraded to a D3D12_RESOURCE_STATE_UNORDERED_ACCESS.
+Now, the  "StateBefore" of D3D12_RESROUCE_STATE_COPY_DEST is invalid, causing a Barrier error.
+
 8/21/24
 
 !!!!!!!!

@@ -6,8 +6,8 @@
 #define GROUP_SIZE_X 8
 #define GROUP_SIZE_Y 4
 
+StructuredBuffer<ReSTIR_DI_Current_Frame_Evaulation_Vars> restir_di_current_frame_reservoir_buffer : register(t1, ComputeSpace);
 RWStructuredBuffer<Temporal_Buffer> prev_frame_reservoir_buffer : register(u1, ComputeSpace);
-RWStructuredBuffer<ReSTIR_DI_Current_Frame_Evaulation_Vars> restir_di_current_frame_reservoir_buffer : register(u2, ComputeSpace);
 
 ConstantBuffer<Texture_Index> output_texture_index  : register(b0, ComputeSpace);
 ConstantBuffer<Output_Dimensions> output_dimensions : register(b1, ComputeSpace);
@@ -41,37 +41,40 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
     Reservoir temp = current_frame_reservoir;
 
-    Reservoir temporal_reservoir;
-    temporal_reservoir.sum_of_weights = 0;
-    temporal_reservoir.p_hat_sample   = 0;
-    temporal_reservoir.sample         = float3(0,0,0);
-    temporal_reservoir.sample_count   = 0;
-    temporal_reservoir.W              = 0;
-    uint temporal_reservoir_combined_sample_count = 0;
+    Reservoir spacial_reservoir;
+    spacial_reservoir.sum_of_weights = 0;
+    spacial_reservoir.p_hat_sample   = 0;
+    spacial_reservoir.sample         = float3(0,0,0);
+    spacial_reservoir.sample_count   = 0;
+    spacial_reservoir.W              = 0;
+    uint spacial_reservoir_combined_sample_count = 0;
 
 
-    for(int i = 0; i < 30; i++){
+    for(int i = 0; i < 5; i++){
 
-        Reservoir prev_frame_reservoir    = prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[i];
-        // Clamp prev frame reservoir to 20*current_frame_reservoir_sample_count
-        prev_frame_reservoir.sample_count = min(prev_frame_reservoir.sample_count, 20 * current_frame_reservoir.sample_count);
+        float2 u = get_rand_float3(random_u);
+
+        u -= 0.5;
+
+        u *= 40.0; // u range of [[-20, 20], [-20, 20]]
+
+        int2 neighbor_xy = pixel_xy + int2(ceil(u));
 
         rand = pcg_hash_prng(random_u);
 
-        float prev_frame_weight = (prev_frame_reservoir.p_hat_sample * prev_frame_reservoir.W * prev_frame_reservoir.sample_count);
+        Reservoir neighbor_reservoir = restir_di_current_frame_reservoir_buffer[neighbor_xy.y * 1920 + neighbor_xy.x].reservoir;
+
+        float neighbor_weight = (neighbor_reservoir.p_hat_sample * neighbor_reservoir.W * neighbor_reservoir.sample_count);
 
         update_reservoir(
-            temporal_reservoir, 
-            prev_frame_reservoir.sample, 
-            prev_frame_weight,
-            prev_frame_reservoir.p_hat_sample, 
+            spacial_reservoir, 
+            neighbor_reservoir.sample, 
+            neighbor_weight,
+            neighbor_reservoir.p_hat_sample, 
             rand
             );
-
-        temporal_reservoir_combined_sample_count += prev_frame_reservoir.sample_count;
-
-        prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[i] = temp;
-        temp = prev_frame_reservoir;
+        
+        spacial_reservoir_combined_sample_count += neighbor_reservoir.sample_count;
     }
 
     rand = pcg_hash_prng(random_u);
@@ -79,27 +82,27 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float current_frame_weight = (current_frame_reservoir.p_hat_sample * current_frame_reservoir.W * current_frame_reservoir.sample_count);
 
     update_reservoir(
-        temporal_reservoir, 
+        spacial_reservoir, 
         current_frame_reservoir.sample, 
         current_frame_weight,
         current_frame_reservoir.p_hat_sample, 
         rand
         );
     
-    temporal_reservoir_combined_sample_count += current_frame_reservoir.sample_count;
+    spacial_reservoir_combined_sample_count += current_frame_reservoir.sample_count;
+    
+    spacial_reservoir.sample_count = spacial_reservoir_combined_sample_count;
 
-    temporal_reservoir.sample_count = temporal_reservoir_combined_sample_count;
-
-    temporal_reservoir.W = (1./(temporal_reservoir.p_hat_sample + 0.0001)) * ((1./float((temporal_reservoir.sample_count)+0.000001)) * temporal_reservoir.sum_of_weights);
+    spacial_reservoir.W = (1./(spacial_reservoir.p_hat_sample + 0.0001)) * ((1./(float(spacial_reservoir.sample_count)+0.000001)) * spacial_reservoir.sum_of_weights);
 
     /////////////////////////////////////////////
     // CALC PIXEL
     /////////////////////////////////////////////
 
-    float2 uv = sphere_coord_to_square_coord(temporal_reservoir.sample);
+    float2 uv = sphere_coord_to_square_coord(spacial_reservoir.sample);
     float3 L = EnvMap_ImageLe(uv);
     float3 wo = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].wo;
-    float3 wi = temporal_reservoir.sample;
+    float3 wi = spacial_reservoir.sample;
     float roughness  = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].roughness;
     float metallic   = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].metallic;
     float3 albedo_rgb = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].albedo_rgb;
@@ -113,7 +116,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     hit_info.t_handedness = tangent_handedness;
     float3 f = BxDF_CT_f(wo, wi, albedo_rgb, hit_info, metallic, roughness) * abs(dot(wi, hit_info.n));
 
-    float3 output_color = (L * f) * temporal_reservoir.W;// * light_samples.W; //(f * env_light_sample.L * env_light_MIS_weight) / (env_light_sample.pdf);
+    float3 output_color = (L * f) * spacial_reservoir.W;// * light_samples.W; //(f * env_light_sample.L * env_light_MIS_weight) / (env_light_sample.pdf);
 
     // output_color = float3(pixel_xy.x / float(output_dimensions.width), pixel_xy.y / float(output_dimensions.height), 0.0);
     // output_color = current_frame_reservoir.sample;
@@ -121,8 +124,8 @@ void main(uint3 DTid : SV_DispatchThreadID)
     // Write to output texture
     texture_2d_uav_table[output_texture_index.texture_index][pixel_xy] = float4(output_color, 1.0);
 
+    prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[0] = spacial_reservoir;
     // Update Prev frame Reservoir
     // prev_frame_reservoir_buffer[pixel_xy.y * 1920. + pixel_xy.x] = current_frame_reservoir;
-    restir_di_current_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoir = temporal_reservoir;
 
 }

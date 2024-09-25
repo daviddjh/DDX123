@@ -344,3 +344,28 @@ Shader* create_restir_temporal_shader()
 
     return create_shader(shader_desc);
 }
+
+Shader* create_restir_spacial_shader()
+{
+
+    DEBUG_LOG("Creating ReSTIR Temporal Gather Shader");
+
+    //////////////////////////////////
+    //  Create our shader / PSO
+    //////////////////////////////////
+
+    Shader_Desc shader_desc;
+
+    //////////////////////////////////
+    //  Set compiled shader code
+    //////////////////////////////////
+
+    shader_desc.type = Shader::Shader_Type::TYPE_COMPUTE;
+    shader_desc.ray_trace_shader = L"restir_spacial.hlsl";
+
+    /////////////////////////////////////////
+    //  Create PSO using shader reflection
+    /////////////////////////////////////////
+
+    return create_shader(shader_desc);
+}

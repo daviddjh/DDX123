@@ -441,11 +441,24 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     light_samples.sample_count   = 0;
     light_samples.p_hat_sample   = 0;
 
-    for(int i = 0; i < 100; i++){
+    Reservoir uniform_env_map_samples;
+    uniform_env_map_samples.sample         = float3(0,0,0);
+    uniform_env_map_samples.W              = 0;
+    uniform_env_map_samples.sum_of_weights = 0;
+    uniform_env_map_samples.sample_count   = 0;
+    uniform_env_map_samples.p_hat_sample   = 0;
+
+    Reservoir bsdf_samples;
+    bsdf_samples.sample         = float3(0,0,0);
+    bsdf_samples.W              = 0;
+    bsdf_samples.sum_of_weights = 0;
+    bsdf_samples.sample_count   = 0;
+    bsdf_samples.p_hat_sample   = 0;
+
+    #define M 10
+    for(int i = 0; i < M; i++){
 
         u.xy = get_rand_float3(payload.random_u).xy;
-
-        Light_Sample light_sample;
 
         // TODO: sample uv from a distribution over the image:
         float map_PDF = 1;
@@ -466,25 +479,61 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
         float pdf = map_PDF / (4 * PI);
         pdf *= 2;
 
-        float light_sample_bxdf_pdf = 0.0;
-        float3 f = 0.0;
+        // Evaluate P_Hat
+        float3 f = BxDF_CT_f(wo, wi, albedo_sample.rgb, hit_info, metallic, roughness) * abs(dot(wi, hit_info.wn));//);
+        float3 L = EnvMap_ImageLe(uv);
+        
+        float3 p_hat_rgb = f * L;
 
-        u.xy = get_rand_float3(payload.random_u).xy;
-        if(u.x > 0.5){
-            light_sample_bxdf_pdf = BxDF_TS_pdf(wo, wi, roughness);
-        } else {
-            light_sample_bxdf_pdf = BxDF_diffuse_pdf(wo, wi);
-        }
-
-        float env_light_MIS_weight = power_huristic(1, pdf, 1, light_sample_bxdf_pdf);
-        //float p_hat  = (env_light_MIS_weight) / (pdf); 
-        float p_hat  = env_light_MIS_weight / pdf; 
-        float weight = p_hat / pdf;
+        // https://en.wikipedia.org/wiki/Relative_luminance
+        float p_hat  = rgb_to_relative_luminance(p_hat_rgb);  
+        float weight =  p_hat / pdf;
 
         float rand = pcg_hash_prng(payload.random_u);
 
         update_reservoir(light_samples, wi, weight, p_hat, rand);
     }
+
+    // for(int j = 0; j < M; j++){
+
+    //     u.xy = get_rand_float3(payload.random_u).xy;
+
+    //     BSDF_Sample bsdf_sample;
+    //     // if(u.x > 0.5){
+    //         u.xy = get_rand_float3(payload.random_u).xy;
+    //         bsdf_sample = BxDF_TS_sample_f(wo, albedo_sample.rgb, u.xy, hit_info, metallic, roughness);
+    //     // } else {
+    //     //     u.xy = get_rand_float3(payload.random_u).xy;
+    //     //     bsdf_sample = BxDF_diffuse_sample_f(wo, albedo_sample.rgb, u.xy, hit_info);
+    //     // }
+
+    //     float2 uv = sphere_coord_to_square_coord(bsdf_sample.wi);
+
+    //     // Evaluate P_Hat
+    //     float3 f = bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.wn));//);
+    //     float3 L = EnvMap_ImageLe(uv);
+        
+    //     float3 p_hat_rgb = f * L;
+
+    //     float p_hat  = rgb_to_relative_luminance(p_hat_rgb);  
+    //     float weight =  p_hat / bsdf_sample.pdf;
+
+    //     float rand = pcg_hash_prng(payload.random_u);
+
+    //     update_reservoir(bsdf_samples, bsdf_sample.wi, weight, p_hat, rand);
+    // }
+
+    // bsdf_samples.W = (1./bsdf_samples.p_hat_sample) * ((1./float(bsdf_samples.sample_count)) * bsdf_samples.sum_of_weights);
+    // float bsdf_samples_weight = bsdf_samples.p_hat_sample * bsdf_samples.W * bsdf_samples.sample_count;
+    // float rand = pcg_hash_prng(payload.random_u);
+    // update_reservoir(light_samples, bsdf_samples.sample, bsdf_samples_weight, bsdf_samples.p_hat_sample, rand);
+    // light_samples.sample_count += bsdf_samples.sample_count;
+
+    // uniform_env_map_samples.W = (1./uniform_env_map_samples.p_hat_sample) * ((1./float(uniform_env_map_samples.sample_count)) * uniform_env_map_samples.sum_of_weights);
+    // float uniform_env_map_samples_weight = uniform_env_map_samples.p_hat_sample * uniform_env_map_samples.W * uniform_env_map_samples.sample_count;
+    // rand = pcg_hash_prng(payload.random_u);
+    // update_reservoir(light_samples, uniform_env_map_samples.sample, uniform_env_map_samples_weight, uniform_env_map_samples.p_hat_sample, rand);
+    // light_samples.sample_count += uniform_env_map_samples.sample_count;
 
     Light_Sample env_light_sample;
     float3 f = float3(0,0,0);
@@ -527,8 +576,8 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
             f = BxDF_CT_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info, metallic, roughness) * abs(dot(env_light_sample.wi, hit_info.wn));
         } else {
             light_samples.W = 0;
-            light_samples.sum_of_weights = 0;
-            light_samples.sample_count = 0;
+            // light_samples.sum_of_weights = 0;
+            // light_samples.sample_count = 0;
         }
     }
 
