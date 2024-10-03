@@ -278,7 +278,6 @@ Hit_Info get_hit_info(float2 barycentrics_2) {
     float4 tangent  = barycentrics.x * vertex1.tangent + barycentrics.y * vertex2.tangent + barycentrics.z * vertex3.tangent;
     hit_info.t = tangent.xyz;
     hit_info.t_handedness = tangent.w;
-    hit_info.t  = normalize(hit_info.t);
 
     // This checks if N and T are in the same direction. If they are, generate a new T
     if (abs(dot(hit_info.n, hit_info.t)) > 0.9999f || length(hit_info.t < 0.001f)){
@@ -289,6 +288,8 @@ Hit_Info get_hit_info(float2 barycentrics_2) {
     if(!hit_info.t_handedness){
         hit_info.t_handedness = 1;
     }
+
+    hit_info.t  = normalize(hit_info.t);
 
     hit_info.material_id = g_info.material_id;
 
@@ -455,8 +456,8 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     bsdf_samples.sample_count   = 0;
     bsdf_samples.p_hat_sample   = 0;
 
-    #define M 10
-    for(int i = 0; i < M; i++){
+    #define P 10
+    for(int i = 0; i < P; i++){
 
         u.xy = get_rand_float3(payload.random_u).xy;
 
@@ -494,7 +495,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
         update_reservoir(light_samples, wi, weight, p_hat, rand);
     }
 
-    // for(int j = 0; j < M; j++){
+    // for(int j = 0; j < P; j++){
 
     //     u.xy = get_rand_float3(payload.random_u).xy;
 
@@ -538,7 +539,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     Light_Sample env_light_sample;
     float3 f = float3(0,0,0);
     {
-        light_samples.W = (1./light_samples.p_hat_sample) * ((1./float(light_samples.sample_count)) * light_samples.sum_of_weights);
+        light_samples.W = (1./(light_samples.p_hat_sample + 0.00001)) * ((1./(float(light_samples.sample_count)+ 0.00001)) * light_samples.sum_of_weights);
 
         float2 uv = sphere_coord_to_square_coord(light_samples.sample);
 
@@ -590,6 +591,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].tangent_handedness = hit_info.t_handedness;
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].metallic = metallic;
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].roughness = roughness;
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].ray_distance = length(ray_hit_point-ray_origin);
 
     // Sample outgoing direction at intersecion to continue path
     BSDF_Sample bsdf_sample;
@@ -804,7 +806,12 @@ void MyMissShader(inout RayPayload payload : SV_RayPayload)
     float3 ray = WorldRayDirection();
     if(payload.recursion_depth == 0){
 
-        payload.color.rgb += payload.beta * EnvMap_Le(ray);
+        //payload.color.rgb += payload.beta * EnvMap_Le(ray);
+        float3 ray_index = DispatchRaysIndex();
+        restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].reservoir.sample = EnvMap_Le(ray);
+        restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].reservoir.sample_count = 0;  // If I don't set this, then reservoirs sample count grow uncontrollably and cause NaNs/INFs
+        restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].reservoir.W = 0.;
+        restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].tangent_handedness = 100.;
 
     } else {
 

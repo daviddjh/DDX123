@@ -602,7 +602,7 @@ void MyRaygenShader()
     payload.color = float4(0.0, 0.0, 0.0, 0);
     payload.random_u = random_u;
 
-    static const uint SAMPLE_COUNT = 1;
+    static const uint SAMPLE_COUNT = 25;
     RayDesc ray;
     for(uint i = 0; i < SAMPLE_COUNT; i++){
 

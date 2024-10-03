@@ -102,8 +102,9 @@ struct Reservoir {
     float  p_hat_sample;
 };
 
+#define TEMPORAL_BUFFER_RESERVOIR_COUNT 1
 struct Temporal_Buffer {
-    Reservoir reservoirs[30];
+    Reservoir reservoirs[TEMPORAL_BUFFER_RESERVOIR_COUNT];
 };
 
 struct ReSTIR_DI_Current_Frame_Evaulation_Vars {
@@ -115,6 +116,7 @@ struct ReSTIR_DI_Current_Frame_Evaulation_Vars {
     float tangent_handedness;
     float metallic;
     float roughness;
+    float ray_distance;
 };
 
 #ifdef __cplusplus

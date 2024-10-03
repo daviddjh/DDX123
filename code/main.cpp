@@ -1702,6 +1702,7 @@ void D_Renderer::restir_pass(Command_List* command_list){
     // Spacial Reservoir Gather
     //////////////////////////////////////////////////////////
 
+    #if 1
     {
 
         // command_list->d3d12_command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(buffers.restir_di_current_frame_reservoir_buffer->d3d12_resource.Get()));
@@ -1746,6 +1747,7 @@ void D_Renderer::restir_pass(Command_List* command_list){
         // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_float_table"));
         command_list->dispatch((int)(config.render_width / 8), (int)(config.render_height / 4), 1);
     }
+    #endif
 
     //////////////////////////////////////////////////////////
     // Post Processing
