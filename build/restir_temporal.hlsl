@@ -39,7 +39,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float3 normal = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].normal;
     float3 tangent = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].tangent;
     float tangent_handedness = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].tangent_handedness;
-    if(tangent_handedness == 100) return;
+    if(tangent_handedness == 100.) return;
 
     Hit_Info hit_info;
     hit_info.n = normal;

@@ -111,6 +111,7 @@ struct ReSTIR_DI_Current_Frame_Evaulation_Vars {
     Reservoir reservoir;
     float3 wo;
     float3 albedo_rgb;
+    float3 w_normal;
     float3 normal;
     float3 tangent;
     float tangent_handedness;

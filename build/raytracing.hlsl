@@ -275,6 +275,20 @@ Hit_Info get_hit_info(float2 barycentrics_2) {
     float4 tangent  = barycentrics.x * vertex1.tangent + barycentrics.y * vertex2.tangent + barycentrics.z * vertex3.tangent;
     hit_info.t = tangent.xyz;
     hit_info.t_handedness = tangent.w;
+
+
+    // This checks if N and T are in the same direction. If they are, generate a new T
+    if (abs(dot(hit_info.n, hit_info.t)) > 0.9999f || length(hit_info.t) < 0.001f){
+        float3 up = (abs(hit_info.n.y) < 0.9999f) ? float3(0, 1, 0) : float3(0,0,1);
+        hit_info.t = normalize(cross(hit_info.n, up));
+        hit_info.t = hit_info.t - dot(hit_info.t, hit_info.n) * hit_info.n;
+    }
+
+    if(!hit_info.t_handedness){
+        hit_info.t_handedness = -1;
+    }
+
+
     hit_info.t  = normalize(hit_info.t);
     hit_info.material_id = g_info.material_id;
 
@@ -417,7 +431,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     //hit_info.wn = mul(TBN, normal_sample.xyz);
     hit_info.wn = mul(normal_sample.xyz, TBN);
     float3 delta = hit_info.wn - hit_info.n;
-    hit_info.n = hit_info.wn;
+    // hit_info.n = hit_info.wn;
     //hit_info.t += delta;
 
     Light_Sample env_light_sample = EnvMap_SampleLi(hit_info, u);  
@@ -453,8 +467,8 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     payload.p_b = bsdf_sample.pdf;
 
     // Compute ray origin offset
-    float3 offset = float3(0.001, 0.001, 0.001) * hit_info.n;
-    if(dot(bsdf_sample.wi,hit_info.n) < 0){
+    float3 offset = float3(0.001, 0.001, 0.001) * hit_info.wn;
+    if(dot(bsdf_sample.wi,hit_info.wn) < 0){
         offset = -offset;
     }
 

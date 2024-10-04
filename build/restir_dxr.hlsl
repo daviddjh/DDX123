@@ -280,7 +280,7 @@ Hit_Info get_hit_info(float2 barycentrics_2) {
     hit_info.t_handedness = tangent.w;
 
     // This checks if N and T are in the same direction. If they are, generate a new T
-    if (abs(dot(hit_info.n, hit_info.t)) > 0.9999f || length(hit_info.t < 0.001f)){
+    if (abs(dot(hit_info.n, hit_info.t)) > 0.9999f || length(hit_info.t) < 0.001f){
         float3 up = (abs(hit_info.n.y) < 0.9999f) ? float3(0, 1, 0) : float3(0,0,1);
         hit_info.t = normalize(cross(hit_info.n, up));
     }
@@ -432,7 +432,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     //hit_info.wn = mul(TBN, normal_sample.xyz);
     hit_info.wn = mul(normal_sample.xyz, TBN);
     float3 delta = hit_info.wn - hit_info.n;
-    hit_info.n = hit_info.wn;
+    // hit_info.n = hit_info.wn;
     //hit_info.t += delta;
 
     Reservoir light_samples;
@@ -545,7 +545,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
 
         // Compute ray origin offset
         float3 offset = float3(0.001, 0.001, 0.001) * hit_info.n;
-        if(dot(light_samples.sample, hit_info.n) < 0){
+        if(dot(light_samples.sample, hit_info.wn) < 0){
             offset = -offset;
         }
 
@@ -588,6 +588,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].albedo_rgb = albedo_sample.rgb;
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].normal = hit_info.n;
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].tangent = hit_info.t;
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].w_normal = hit_info.wn;
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].tangent_handedness = hit_info.t_handedness;
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].metallic = metallic;
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].roughness = roughness;

@@ -37,6 +37,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float metallic   = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].metallic;
     float3 albedo_rgb = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].albedo_rgb;
     float3 normal = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].normal;
+    float3 w_normal = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].w_normal;
     float3 tangent = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].tangent;
     float tangent_handedness = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].tangent_handedness;
     float ray_distance = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].ray_distance;
@@ -50,6 +51,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     Hit_Info hit_info;
     hit_info.n = normal;
     hit_info.t = tangent;
+    hit_info.wn = w_normal;
     hit_info.t_handedness = tangent_handedness;
 
     
@@ -85,27 +87,27 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
         Reservoir neighbor_reservoir = restir_di_current_frame_reservoir_buffer[neighbor_xy.y * 1920 + neighbor_xy.x].reservoir;
 
-        float3 neighbor_normal = restir_di_current_frame_reservoir_buffer[neighbor_xy.y * 1920 + neighbor_xy.x].normal;
+        float3 neighbor_w_normal = restir_di_current_frame_reservoir_buffer[neighbor_xy.y * 1920 + neighbor_xy.x].w_normal;
 
-        float dotNN = dot(neighbor_normal, normal);
+        float dotNN = dot(neighbor_w_normal, w_normal);
 
-        float dotlengthNN = dotNN * length(neighbor_normal) * length(normal);
+        float dotlengthNN = dotNN * length(neighbor_w_normal) * length(w_normal);
 
         float rad_diff = acos(dotlengthNN);
         rad_diff = abs(rad_diff);
 
-        if(rad_diff > 0.22){
+        if(rad_diff > 0.12){
             continue;
         }
 
         float neighbor_distance = restir_di_current_frame_reservoir_buffer[neighbor_xy.y * 1920 + neighbor_xy.x].ray_distance;
 
-        if(abs(ray_distance - neighbor_distance) > (0.1 * ray_distance)){
+        if(abs(ray_distance - neighbor_distance) > (0.01 * ray_distance)){
             continue;
         }
 
         // Evaluate P_Hat
-        float3 f = BxDF_CT_f(wo, neighbor_reservoir.sample, albedo_rgb, hit_info, metallic, roughness) * abs(dot(neighbor_reservoir.sample, normal));//);
+        float3 f = BxDF_CT_f(wo, neighbor_reservoir.sample, albedo_rgb, hit_info, metallic, roughness) * abs(dot(neighbor_reservoir.sample, w_normal));//);
         float2 uv = sphere_coord_to_square_coord(neighbor_reservoir.sample);
         float3 L = EnvMap_ImageLe(uv);
         
@@ -167,6 +169,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     }
     texture_2d_uav_table[output_texture_index.texture_index][pixel_xy] = float4(output_color, 1.0);
 
+    // restir_di_current_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoir = spacial_reservoir;
     prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[0] = spacial_reservoir;
     // Update Prev frame Reservoir
     // prev_frame_reservoir_buffer[pixel_xy.y * 1920. + pixel_xy.x] = current_frame_reservoir;

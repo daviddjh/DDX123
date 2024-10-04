@@ -1746,6 +1746,7 @@ void D_Renderer::restir_pass(Command_List* command_list){
         command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
         // command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_float_table"));
         command_list->dispatch((int)(config.render_width / 8), (int)(config.render_height / 4), 1);
+        // command_list->dispatch((int)(config.render_width / 8), (int)(config.render_height / 4), 1);
     }
     #endif
 
