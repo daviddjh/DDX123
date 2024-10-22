@@ -11,6 +11,23 @@ To Build:
   - `build.bat -d`   - Debug build (Default)
   - `build.bat -ods` - Release build with debug symbols
 
+## ReSTIR DI Working!- 10/21/24
+
+Began by implementing a path tracer based on the implementation in pbr-book.org.
+Then, implemented ReSTIR based on the original paper: "Spatiotemporal reservoir resampling for real-time ray tracing with dynamic direct lighting"
+
+### ReSTIR DI:
+
+![ReSTIR_Final_1](/pics/ReSTIR_Final_1.webp "ReSTIR DI #1") 
+
+![ReSTIR_Final_2](/pics/ReSTIR_Final_2.webp "ReSTIR DI #2") 
+
+### Path Tracing:
+
+![Path_Tracing_Final_1](/pics/Path_Tracing_Final_1.webp "Path Tracing #1") 
+ 
+![Path_Tracing_Final_2](/pics/Path_Tracing_Final_2.webp "Path Tracing #2") 
+
 ## Added SSAO - 12/15/23
 
 Followed an implementation from https://learnopengl.com/Advanced-Lighting/SSAO \
