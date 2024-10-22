@@ -36,6 +36,7 @@ ALIGN_STRUCT struct Per_Frame_Data {
     matrix light_space_matrix;
     matrix view_projection_matrix;
     matrix view_matrix;
+    matrix prev_view_matrix;
     uint   render_to_display_scale;
 };
 
@@ -114,6 +115,7 @@ struct ReSTIR_DI_Current_Frame_Evaulation_Vars {
     float3 w_normal;
     float3 normal;
     float3 tangent;
+    float3 velocity;
     float tangent_handedness;
     float metallic;
     float roughness;

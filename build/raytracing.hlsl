@@ -186,7 +186,7 @@ Light_Sample EnvMap_SampleLi(Hit_Info hit_info, float2 u){
 float3 EnvMap_Le(float3 ray_direction){
     float2 uv = sphere_coord_to_square_coord(ray_direction);
     // uv = -uv;
-    return EnvMap_ImageLe(uv);
+    return  2.0 * EnvMap_ImageLe(uv);
 }
 
 bool IsInsideViewport(float2 p, Viewport viewport)
@@ -491,7 +491,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     }
 
     // Trace the bound scene with ray created above
-    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 1)
+    if(((payload.beta.x > 0.0 && payload.beta.y > 0.0 && payload.beta.z > 0.0)) && payload.recursion_depth < 3)
         TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
     return;
 

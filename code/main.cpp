@@ -48,6 +48,7 @@ struct D_Shaders {
     Shader*           restir_dxr_shader;
     Shader*           restir_temporal;
     Shader*           restir_spacial;
+    Shader*           restir_update_buffer;
 };
 
 struct D_Textures {
@@ -614,17 +615,18 @@ int D_Renderer::init(){
     // Set Shaders
     ////////////////////////////////////////
 
-    shaders.pbr_shader               = create_forward_render_pbr_shader();
-    shaders.deferred_g_buffer_shader = create_deferred_render_gbuffer_shader();
-    shaders.deferred_shading_shader  = create_deferred_render_shading_shader();
-    shaders.shadow_map_shader        = create_shadow_mapping_shader();
-    shaders.ssao_shader              = create_ssao_shader();
-    shaders.post_processing_shader   = create_post_processing_shader();
-    shaders.compute_rayt_shader      = create_compute_rayt_shader();
-    shaders.dxr_rayt_shader          = create_dxr_rayt_shader();
-    shaders.restir_dxr_shader        = create_restir_dxr_shader();
-    shaders.restir_temporal          = create_restir_temporal_shader();
-    shaders.restir_spacial           = create_restir_spacial_shader();
+    shaders.pbr_shader                    = create_forward_render_pbr_shader();
+    shaders.deferred_g_buffer_shader      = create_deferred_render_gbuffer_shader();
+    shaders.deferred_shading_shader       = create_deferred_render_shading_shader();
+    shaders.shadow_map_shader             = create_shadow_mapping_shader();
+    shaders.ssao_shader                   = create_ssao_shader();
+    shaders.post_processing_shader        = create_post_processing_shader();
+    shaders.compute_rayt_shader           = create_compute_rayt_shader();
+    shaders.dxr_rayt_shader               = create_dxr_rayt_shader();
+    shaders.restir_dxr_shader             = create_restir_dxr_shader();
+    shaders.restir_temporal               = create_restir_temporal_shader();
+    shaders.restir_spacial                = create_restir_spacial_shader();
+    shaders.restir_update_buffer          = create_restir_update_buffer_shader();
 
     ////////////////////////////
     //  Create our command list
@@ -791,7 +793,7 @@ int D_Renderer::init(){
     // Load image to CPU
     ScratchImage env_map_scratch_img;
     HRESULT hr = LoadFromHDRFile(L"buikslotermeerplein_4k.hdr", NULL, env_map_scratch_img);
-    //HRESULT hr = LoadFromHDRFile(L"kloofendal_48d_partly_cloudy_puresky_4k.hdr", NULL, env_map_scratch_img);
+    // HRESULT hr = LoadFromHDRFile(L"kloofendal_48d_partly_cloudy_puresky_4k.hdr", NULL, env_map_scratch_img);
     if (FAILED(hr)){
         DEBUG_ERROR("Error Loading Env Map File!");
         exit(0);
@@ -1751,6 +1753,85 @@ void D_Renderer::restir_pass(Command_List* command_list){
     #endif
 
     //////////////////////////////////////////////////////////
+    // Update history buffer
+    //////////////////////////////////////////////////////////
+
+    #if 0
+    {
+
+        command_list->set_shader(shaders.restir_update_buffer);
+
+
+        // Output_Dimensions output_dimensions = {config.display_width, config.display_height};
+        // Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+        // output_dimensions         = {config.display_width, config.display_height};
+        // output_dimensions_handle  = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+        command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
+
+        // Texture_Index output_texture_index = {};
+        // output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+        // output_texture_index = {};
+
+        command_list->bind_buffer_write(buffers.restir_di_current_frame_reservoir_buffer, binding_point_string_lookup("restir_di_current_frame_reservoir_buffer"));
+        command_list->bind_buffer_read(buffers.prev_frame_reservoir_buffer, binding_point_string_lookup("prev_frame_reservoir_buffer"));
+
+        command_list->dispatch((int)(config.render_width / 8), (int)(config.render_height / 4), 1);
+    }
+    #endif
+
+
+    //////////////////////////////////////////////////////////
+    // Spacial Reservoir Gather #2
+    //////////////////////////////////////////////////////////
+
+    #if 0
+    {
+
+        // command_list->d3d12_command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(buffers.restir_di_current_frame_reservoir_buffer->d3d12_resource.Get()));
+        // command_list->d3d12_command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(buffers.prev_frame_reservoir_buffer->d3d12_resource.Get()));
+
+        command_list->set_shader(shaders.restir_spacial);
+
+        //Texture_Index random_tex_index_2 = {};
+        //random_tex_index_2.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+        //Descriptor_Handle random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+
+        // random_tex_index = {};
+        // random_tex_index.texture_index = (unsigned int)command_list->bind_texture(textures.random_tex, &resource_manager, 0);
+        // random_tex_handle = resource_manager.load_dyanamic_frame_data((void*)&random_tex_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(random_tex_handle, binding_point_string_lookup("random_tex_index"));
+
+        // Output_Dimensions output_dimensions = {config.display_width, config.display_height};
+        // Descriptor_Handle output_dimensions_handle = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+        // output_dimensions         = {config.display_width, config.display_height};
+        // output_dimensions_handle  = resource_manager.load_dyanamic_frame_data((void*)&output_dimensions, sizeof(Output_Dimensions), 256);
+        command_list->bind_handle(output_dimensions_handle, binding_point_string_lookup("output_dimensions"));
+
+        // Texture_Index output_texture_index = {};
+        // output_texture_index.texture_index = command_list->bind_texture(textures.main_output_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        // Descriptor_Handle output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+        // output_texture_index = {};
+        output_texture_index.texture_index = command_list->bind_texture(textures.main_render_target, &resource_manager, binding_point_string_lookup("outputTexture"), true);
+        output_texture_index_handle = resource_manager.load_dyanamic_frame_data((void*)&output_texture_index, sizeof(Texture_Index), 256);
+        command_list->bind_handle(output_texture_index_handle, binding_point_string_lookup("output_texture_index"));
+
+        command_list->bind_handle(env_map_handle, binding_point_string_lookup("env_map_index"));
+
+        //command_list->transition_buffer(buffers.restir_di_current_frame_reservoir_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
+        command_list->transition_buffer(buffers.restir_di_current_frame_reservoir_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        command_list->bind_buffer_read(buffers.restir_di_current_frame_reservoir_buffer, binding_point_string_lookup("restir_di_current_frame_reservoir_buffer"));
+        command_list->bind_buffer_write(buffers.prev_frame_reservoir_buffer, binding_point_string_lookup("prev_frame_reservoir_buffer"));
+
+        // Now be bind the texture table to the root signature. 
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uav_table"));
+        command_list->bind_online_descriptor_heap_texture_table(&resource_manager, binding_point_string_lookup("texture_2d_uint_table"));
+        command_list->dispatch((int)(config.render_width / 8), (int)(config.render_height / 4), 1);
+    }
+    #endif
+
+    //////////////////////////////////////////////////////////
     // Post Processing
     //////////////////////////////////////////////////////////
     {
@@ -1799,6 +1880,24 @@ void D_Renderer::render(){
     PROFILED_SCOPE("CPU_FRAME");
 
     if(config.pause_rendering) return;
+                        
+    #if 0
+    float speed = -renderer.camera.speed * 0.05;
+    XMVECTOR translation_vector = XMVectorMultiply(XMVector3Normalize(-renderer.camera.up_direction), XMVectorSet(speed, speed, speed, 0));
+    renderer.camera.eye_position = XMVectorAdd(renderer.camera.eye_position, translation_vector);
+
+    static unsigned int f = 0;
+    f += 1;
+    float y_dir = 1.0;
+    if((f % 500) < 250){
+        y_dir = 0.5; 
+    } else {
+        y_dir = -0.5;
+    }
+    XMVECTOR camera_x_axis        = XMVector3Normalize(XMVector3Cross(renderer.camera.eye_direction, renderer.camera.up_direction));
+    XMMATRIX rotation_matrix      = XMMatrixMultiply(DirectX::XMMatrixRotationAxis(DirectX::XMVectorSet(0, 1, 0, 0), (float)-2.0/ 100.), DirectX::XMMatrixRotationAxis(camera_x_axis, (float)(y_dir) / 100.));
+    renderer.camera.eye_direction = XMVector3Normalize(XMVector3Transform(renderer.camera.eye_direction, rotation_matrix));
+    #endif
 
     // TODO: Rewrite all of this !!!
     static std::chrono::high_resolution_clock::time_point tp1;
@@ -1842,6 +1941,7 @@ void D_Renderer::render(){
     DirectX::XMStoreFloat4(&per_frame_data.camera_pos, camera.eye_position);
     DirectX::XMVECTOR view_matrix_deter;
     DirectX::XMMATRIX inv_view_matrix = DirectX::XMMatrixInverse(&view_matrix_deter, view_matrix);
+    per_frame_data.prev_view_matrix = per_frame_data.view_matrix;
     per_frame_data.view_matrix = view_matrix;
     
     ////////////////////////////////////
@@ -2315,7 +2415,7 @@ WinMain(HINSTANCE hInstance,
 
     // Catch all exceptions
     } catch (const std::exception& e){
-        MessageBoxA(NULL, e.what(), "DDX123 Excpetion!", MB_ICONERROR);
+        MessageBoxA(NULL, e.what(), "DDX123 Exception!", MB_ICONERROR);
     }
 
     return 0;

@@ -37,8 +37,10 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float metallic   = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].metallic;
     float3 albedo_rgb = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].albedo_rgb;
     float3 normal = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].normal;
+    float3 w_normal = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].w_normal;
     float3 tangent = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].tangent;
     float tangent_handedness = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].tangent_handedness;
+    float2 pixel_velocity = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].velocity.xy;
     if(tangent_handedness == 100.) return;
 
     Hit_Info hit_info;
@@ -60,33 +62,39 @@ void main(uint3 DTid : SV_DispatchThreadID)
     temporal_reservoir.W              = 0;
     uint temporal_reservoir_combined_sample_count = 0;
 
-    rand = pcg_hash_prng(random_u);
+    {
+        rand = pcg_hash_prng(random_u);
 
-    float current_frame_weight = (current_frame_reservoir.p_hat_sample * current_frame_reservoir.W * current_frame_reservoir.sample_count);
+        float current_frame_weight = (current_frame_reservoir.p_hat_sample * current_frame_reservoir.W * current_frame_reservoir.sample_count);
 
-    update_reservoir(
-        temporal_reservoir, 
-        current_frame_reservoir.sample, 
-        current_frame_weight,
-        current_frame_reservoir.p_hat_sample, 
-        rand
-        );
-    
-    // if(current_frame_weight > 0.0){
+        update_reservoir(
+            temporal_reservoir, 
+            current_frame_reservoir.sample, 
+            current_frame_weight,
+            current_frame_reservoir.p_hat_sample, 
+            rand
+            );
+        
         temporal_reservoir_combined_sample_count += current_frame_reservoir.sample_count;
-    // }
+    }
 
+    #if 1
+    {
 
-    for(int i = 0; i < TEMPORAL_BUFFER_RESERVOIR_COUNT; i++){
+        float2 prev_frame_pixel_f = float2(pixel_xy) - pixel_velocity;
+        int2 prev_frame_pixel = int2(prev_frame_pixel_f);
+        prev_frame_pixel.x = clamp(prev_frame_pixel.x, 0, 1919);
+        prev_frame_pixel.y = clamp(prev_frame_pixel.y, 0, 1079);
 
-        Reservoir prev_frame_reservoir    = prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[i];
+        Reservoir prev_frame_reservoir    = prev_frame_reservoir_buffer[prev_frame_pixel.y * 1920 + prev_frame_pixel.x].reservoirs[0];
+        // Reservoir prev_frame_reservoir    = prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[0];
         // Clamp prev frame reservoir to 20*current_frame_reservoir_sample_count
-        prev_frame_reservoir.sample_count = min(prev_frame_reservoir.sample_count, 20 * current_frame_reservoir.sample_count);
+        prev_frame_reservoir.sample_count = min(prev_frame_reservoir.sample_count, 200);
 
         rand = pcg_hash_prng(random_u);
 
         // Evaluate P_Hat
-        float3 f = BxDF_CT_f(wo, prev_frame_reservoir.sample, albedo_rgb.rgb, hit_info, metallic, roughness) * abs(dot(prev_frame_reservoir.sample, normal));//);
+        float3 f = BxDF_CT_f(wo, prev_frame_reservoir.sample, albedo_rgb.rgb, hit_info, metallic, roughness) * abs(dot(prev_frame_reservoir.sample, w_normal));//);
         float2 uv = sphere_coord_to_square_coord(prev_frame_reservoir.sample);
         float3 L = EnvMap_ImageLe(uv);
         
@@ -105,11 +113,9 @@ void main(uint3 DTid : SV_DispatchThreadID)
             rand
             );
 
-        // if(prev_frame_weight > 0.0){
-            temporal_reservoir_combined_sample_count += prev_frame_reservoir.sample_count;
-        // }
-
+        temporal_reservoir_combined_sample_count += prev_frame_reservoir.sample_count;
     }
+    #endif
 
     temporal_reservoir.sample_count = temporal_reservoir_combined_sample_count;
 
@@ -141,14 +147,14 @@ void main(uint3 DTid : SV_DispatchThreadID)
     //temporal_reservoir.W = (1./(temporal_reservoir.p_hat_sample + 0.0001)) * ((1./float(temporal_reservoir.sample_count+0.000001)) * temporal_reservoir.sum_of_weights);
     // prev_frame_reservoir_buffer[pixel_xy.y * 1920. + pixel_xy.x] = current_frame_reservoir;
 
-    Reservoir temp = temporal_reservoir;
+    // Reservoir temp = temporal_reservoir;
 
-    for(int k = 0; k < TEMPORAL_BUFFER_RESERVOIR_COUNT; k++){
+    // for(int k = 0; k < TEMPORAL_BUFFER_RESERVOIR_COUNT; k++){
 
-        Reservoir prev_frame_reservoir2    = prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[k];
-        prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[k] = temp;
-        temp = prev_frame_reservoir2;
-    }
+    //     Reservoir prev_frame_reservoir2    = prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[k];
+    //     prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[k] = temp;
+    //     temp = prev_frame_reservoir2;
+    // }
 
     //prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[0] = temporal_reservoir;
     restir_di_current_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoir = temporal_reservoir;

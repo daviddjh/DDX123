@@ -41,6 +41,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
     float3 tangent = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].tangent;
     float tangent_handedness = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].tangent_handedness;
     float ray_distance = restir_di_current_frame_reservoir_buffer[pixel_xy.y * output_dimensions.width + pixel_xy.x].ray_distance;
+   
     if(tangent_handedness == 100) {
 
         float3 output_color = current_frame_reservoir.sample;
@@ -79,7 +80,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
         u -= 0.5;
 
-        u *= 20.0; // u range of [[-20, 20], [-20, 20]]
+        u *= 40.0; // u range of [[-20, 20], [-20, 20]]
 
         int2 neighbor_xy = pixel_xy + int2(ceil(u));
 
@@ -96,7 +97,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
         float rad_diff = acos(dotlengthNN);
         rad_diff = abs(rad_diff);
 
-        if(rad_diff > 0.12){
+        if(rad_diff > 0.42){
             continue;
         }
 
@@ -170,7 +171,16 @@ void main(uint3 DTid : SV_DispatchThreadID)
     texture_2d_uav_table[output_texture_index.texture_index][pixel_xy] = float4(output_color, 1.0);
 
     // restir_di_current_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoir = spacial_reservoir;
+
+    // float2 prev_frame_pixel_f = float2(pixel_xy) - pixel_velocity;
+    // int2 prev_frame_pixel = int2(prev_frame_pixel_f);
+    // prev_frame_pixel.x = clamp(prev_frame_pixel.x, 0, 1919);
+    // prev_frame_pixel.y = clamp(prev_frame_pixel.y, 0, 1079);
+
+    //Reservoir prev_frame_reservoir    = prev_frame_reservoir_buffer[prev_frame_pixel.y * 1920 + prev_frame_pixel.x].reservoirs[0];
+
     prev_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoirs[0] = spacial_reservoir;
+    //restir_di_current_frame_reservoir_buffer[pixel_xy.y * 1920 + pixel_xy.x].reservoir = spacial_reservoir;
     // Update Prev frame Reservoir
     // prev_frame_reservoir_buffer[pixel_xy.y * 1920. + pixel_xy.x] = current_frame_reservoir;
 

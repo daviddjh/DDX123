@@ -198,6 +198,41 @@ bool IsInsideViewport(float2 p, Viewport viewport)
         && (p.y >= viewport.top && p.y <= viewport.bottom);
 }
 
+
+int2 pixel_from_world_pos(float3 world_pos, matrix view_matrix){
+
+    float3 camera_center = float3(.0f,.0f,.0f);
+    float viewport_height = 2.0;
+    float viewport_width  = viewport_height * ((float)output_dimensions.width / (float)output_dimensions.height) ;
+    float3 viewport_u = float3(viewport_width, 0, 0);
+    float3 viewport_v = float3(0, -viewport_height, 0);
+    float3 pixel_delta_u = viewport_u / output_dimensions.width;
+    float3 pixel_delta_v = viewport_v / output_dimensions.height;
+
+    float3 viewport_upper_left = camera_center - float3(0, 0, focal_length) - (viewport_u / 2) - (viewport_v / 2);
+    float3 pixel00_loc = viewport_upper_left + 0.5*(pixel_delta_u + pixel_delta_v);
+
+    matrix inv_view_matrix = transpose(view_matrix);  //  view matrix needs to be orthogonal 
+    float3 camera_space_dir = mul(float4(world_pos, 1.0), inv_view_matrix);
+    //float3 ray_direction_camera_space = mul(inv_view_matrix, normalize(ray_direction_world_space));
+    //float3 pixel_center_camera_space = normalize(ray_direction_camera_space + camera_center);
+
+    //camera_space_dir *= float3(0, -1, 0);
+    camera_space_dir = normalize(camera_space_dir + camera_center);
+
+    float3 camera_plane_normal = normalize(cross(viewport_u, viewport_v));
+
+    float t = dot(camera_plane_normal, pixel00_loc - camera_center) / dot(camera_plane_normal, camera_space_dir);
+
+    float3 pixel_center_camera_space = camera_center + (t * camera_space_dir);
+
+    int2 pixel;
+    pixel.y = int((pixel_center_camera_space - pixel00_loc).y / pixel_delta_v.y);
+    pixel.x = int((pixel_center_camera_space - pixel00_loc).x / pixel_delta_u.x);
+    return pixel;
+
+}
+
 RayDesc create_camera_ray(uint2 pixel_xy, inout uint random_u){
 
     float3 camera_center = float3(.0f,.0f,.0f);
@@ -209,8 +244,10 @@ RayDesc create_camera_ray(uint2 pixel_xy, inout uint random_u){
     float3 pixel_delta_v = viewport_v / output_dimensions.height;
     float3 u_rand = get_rand_float3(random_u);
     float3 v_rand = get_rand_float3(random_u);
-    u_rand *= pixel_delta_u;
-    v_rand *= pixel_delta_v;
+    // u_rand *= pixel_delta_u;
+    // v_rand *= pixel_delta_v;
+    u_rand = float3(0,0,0);
+    v_rand = float3(0,0,0);
 
     float3 viewport_upper_left = camera_center - float3(0, 0, focal_length) - (viewport_u / 2) - (viewport_v / 2);
     float3 pixel00_loc = viewport_upper_left + 0.5*(pixel_delta_u + pixel_delta_v);
@@ -220,7 +257,7 @@ RayDesc create_camera_ray(uint2 pixel_xy, inout uint random_u){
 
     float3 pixel_center = pixel00_loc + ((xy.x * pixel_delta_u) + u_rand) + ((xy.y * pixel_delta_v) + v_rand);
     float3 ray_direction = normalize(pixel_center - camera_center);
-    ray_direction = mul(float4(ray_direction, 1.), per_frame_data.view_matrix);
+    ray_direction = mul(float4(ray_direction, 0.), per_frame_data.view_matrix);
     ray_direction = normalize(ray_direction);
     // ray_direction = mul(per_frame_data.view_matrix, float4(ray_direction, 1.));
     // ray_direction.z = ray_direction.z;
@@ -380,7 +417,7 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     payload.recursion_depth++;
 
     float2 u; // Random Vector -> TODO
-    float3 ray_index = DispatchRaysIndex();
+    int3 ray_index = DispatchRaysIndex();
     u.xy = get_rand_float3(payload.random_u).xy;
 
     float L = 0;
@@ -432,6 +469,13 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     //hit_info.wn = mul(TBN, normal_sample.xyz);
     hit_info.wn = mul(normal_sample.xyz, TBN);
     float3 delta = hit_info.wn - hit_info.n;
+
+    // Compute ray origin offset
+    float3 offset = float3(0.001, 0.001, 0.001) * hit_info.wn;
+    if(dot(ray_direction, hit_info.wn) > 0){
+        offset = -offset;
+    }
+
     // hit_info.n = hit_info.wn;
     //hit_info.t += delta;
 
@@ -543,11 +587,6 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
 
         float2 uv = sphere_coord_to_square_coord(light_samples.sample);
 
-        // Compute ray origin offset
-        float3 offset = float3(0.001, 0.001, 0.001) * hit_info.n;
-        if(dot(light_samples.sample, hit_info.wn) < 0){
-            offset = -offset;
-        }
 
         // Create Ray
         RayDesc ray;
@@ -594,6 +633,18 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].roughness = roughness;
     restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].ray_distance = length(ray_hit_point-ray_origin);
 
+    // Compute Velocity
+    int2 current_pixel  = pixel_from_world_pos(ray_hit_point, per_frame_data.view_matrix);
+    int2 previous_pixel = pixel_from_world_pos(ray_hit_point, per_frame_data.prev_view_matrix);
+    
+    //float2 current_pixel_f = float2(ray_index.xy);
+    float2 current_pixel_f = float2(current_pixel);
+    float2 previous_pixel_f = float2(previous_pixel);
+
+    float2 velocity = current_pixel_f - previous_pixel_f;
+
+    restir_di_current_frame_reservoir_buffer[ray_index.y * output_dimensions.width + ray_index.x].velocity.xy = velocity;
+
     // Sample outgoing direction at intersecion to continue path
     BSDF_Sample bsdf_sample;
     if(u.y > 0.5){
@@ -606,12 +657,6 @@ void MyPathTracer(inout RayPayload payload : SV_RayPayload, in MyAttributes attr
 
     payload.beta *= bsdf_sample.sampled_light * abs(dot(bsdf_sample.wi, hit_info.wn) / bsdf_sample.pdf );
     payload.p_b = bsdf_sample.pdf;
-
-    // Compute ray origin offset
-    float3 offset = float3(0.001, 0.001, 0.001) * hit_info.n;
-    if(dot(bsdf_sample.wi,hit_info.n) < 0){
-        offset = -offset;
-    }
 
     // Create and trace new ray
     RayDesc ray;
@@ -704,7 +749,7 @@ void MySimplePathTracer(inout RayPayload payload : SV_RayPayload, in MyAttribute
     hit_info.n = hit_info.wn;
     //hit_info.t += delta;
 
-    Light_Sample env_light_sample = EnvMap_SampleLi(hit_info, u);  
+    Light_Sample env_light_sample = EnvMap_SampleLi(hit_info, u);
 
     float F;
     float3 f = BxDF_CT_f(wo, env_light_sample.wi, albedo_sample.rgb, hit_info, metallic, roughness) * abs(dot(env_light_sample.wi, hit_info.wn));//);
@@ -760,6 +805,7 @@ void MyRaygenShader()
 
     static const uint SAMPLE_COUNT = 1;
     RayDesc ray;
+    float3 pixel_center;
     for(uint i = 0; i < SAMPLE_COUNT; i++){
 
         // Create Ray from camera
@@ -770,12 +816,6 @@ void MyRaygenShader()
         TraceRay(scene, RAY_FLAG_NONE /*RAY_FLAG_CULL_BACK_FACING_TRIANGLES*/, 0xFF, 0, 0, 0, ray, payload);
 
     }
-
-    // Write the raytraced color to the output texture.
-
-    float3 ray_sample   = payload.color.rgb / float(SAMPLE_COUNT);
-
-    //texture_2d_uav_table[output_texture_index.texture_index][pixel_xy] = float4(ray_sample, 1);
 
     return;
 }
